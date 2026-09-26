@@ -155,9 +155,10 @@ class Spike:
         )
 
     async def list_status(self, list_cid: str) -> dict[str, Any]:
-        return await self.call(
+        result: dict[str, Any] = await self.call(
             "query_list", "GET", "/api/v3/orderList", {"origClientOrderId": list_cid}
-        )  # type: ignore[no-any-return]
+        )
+        return result
 
     async def orders_of(self, status: dict[str, Any]) -> list[dict[str, Any]]:
         result = []

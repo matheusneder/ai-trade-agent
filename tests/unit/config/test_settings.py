@@ -66,7 +66,7 @@ def test_hmac_with_secret_is_valid() -> None:
 @pytest.mark.parametrize("value", [0, 60001])
 def test_recv_window_bounds(value: int) -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, binance_recv_window_ms=value)  # type: ignore[call-arg]
+        Settings(_env_file=None, binance_recv_window_ms=value)
 
 
 def test_invalid_log_level() -> None:

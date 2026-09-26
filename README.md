@@ -52,6 +52,22 @@ uv run python scripts/spike_opoco.py --env-file .env --symbol ETHUSDT
 
 O script recusa o ambiente `prod`. Os resultados brutos ficam em `var/spike/`.
 
+## CLI de operação manual
+
+Consultas e ordens protegidas (Testnet/Demo). O envio de ordens exige `TA_TRADING_ENABLED=true`; em produção, também `--confirm-prod`.
+
+```bash
+uv run trade-agent info BTCUSDT
+uv run trade-agent account
+uv run trade-agent lists
+# compra de 20 USDT: OPOCO com TP em trailing (+3%, recuo 1%) e stop fixo (-4%)
+uv run trade-agent open BTCUSDT --quote 20 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
+# proteger um saldo existente com OCO
+uv run trade-agent protect BTCUSDT --qty 0.0003 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
+# encerrar: cancela a proteção e vende a mercado
+uv run trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
+```
+
 ## Estrutura
 
 ```text
