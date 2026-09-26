@@ -85,7 +85,8 @@ src/trade_agent/
   notify/                 # Telegram: alertas, relatórios, comandos
   telemetry/              # snapshots de métricas no Postgres, heartbeat
 lab/
-  freqtrade/              # estratégia "casca" que chama trade_agent.signals (backtest/hyperopt)
+  walk_forward.py         # orquestra backtests por janela no Freqtrade (Docker) e resume
+  freqtrade/              # docker-compose + estratégia "casca" que importa trade_agent.signals
 config/
   profiles.yaml
   stop_conditions.yaml
@@ -149,14 +150,14 @@ sequenceDiagram
 1. `exchangeInfo`: `status = TRADING`, permissão SPOT, moeda de cotação do perfil, flags `ocoAllowed`/`otoAllowed`/`opoAllowed`/`allowTrailingStop`.
 2. Exclusões: stablecoins e ativos atrelados a moeda fiduciária, tokens alavancados, ativos em `delist-schedule` ou com *monitoring tag*, listados há menos de N dias.
 3. Liquidez: volume de 24h acima do mínimo, spread máximo (bps) e profundidade suficiente para o tamanho da ordem.
-4. *Tiers* por capitalização (CoinGecko): `core` (BTC, ETH), `large`, `mid`, `small`. Cada perfil define quais *tiers* pode usar e com qual peso.
+4. *Tiers* por volume em USDT na própria Binance (D-013): `core` (BTC, ETH), `large`, `mid`, `small`. Cada perfil define quais *tiers* pode usar e com qual peso.
 
 ### 6.2 Sinais técnicos (`signals/`, funções puras)
 
 - **Features:** tendência (EMA 50/200, ADX), momento (RSI, histograma MACD, ROC), volatilidade (ATR%, largura de Bollinger), volume (volume relativo, inclinação do OBV), força relativa contra o BTC, amplitude do mercado (percentual do universo acima da EMA).
-- **Setups iniciais** (começar com 1–2): *pullback* em tendência e rompimento com volume. Reversão à média só em regime lateral, numa etapa posterior.
+- **Setups iniciais** (começar com 1–2): *pullback* em tendência e rompimento com volume, ambos **a favor da tendência** (EMA rápida > lenta) e só com o **regime de mercado em alta** (BTC acima da própria EMA 200; D-016). Reversão à média só em regime lateral, numa etapa posterior.
 - **Saída:** `Signal(score ∈ [-1, 1], setup, stop_distance = k × ATR, invalidation)`.
-- O mesmo código roda **no agente** e **no laboratório Freqtrade**: a estratégia “casca” chama `compute_features()` e `score()`. Ajustes de parâmetros saem do *hyperopt*, nunca de tentativa e erro em produção.
+- O mesmo código roda **no agente** e **no laboratório Freqtrade**: a estratégia “casca” chama `compute_features()` e `score()`. Ajustes de parâmetros saem do *hyperopt* em *walk-forward* (D-017), nunca de tentativa e erro em produção.
 
 ### 6.3 Combinação, seleção e dimensionamento
 
@@ -533,3 +534,8 @@ volumes: {pgdata: {}, grafana: {}}
 | D-010 | 26/09/2026 | **Re-proteção** resolve a política sobre o **preço médio real de entrada**. Ativação e alvo do TP sobem para pelo menos +10 bips do preço atual, e o stop original é mantido. Se o preço já atravessou o stop, a posição é **vendida a mercado** | Preserva o plano de risco original sem gerar ordens rejeitadas por "disparo imediato" | Recalcular a proteção a partir do preço atual (mudaria o risco) |
 | D-011 | 26/09/2026 | O estado das posições é **sempre derivado da exchange**: eventos do User Data Stream apenas disparam a sincronização (REST) da posição afetada; reconexões do stream disparam a reconciliação completa | Uma única lógica de derivação (`assess`), robusta a eventos perdidos, duplicados ou fora de ordem | Aplicar os eventos incrementalmente ao estado local |
 | D-012 | 26/09/2026 | **Carência de 60 s** antes de concluir que uma intenção sem registro na exchange nunca foi aceita; IDs de ordem **nunca são reutilizados** (`seq` sempre avança) | As consultas da Binance (fonte "Database") podem ficar alguns instantes atrás do motor de negociação | Decidir imediatamente com base em uma única consulta |
+| D-013 | 26/09/2026 | Moeda de cotação **USDT**; timeframe **por perfil** (conservador 4h, moderado/agressivo 1h); **tiers por volume** em USDT da própria Binance (BTC/ETH = *core*; ranking por volume de 24h define *large*/*mid*/*small*) | Decisão do usuário: maior liquidez e nenhuma dependência externa (CoinGecko fica como evolução opcional) | Market cap via CoinGecko |
+| D-014 | 26/09/2026 | Laboratório de backtest = **Freqtrade oficial via Docker**. A estratégia "casca" importa o mesmo `trade_agent.signals` de produção e replica a proteção nativa (stop por ATR limitado, trailing TP com ativação, tamanho por risco). `lab/walk_forward.py` gera a configuração a partir de `config/profiles.yaml` (fonte única) | Backtester maduro sem misturar as dependências fixadas do Freqtrade ao agente | Freqtrade no mesmo venv; backtester próprio |
+| D-015 | 26/09/2026 | Análise técnica em `float64` (TA-Lib/pandas); preços e quantidades de ordem sempre em `Decimal` | A TA-Lib exige `float64`. A fronteira fica na montagem da ordem (`round_price`/`round_qty`) | Decimal na análise (lento, sem suporte da TA-Lib) |
+| D-016 | 26/09/2026 | Setups de entrada só **a favor da tendência** (EMA rápida > lenta, também no rompimento) e com **filtro de regime**: benchmark (BTC) acima da própria EMA lenta; desligável por perfil (`signals.use_regime_filter`) | O primeiro *walk-forward* mostrou compras de *altcoins* com o BTC em queda e rompimentos contra a tendência. São filtros clássicos, definidos antes da otimização | Filtro de regime apenas via LLM (Fase 4) |
+| D-017 | 26/09/2026 | Método do laboratório: **walk-forward com otimização**. *Hyperopt* (`SharpeHyperOptLossDaily`, 100 épocas, semente fixa) nos **12 meses anteriores** a cada janela trimestral de validação; os parâmetros escolhidos são aplicados sem ajuste na janela seguinte. Os parâmetros de **risco** do perfil (stop máximo, risco por trade, tamanho máximo) **nunca são otimizados**. Comparação com o *buy & hold* da cesta e do BTC | Avalia fora da amostra e evita escolher parâmetros olhando o período de teste | Backtest com parâmetros fixos (usado só como baseline); otimizar o período inteiro |

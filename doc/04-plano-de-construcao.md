@@ -11,6 +11,7 @@ Plano para implementar a **Proposta B** ([03-arquitetura-recomendada.md](03-arqu
 | 0 — Fundação e spike | 🟡 Fundação concluída; **spike aguardando chaves** de Testnet/Demo no `.env` | Tooling (`uv`, ruff, mypy, pytest 100%), cliente REST próprio (D-001), Docker/Compose, `scripts/spike_opoco.py`. Flags OPO/OCO/trailing confirmadas via API pública no Testnet e no Demo |
 | 1 — Exchange e execução | 🟡 Implementação concluída e testada com a Binance simulada; **validação live pendente das chaves** (`uv run pytest -m live`) | Modelos, regras de símbolo (arredondamento e filtros, com testes de propriedade), API tipada, IDs determinísticos, construtores OPOCO/OCO/venda, `ExecutionGateway` (idempotência D-006, *fail-safe* D-007), User Data Stream com reconexão, CLI `trade-agent` |
 | 2 — Persistência e recuperação | ✅ Concluída (critério de saída atendido nos testes de caos) | PostgreSQL + Alembic (asyncpg, D-008), `Store` (posições, intenções, espelho de ordens, execuções, eventos, checkpoints), máquina de estados, `PositionService` (abrir, sincronizar, re-proteger, ajustar, encerrar), `Reconciler` (intenções, posições, órfãs D-009), `AgentRuntime` (lock exclusivo, migrações, recuperação na partida, reconciliação periódica, stream), `trade-agent run`, testes de caos |
+| 3 — Universo, sinais, perfis e laboratório | 🟡 Implementada; critério de saída **atendido pelo conservador (4h)** e **não atendido pelo moderado (1h)** no *walk-forward* otimizado ([lab-resultados.md](lab-resultados.md)) | `market/` (candles, universo com filtros e *tiers* por volume), `signals/` (TA-Lib, score e setups vetorizados, filtro de regime D-016), `strategy/` (perfis YAML validados, carteira com dimensionamento por risco, saídas e *break-even*), `lab/` (Freqtrade via Docker, *walk-forward* com *hyperopt* no treino D-017). O ciclo de decisão entra em produção junto com o Risk Guard (Fase 5) |
 
 ## 1. Fases
 
@@ -49,7 +50,7 @@ Plano para implementar a **Proposta B** ([03-arquitetura-recomendada.md](03-arqu
 
 ### Fase 3 — Universo, sinais técnicos, perfis e laboratório (2 semanas)
 
-- `market/`: universo, filtros e *tiers* (CoinGecko), delistagens.
+- `market/`: universo, filtros e *tiers* (volume na Binance, D-013), delistagens.
 - `signals/`: features e scores como **funções puras**, com testes sobre dados conhecidos.
 - `strategy/`: combinação, ranking, dimensionamento; `config/profiles.yaml` com validação pydantic.
 - `lab/freqtrade/`: estratégia “casca” que importa `signals`; download de dados; backtest e *hyperopt* com **walk-forward** (treino e validação em janelas separadas), incluindo taxas reais.

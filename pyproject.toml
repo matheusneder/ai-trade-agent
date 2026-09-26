@@ -10,10 +10,14 @@ dependencies = [
     "asyncpg>=0.30",
     "cryptography>=45",
     "httpx>=0.28",
+    "numpy>=2.0",
+    "pandas>=2.2",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
+    "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.0.40",
     "structlog>=25",
+    "ta-lib>=0.6",
     "websockets>=15",
 ]
 
@@ -24,12 +28,14 @@ trade-agent = "trade_agent.cli:main"
 dev = [
     "hypothesis>=6.130",
     "mypy>=1.17",
+    "pandas-stubs>=2.2",
     "pytest>=8.4",
     "pytest-asyncio>=1.1",
     "pytest-cov>=6.2",
     "respx>=0.22",
     "ruff>=0.12",
     "testcontainers[postgres]>=4.10",
+    "types-pyyaml>=6.0",
 ]
 
 [build-system]
@@ -59,6 +65,7 @@ ignore = [
 "tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "PLR0917", "SLF001", "PT018", "C408"]
 "scripts/**" = ["T201", "S101"]
 "src/trade_agent/persistence/migrations/**" = ["E501"]
+"lab/freqtrade/**" = ["E501", "ARG002", "PLR0917"]
 
 [tool.ruff.lint.pylint]
 max-returns = 10
@@ -75,8 +82,12 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 mypy_path = "src"
-files = ["src", "tests", "scripts"]
+files = ["src", "tests", "scripts", "lab/walk_forward.py"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["talib", "talib.*", "testcontainers.*"]
+ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
