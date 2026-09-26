@@ -21,5 +21,4 @@ RUN uv sync --frozen --no-dev
 RUN useradd --create-home --uid 10001 agent
 USER agent
 
-# O entrypoint do agente é definido nas fases seguintes; por ora valida a instalação.
-CMD ["python", "-c", "import trade_agent; print('trade-agent', trade_agent.__version__)"]
+CMD ["trade-agent", "run"]

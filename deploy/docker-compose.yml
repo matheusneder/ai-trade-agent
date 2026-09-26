@@ -27,6 +27,9 @@ services:
     env_file:
       - path: ../.env
         required: false
+    environment:
+      TA_DATABASE_URL: postgresql+asyncpg://trade_agent:${TA_POSTGRES_PASSWORD:-trade_agent_dev}@postgres:5432/trade_agent
+      TA_LOG_FORMAT: json
     volumes:
       - ../secrets:/app/secrets:ro
     depends_on:

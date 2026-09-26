@@ -344,6 +344,8 @@ stateDiagram-v2
   PROTECTED --> EXITING: saída por decisão (rotação, veto, tempo)
   PROTECTED --> CLOSED: TP ou SL executado na Binance
   EXITING --> CLOSED: venda confirmada
+  EXITING --> PROTECTED: saída falhou, OCO segue ativo
+  EXITING --> UNPROTECTED: saída falhou, OCO já cancelado
   REJECTED --> [*]
   CLOSED --> [*]
 ```
@@ -443,14 +445,14 @@ flowchart TD
   F --> G[Posições: TP/SL executados offline → fecha e contabiliza]
   G --> H{Posição sem OCO ativo<br/>e com saldo?}
   H -- sim --> I[Re-protege já<br/>ou vende se abaixo do stop]
-  H -- não --> J[Ordens com prefixo do agente<br/>e sem registro → adota]
+  H -- não --> J[Listas com prefixo do agente<br/>e sem posição → alerta crítico]
   I --> J
   J --> K[Recalcula patrimônio e disjuntores]
   K --> L[Assina user data stream<br/>e inicia agendador]
   L --> M[Alerta 'recuperado' com resumo]
 ```
 
-- Ordens **sem** o prefixo do agente nunca são tocadas.
+- Ordens **sem** o prefixo do agente nunca são tocadas. Listas **com** o prefixo e sem posição correspondente geram alerta crítico, sem ação automática (D-009).
 - A reconciliação periódica (a cada 5 min e a cada reconexão) roda os passos E–K. Divergências que ela não resolve disparam o disjuntor `reconcile_mismatch`.
 - **Resiliência de processo:** `restart: unless-stopped` e *healthcheck* no Docker; NTP no host; reconexão de WebSocket com *polling* REST como alternativa; *backoff* exponencial com respeito aos cabeçalhos de peso (`X-MBX-USED-WEIGHT-1M`) e aos códigos 429/418.
 
@@ -526,3 +528,8 @@ volumes: {pgdata: {}, grafana: {}}
 | D-005 | 26/09/2026 | **Binance simulada em memória** (`tests/support/fake_binance.py`) para os testes de integração: assinatura HMAC, OPOCO/OCO, gatilhos com trailing, saldos bloqueados e injeção de falhas | Testar ponta a ponta os fluxos críticos (proteção, idempotência, recuperação) de forma determinística e sem rede | Apenas mocks por endpoint (não exercitam o encadeamento de estados) |
 | D-006 | 26/09/2026 | Retentativa automática **somente** em falha de conexão comprovada (requisição não enviada). Status desconhecido (timeout de leitura, 5xx, `-1006`/`-1007`) leva a **consulta** pelo ID de cliente; se não for encontrado, `OrderOutcomeUnknownError` fica para a reconciliação | A Binance aceita repetir um `listClientOrderId` depois que a lista anterior terminou, então reenviar às cegas pode duplicar posições | Reenvio com o mesmo ID |
 | D-007 | 26/09/2026 | Troca de proteção = cancelar a lista + criar o novo OCO; se o novo OCO for **rejeitado**, **venda a mercado** (*fail-safe*); se a lista antiga já tinha terminado, nada é enviado | Não existe substituição atômica de *order list* na API; a posição nunca pode ficar sem proteção | Manter a posição sem proteção até a próxima reconciliação |
+| D-008 | 26/09/2026 | Driver **asyncpg** para o PostgreSQL | O `psycopg` assíncrono não funciona com o *event loop* padrão do Windows (Proactor). O asyncpg funciona em Windows e Linux e é maduro | psycopg 3 com `SelectorEventLoop` forçado |
+| D-009 | 26/09/2026 | Listas do agente sem posição correspondente (**órfãs**) geram **alerta crítico, sem ação automática** | Sem o contexto da decisão original (política, perfil), qualquer ação automática seria um palpite. A própria lista já protege o saldo na exchange | Adotar a lista criando uma posição sintética |
+| D-010 | 26/09/2026 | **Re-proteção** resolve a política sobre o **preço médio real de entrada**. Ativação e alvo do TP sobem para pelo menos +10 bips do preço atual, e o stop original é mantido. Se o preço já atravessou o stop, a posição é **vendida a mercado** | Preserva o plano de risco original sem gerar ordens rejeitadas por "disparo imediato" | Recalcular a proteção a partir do preço atual (mudaria o risco) |
+| D-011 | 26/09/2026 | O estado das posições é **sempre derivado da exchange**: eventos do User Data Stream apenas disparam a sincronização (REST) da posição afetada; reconexões do stream disparam a reconciliação completa | Uma única lógica de derivação (`assess`), robusta a eventos perdidos, duplicados ou fora de ordem | Aplicar os eventos incrementalmente ao estado local |
+| D-012 | 26/09/2026 | **Carência de 60 s** antes de concluir que uma intenção sem registro na exchange nunca foi aceita; IDs de ordem **nunca são reutilizados** (`seq` sempre avança) | As consultas da Binance (fonte "Database") podem ficar alguns instantes atrás do motor de negociação | Decidir imediatamente com base em uma única consulta |

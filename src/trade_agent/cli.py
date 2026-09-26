@@ -8,6 +8,7 @@ Exemplos::
     trade-agent open BTCUSDT --quote 20 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
     trade-agent protect BTCUSDT --qty 0.0003 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
     trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
+    trade-agent run          # agente: recuperação na partida + reconciliação contínua
 
 Ordens exigem ``TA_TRADING_ENABLED=true``; em produção exigem também ``--confirm-prod``.
 """
@@ -22,6 +23,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from decimal import Decimal
 from typing import Any, TextIO
 
+from trade_agent.app import run_agent
 from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.environments import BinanceEnvironment
@@ -41,6 +43,7 @@ from trade_agent.execution.orders import (
     build_opoco,
 )
 from trade_agent.log import configure_logging
+from trade_agent.persistence.db import AlreadyRunningError
 
 MANUAL_PROFILE = "man"
 BIPS = Decimal(10_000)
@@ -86,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
     protect.add_argument("symbol")
     protect.add_argument("--qty", type=Decimal, required=True)
     _add_protection_args(protect)
+
+    commands.add_parser("run", help="executa o agente (recuperação + reconciliação contínua)")
 
     close = commands.add_parser("close", help="cancela a proteção e vende a mercado")
     close.add_argument("symbol")
@@ -182,6 +187,8 @@ async def _main_async(
     ):
         err.write("Ambiente de produção: repita o comando com --confirm-prod.\n")
         return 2
+    if args.command == "run":
+        return await _run_agent(settings, err)
     try:
         async with api_factory(settings) as api:
             return await run(args, api, out)
@@ -192,6 +199,15 @@ async def _main_async(
     except (BinanceError, ValueError) as exc:
         err.write(f"Erro: {exc}\n")
     return 1
+
+
+async def _run_agent(settings: Settings, err: TextIO) -> int:
+    try:
+        await run_agent(settings)
+    except (AlreadyRunningError, BinanceError) as exc:
+        err.write(f"Erro: {exc}\n")
+        return 1
+    return 0
 
 
 def main(
