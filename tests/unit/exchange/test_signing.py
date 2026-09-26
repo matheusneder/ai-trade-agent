@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ec import SECP256R1, generate_private_key
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from trade_agent.exchange.serialization import encode_params, ws_signature_payload
+from trade_agent.exchange.serialization import ParamValue, encode_params, ws_signature_payload
 from trade_agent.exchange.signing import Ed25519Signer, HmacSigner
 
 # Vetores oficiais da documentação da Binance (rest-api.md e web-socket-api.md).
@@ -41,7 +41,7 @@ def test_hmac_rest_matches_binance_doc_vectors(symbol: str, expected: str) -> No
 
 
 def test_hmac_ws_api_matches_binance_doc_vectors() -> None:
-    ascii_params = {
+    ascii_params: dict[str, ParamValue] = {
         "symbol": "BTCUSDT",
         "side": "SELL",
         "type": "LIMIT",
@@ -52,7 +52,7 @@ def test_hmac_ws_api_matches_binance_doc_vectors() -> None:
         "timestamp": 1645423376532,
         "apiKey": DOC_API_KEY,
     }
-    non_ascii_params = {
+    non_ascii_params: dict[str, ParamValue] = {
         "symbol": "１２３４５６",
         "side": "BUY",
         "type": "LIMIT",
