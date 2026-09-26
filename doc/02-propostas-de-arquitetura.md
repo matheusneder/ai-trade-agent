@@ -60,7 +60,7 @@ flowchart LR
 
 ### Visão
 
-Um **único serviço Python** com responsabilidades bem separadas. As partes genéricas usam **bibliotecas maduras** (SDK oficial da Binance, TA-Lib, SQLAlchemy, APScheduler, SDK da Anthropic, python-telegram-bot). Toda posição nasce com uma ordem **OPOCO**: uma compra que, ao executar, arma sozinha no servidor da Binance um par OCO com **take-profit com trailing** e **stop-loss**. O LLM atua como **analista**, não como operador: gera scores e vetos estruturados que o código combina com a análise técnica.
+Um **único serviço Python** com responsabilidades bem separadas. As partes genéricas usam **bibliotecas maduras** (httpx/websockets para a API da Binance, TA-Lib, SQLAlchemy, APScheduler, SDK da Anthropic, python-telegram-bot). Toda posição nasce com uma ordem **OPOCO**: uma compra que, ao executar, arma sozinha no servidor da Binance um par OCO com **take-profit com trailing** e **stop-loss**. O LLM atua como **analista**, não como operador: gera scores e vetos estruturados que o código combina com a análise técnica.
 
 ```mermaid
 flowchart LR
@@ -180,7 +180,7 @@ flowchart LR
 2. **R4 simplifica o R7.** Se o que é crítico mora na exchange, a recuperação vira *reconciliar e seguir*, e não *reconstruir estado frágil*. A queda do agente passa a ser um evento de baixa severidade.
 3. **O papel do LLM fica no lugar certo:** analista com saída estruturada e autoridade assimétrica (pode vetar ou reduzir, nunca ampliar risco). Isso preserva previsibilidade, custo e segurança contra *prompt injection*.
 4. **Simplicidade real:** 3 contêineres; nada de broker, cache ou orquestrador de agentes. O código próprio cobre apenas o que nenhum framework maduro oferece hoje.
-5. **Sem reinventar a roda:** SDK oficial da Binance para a API, TA-Lib para indicadores, Freqtrade como **laboratório offline** de backtest e hyperopt, Demo Mode da Binance como *paper trading*, Grafana para painéis e alertas, Telegram para interação.
+5. **Sem reinventar a roda:** bibliotecas maduras de HTTP, WebSocket e criptografia para a API da Binance (cliente fino; ver decisão D-001 no doc 03), TA-Lib para indicadores, Freqtrade como **laboratório offline** de backtest e hyperopt, Demo Mode da Binance como *paper trading*, Grafana para painéis e alertas, Telegram para interação.
 
 **O que reaproveitar das outras propostas:**
 
