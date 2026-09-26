@@ -46,6 +46,8 @@ class Fault:
     kind: FaultKind
     code: int = -1013
     message: str = "Rejeitado pela falha injetada."
+    skip: int = 0
+    """Quantas requisições correspondentes deixar passar antes de aplicar a falha."""
 
 
 @dataclass
@@ -213,6 +215,9 @@ class FakeBinance:
     def _take_fault(self, request: httpx.Request) -> Fault | None:
         for fault in list(self.faults):
             if fault.method == request.method and fault.path == request.url.path:
+                if fault.skip:
+                    fault.skip -= 1
+                    return None
                 self.faults.remove(fault)
                 return fault
         return None
@@ -804,3 +809,62 @@ class FakeBinance:
                 other.status = "EXPIRED"
                 other.expiry_reason = "OCO_TRIGGER"
         order_list.status = order_list.status_type = "ALL_DONE"
+
+    # ================================================================== cenários especiais
+    def expire_list_legs(self, list_client_order_id: str, reason: str) -> None:
+        """Expira as pernas ativas de uma lista sem execução (ex.: *price range rule*)."""
+        order_list = self.list_by_client_id(list_client_order_id)
+        assert order_list is not None
+        base, _ = self._assets(order_list.symbol)
+        for pending_id in order_list.pending_ids:
+            leg = self.orders[pending_id]
+            if leg.is_open:
+                leg.status = "EXPIRED"
+                leg.expiry_reason = reason
+        if order_list.locked_base:
+            self._unlock(base, order_list.locked_base)
+            order_list.locked_base = D(0)
+        order_list.status = order_list.status_type = "ALL_DONE"
+
+    def partially_fill(self, client_order_id: str, qty: Decimal) -> None:
+        """Executa parcialmente uma ordem no livro (entrada maker ou perna LIMIT_MAKER)."""
+        order = self.order_by_client_id(client_order_id)
+        assert order is not None and order.is_open
+        base, quote = self._assets(order.symbol)
+        price = order.price
+        if order.side == "BUY":
+            self._move(quote, -qty * price, from_locked=True)
+            self._move(base, qty * (1 - self.commission_rate))
+            commission, asset = qty * self.commission_rate, base
+        else:
+            self._move(base, -qty, from_locked=True)
+            self._move(quote, qty * price * (1 - self.commission_rate))
+            commission, asset = qty * price * self.commission_rate, quote
+            order_list = self.lists.get(order.order_list_id)
+            if order_list is not None:
+                order_list.locked_base -= qty
+                for other_id in order_list.pending_ids:
+                    other = self.orders[other_id]
+                    if other is not order and other.is_open:
+                        other.status = "EXPIRED"
+                        other.expiry_reason = "OCO_TRIGGER"
+        order.status = "PARTIALLY_FILLED"
+        order.executed_qty += qty
+        order.cumulative_quote += qty * price
+        self.trades.append(
+            {
+                "symbol": order.symbol,
+                "id": next(self._trade_ids),
+                "orderId": order.order_id,
+                "orderListId": order.order_list_id,
+                "price": str(price),
+                "qty": str(qty),
+                "quoteQty": str(qty * price),
+                "commission": str(commission),
+                "commissionAsset": asset,
+                "time": self.clock(),
+                "isBuyer": order.side == "BUY",
+                "isMaker": True,
+                "isBestMatch": True,
+            }
+        )
