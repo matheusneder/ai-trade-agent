@@ -1,0 +1,65 @@
+# AI Trade Agent
+
+Agente autônomo de trade de criptomoedas na **Binance Spot**. Ele decide com base em análise técnica e em pesquisa de mercado (LLM) e protege cada posição com ordens nativas da Binance (OPOCO/OCO com trailing). A proteção continua valendo mesmo com o agente desligado.
+
+- Arquitetura e plano: [`doc/`](doc/README.md)
+- Estado atual: consulte o histórico de commits. Cada commit corresponde a uma fase do [plano de construção](doc/04-plano-de-construcao.md).
+
+> ⚠️ Software experimental. Não constitui recomendação de investimento. Use Testnet/Demo e, em produção, apenas capital que você aceita perder.
+
+## Requisitos
+
+- Python 3.12+ (desenvolvimento em 3.14)
+- [uv](https://docs.astral.sh/uv/) (`pip install --user uv`; neste README os comandos usam `uv`, e `python -m uv` também funciona)
+- Docker (testes de integração com PostgreSQL e implantação)
+
+## Primeiros passos
+
+```bash
+uv sync                      # cria .venv e instala dependências (incluindo dev)
+cp .env.example .env         # preencha com as chaves de Testnet/Demo
+uv run pytest                # testes unitários e de integração (sem rede externa)
+uv run pytest -m live        # testes contra Binance Testnet/Demo (exigem chaves no .env)
+uv run ruff check . && uv run ruff format --check . && uv run mypy
+```
+
+## Chaves da Binance (Testnet / Demo)
+
+1. Gere um par de chaves Ed25519 localmente e guarde a chave privada **fora do git** (a pasta `secrets/` é ignorada):
+
+   ```bash
+   mkdir -p secrets
+   openssl genpkey -algorithm ed25519 -out secrets/binance-testnet-ed25519.pem
+   openssl pkey -in secrets/binance-testnet-ed25519.pem -pubout
+   ```
+
+2. Cadastre a **chave pública** em:
+   - Spot Testnet: https://testnet.binance.vision (login via GitHub → *Generate Ed25519 Key*)
+   - Demo Mode: https://demo.binance.com → *API Management*
+3. Preencha `TA_BINANCE_API_KEY` e `TA_BINANCE_PRIVATE_KEY_PATH` no `.env`.
+4. Para permitir o envio de ordens, defina `TA_TRADING_ENABLED=true`. Sem isso, o cliente bloqueia qualquer ordem.
+
+Nunca habilite permissão de saque nas chaves de API.
+
+## Spike OPOCO (Fase 0)
+
+Valida no Testnet/Demo os tipos de ordem dos quais a arquitetura depende:
+
+```bash
+uv run python scripts/spike_opoco.py --env-file .env           # usa BTCUSDT por padrão
+uv run python scripts/spike_opoco.py --env-file .env --symbol ETHUSDT
+```
+
+O script recusa o ambiente `prod`. Os resultados brutos ficam em `var/spike/`.
+
+## Estrutura
+
+```text
+src/trade_agent/      código da aplicação (ver doc/03-arquitetura-recomendada.md §4)
+tests/unit/           testes unitários
+tests/integration/    testes de integração (Binance simulada, Postgres em contêiner)
+tests/live/           testes contra Testnet/Demo (marcador `live`)
+scripts/              utilitários operacionais (spike etc.)
+deploy/               docker-compose e provisionamento
+doc/                  arquitetura, plano e decisões
+```

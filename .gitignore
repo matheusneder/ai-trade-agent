@@ -1,0 +1,36 @@
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Ferramentas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Artefatos locais de execução (spike, logs)
+var/
+
+# IDEs / SO
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Claude Code (configuração local)
+.claude/settings.local.json
