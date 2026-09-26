@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -sL -o rest-api.md https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/rest-api.md)",
+      "Bash(curl -sL -o changelog.md https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/CHANGELOG.md)",
+      "Bash(curl -sL -o opo.md https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/faqs/opo.md)",
+      "Bash(curl -sL -o trailing.md https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/faqs/trailing-stop-faq.md)",
+      "Bash(curl -sL https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/demo-mode/general-info.md)",
+      "Bash(curl -sL https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/filters.md)",
+      "WebFetch(domain:www.freqtrade.io)",
+      "WebSearch",
+      "WebFetch(domain:hummingbot.org)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl -sL \"https://api.github.com/repos/binance/binance-skills-hub/git/trees/main?recursive=1\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/binance/binance-skills-hub/main/skills/binance/binance/SKILL.md\")",
+      "WebFetch(domain:cryptopanic.com)",
+      "Skill(claude-api)",
+      "Bash(curl -s -m 15 \"https://api.alternative.me/fng/?limit=1\")",
+      "Bash(curl -s -m 15 -o /dev/null -w \"%{http_code}\\\\n\" \"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=1h&limit=1\")",
+      "Bash(curl -s -m 15 \"https://api.binance.com/api/v3/exchangeInfo?symbol=BTCUSDT\")",
+      "Bash(curl -s -m 30 -o ei.json \"https://api.binance.com/api/v3/exchangeInfo?permissions=SPOT\")",
+      "Bash(python -c ' *)",
+      "Bash(curl -sL https://raw.githubusercontent.com/binance/binance-spot-api-docs/master/faqs/price_range_execution_rules.md)",
+      "Bash(python -m http.server 8765 --bind 127.0.0.1)"
+    ]
+  }
+}
