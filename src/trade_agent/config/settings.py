@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 
     trading_enabled: bool = False
 
+    database_url: SecretStr | None = None
+    """URL SQLAlchemy do PostgreSQL, ex.: ``postgresql+asyncpg://user:senha@host/db``."""
+
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
 
@@ -56,6 +59,7 @@ class Settings(BaseSettings):
         "binance_private_key_path",
         "binance_private_key_passphrase",
         "binance_api_secret",
+        "database_url",
         mode="before",
     )
     @classmethod

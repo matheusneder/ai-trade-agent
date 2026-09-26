@@ -68,6 +68,21 @@ uv run trade-agent protect BTCUSDT --qty 0.0003 --tp-pct 3 --tp-trailing-bips 10
 uv run trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
 ```
 
+## Executar o agente
+
+O agente precisa de PostgreSQL e das chaves no `.env`. Na partida, ele aplica as migrações, sincroniza o relógio e reconcilia todas as posições com a Binance. Depois disso, reconcilia a cada 5 minutos e reage aos eventos do User Data Stream.
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d postgres   # banco local
+uv run trade-agent run                                        # ou: docker compose ... up -d agent
+```
+
+Só pode haver uma instância ativa por banco (*advisory lock*). Migrações manuais com Alembic:
+
+```bash
+uv run alembic -x url=postgresql+asyncpg://trade_agent:trade_agent_dev@localhost:5432/trade_agent upgrade head
+```
+
 ## Estrutura
 
 ```text

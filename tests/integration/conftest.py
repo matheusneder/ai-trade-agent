@@ -1,15 +1,19 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from decimal import Decimal
 
 import pytest
 
 from tests.support.clients import fake_api
+from tests.support.database import fresh_database, postgres_container_url
 from tests.support.fake_binance import FakeBinance
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.gateway import ExecutionGateway
+from trade_agent.execution.service import PositionService, RulesCache
+from trade_agent.persistence.db import Database
+from trade_agent.persistence.store import Store
 
 
-async def _no_sleep(_: float) -> None:
+async def no_sleep(_: float) -> None:
     return None
 
 
@@ -26,4 +30,25 @@ async def api(fake: FakeBinance) -> AsyncIterator[BinanceSpotApi]:
 
 @pytest.fixture
 def gateway(api: BinanceSpotApi) -> ExecutionGateway:
-    return ExecutionGateway(api, sleep=_no_sleep)
+    return ExecutionGateway(api, sleep=no_sleep)
+
+
+@pytest.fixture(scope="session")
+def postgres_url() -> Iterator[str]:
+    yield from postgres_container_url()
+
+
+@pytest.fixture
+async def db(postgres_url: str) -> AsyncIterator[Database]:
+    async for database in fresh_database(postgres_url):
+        yield database
+
+
+@pytest.fixture
+def store(db: Database) -> Store:
+    return Store(db)
+
+
+@pytest.fixture
+def service(api: BinanceSpotApi, gateway: ExecutionGateway, store: Store) -> PositionService:
+    return PositionService(api, gateway, store, RulesCache(api))
