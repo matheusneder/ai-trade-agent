@@ -426,7 +426,7 @@ per_profile:
 
 ### 11.2 Idempotência
 
-- `clientOrderId` e `listClientOrderId` determinísticos, com até 36 caracteres: `ta1-{perfil}-{decisão}-{perna}`.
+- `clientOrderId` e `listClientOrderId` determinísticos, com até 36 caracteres: `ta1-{perfil}-{decisão}-{seq}-{perna}` (ex.: `ta1-mod-7f3a9c2b1d-0-TP`). `seq` numera as proteções sucessivas da mesma posição (0 = OPOCO original; 1.. = OCOs recriados em ajustes) e `perna` ∈ {`L`, `E`, `TP`, `SL`, `X`}. Implementação: `trade_agent.execution.ids`.
 - Padrão **intenção → envio → confirmação**. Com resultado incerto, o próximo passo é sempre **consultar** a ordem pelo ID de cliente antes de qualquer reenvio.
 - Chave única por ciclo de decisão, e *upserts* ao processar eventos do *user data stream*, que podem chegar repetidos.
 
@@ -523,3 +523,6 @@ volumes: {pgdata: {}, grafana: {}}
 | D-002 | 26/09/2026 | Python 3.14 no desenvolvimento e na imagem Docker (projeto compatível com ≥ 3.12); `uv` com lockfile | Todas as dependências têm *wheels* para 3.14; `uv.lock` garante builds reprodutíveis | pip + venv sem lockfile |
 | D-003 | 26/09/2026 | Núcleo **assíncrono** (`asyncio`) | O agente combina WebSocket (*user data stream*), agendador, Telegram e HTTP concorrentes num único processo | Threads |
 | D-004 | 26/09/2026 | Cobertura de testes **100% (linhas e ramos)** exigida no CI para `src/`; testes `live` (Testnet/Demo) separados por marcador | Requisito de cobertura total. O que depende da exchange real é validado à parte, sem tornar a suíte padrão dependente de rede | Cobertura parcial |
+| D-005 | 26/09/2026 | **Binance simulada em memória** (`tests/support/fake_binance.py`) para os testes de integração: assinatura HMAC, OPOCO/OCO, gatilhos com trailing, saldos bloqueados e injeção de falhas | Testar ponta a ponta os fluxos críticos (proteção, idempotência, recuperação) de forma determinística e sem rede | Apenas mocks por endpoint (não exercitam o encadeamento de estados) |
+| D-006 | 26/09/2026 | Retentativa automática **somente** em falha de conexão comprovada (requisição não enviada). Status desconhecido (timeout de leitura, 5xx, `-1006`/`-1007`) leva a **consulta** pelo ID de cliente; se não for encontrado, `OrderOutcomeUnknownError` fica para a reconciliação | A Binance aceita repetir um `listClientOrderId` depois que a lista anterior terminou, então reenviar às cegas pode duplicar posições | Reenvio com o mesmo ID |
+| D-007 | 26/09/2026 | Troca de proteção = cancelar a lista + criar o novo OCO; se o novo OCO for **rejeitado**, **venda a mercado** (*fail-safe*); se a lista antiga já tinha terminado, nada é enviado | Não existe substituição atômica de *order list* na API; a posição nunca pode ficar sem proteção | Manter a posição sem proteção até a próxima reconciliação |
