@@ -1,0 +1,57 @@
+{
+  "$comment": "Base do laboratório. lab/walk_forward.py gera config.<perfil>.json a partir deste arquivo e de config/profiles.yaml.",
+  "max_open_trades": 3,
+  "stake_currency": "USDT",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.7,
+  "dry_run": true,
+  "dry_run_wallet": 1000,
+  "timeframe": "4h",
+  "fee": 0.001,
+  "cancel_open_orders_on_exit": false,
+  "trading_mode": "spot",
+  "exchange": {
+    "name": "binance",
+    "key": "",
+    "secret": "",
+    "pair_whitelist": [],
+    "pair_blacklist": [],
+    "ccxt_config": {
+      "options": {
+        "fetchMarkets": [
+          "spot"
+        ],
+        "defaultType": "spot"
+      }
+    },
+    "ccxt_async_config": {
+      "options": {
+        "fetchMarkets": [
+          "spot"
+        ],
+        "defaultType": "spot"
+      }
+    }
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    }
+  ],
+  "entry_pricing": {
+    "price_side": "other",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exit_pricing": {
+    "price_side": "other",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "dataformat_ohlcv": "jsongz",
+  "strategy": "TradeAgentStrategy",
+  "bot_name": "trade-agent-lab",
+  "internals": {
+    "process_throttle_secs": 5
+  }
+}

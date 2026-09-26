@@ -152,6 +152,17 @@ class BookTicker(_Model):
     ask_qty: Decimal = Field(alias="askQty")
 
 
+class Ticker24h(_Model):
+    """Estatísticas de 24 h (``GET /api/v3/ticker/24hr``)."""
+
+    symbol: str
+    last_price: Decimal = Field(alias="lastPrice")
+    price_change_percent: Decimal = Field(alias="priceChangePercent")
+    volume: Decimal
+    quote_volume: Decimal = Field(alias="quoteVolume")
+    count: int = 0
+
+
 class Trade(_Model):
     """Execução da conta (``GET /api/v3/myTrades``)."""
 
