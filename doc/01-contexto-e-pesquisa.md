@@ -90,7 +90,7 @@ Outros pontos da API:
 
 | Ferramenta | O que é | Avaliação |
 |------------|---------|-----------|
-| **`binance-sdk-spot`** (PyPI) | SDK Python oficial e modular (Python ≥ 3.10) com REST, WebSocket API e Streams, e reconexão automática | **Recomendado** para o núcleo de execução |
+| **`binance-sdk-spot`** (PyPI) | SDK Python oficial e modular (Python ≥ 3.10) com REST, WebSocket API e Streams, e reconexão automática | Suporta OPOCO, mas usa `float` para preço e quantidade (serializados com `str(float)` → `1e-05`). **Descartado** na implementação em favor de um cliente próprio fino (decisão D-001 no doc 03) |
 | **CCXT** | Biblioteca multi-exchange | Alternativa madura. Order lists da Binance só pela API “implícita”, sem tipagem. Útil se um dia houver outras exchanges |
 | **Binance Skills Hub** (`binance/binance-skills-hub`, MIT) | *Agent Skills* (`SKILL.md`) sobre o `binance-cli`, para agentes LLM (Claude Code, OpenClaw, LangChain etc.) | Bom para **exploração e pesquisa interativa** durante o desenvolvimento. **Não é indicado para o caminho crítico de execução**: o próprio skill instrui o agente a pedir que o usuário digite `CONFIRM` em transações de produção, porque foi desenhado para ter um humano no circuito |
 

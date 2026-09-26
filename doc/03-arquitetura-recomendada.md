@@ -50,7 +50,7 @@ flowchart TB
 | Preocupação | Componente | Por quê |
 |-------------|------------|---------|
 | Linguagem | **Python 3.12+**, `uv`, `ruff`, `pytest`, `mypy`/`pyright` | Ecossistema quant e SDKs oficiais |
-| API Binance | **`binance-sdk-spot`** (oficial) | REST + WebSocket API + Streams, reconexão automática, cobertura dos endpoints de *order list* |
+| API Binance | **Cliente próprio fino** sobre `httpx` (REST) e `websockets` (WebSocket API), com assinatura Ed25519/HMAC via `cryptography` | `Decimal` de ponta a ponta (sem `float`), erros mapeados por semântica (rejeitado × status desconhecido), cabeçalhos de peso, trava de envio de ordens, 100% testável com `respx`. Ver decisão D-001 (§15) |
 | Indicadores | **TA-Lib** + pandas | Padrão de mercado, maduro, com *wheels* disponíveis |
 | LLM | **SDK `anthropic`**, modelo **`claude-opus-5`** (configurável) | *Structured outputs*, busca web no servidor e *prompt caching* |
 | Coleta de notícias | `feedparser` + `httpx` | RSS e APIs simples |
@@ -72,8 +72,8 @@ flowchart TB
 src/trade_agent/
   main.py                 # bootstrap: lock exclusivo, recuperação, agendador
   config/                 # modelos pydantic + carga de YAML (perfis, paradas, fontes)
-  exchange/               # adapter binance-sdk-spot: filtros, arredondamento, rate limit,
-                          #   user data stream, ambientes (testnet/demo/prod)
+  exchange/               # cliente próprio (REST + WS API): assinatura, filtros, arredondamento,
+                          #   rate limit, user data stream, ambientes (testnet/demo/prod)
   market/                 # klines, tickers, universo e tiers
   signals/                # FUNÇÕES PURAS: features técnicas e score (usadas também no lab)
   research/               # ingestão de notícias + analista LLM (schema MarketView)
@@ -514,3 +514,12 @@ volumes: {pgdata: {}, grafana: {}}
 - **VPS:** 2 vCPU, 4 GB RAM, 40 GB SSD, IP fixo, **região permitida pela Binance** (ex.: Tóquio, Frankfurt, São Paulo). Latência não é crítica para swing trading.
 - **Ambientes:** `testnet` (integração) → `demo` (*paper trading* realista) → `prod`. É a mesma imagem; muda apenas `BINANCE_ENV` e a configuração.
 - **Deploy:** `git pull` + `docker compose up -d --build`. As migrações Alembic rodam na partida. O *lock* exclusivo impede sobreposição de instâncias durante o *deploy*.
+
+## 15. Registro de decisões de implementação
+
+| ID | Data | Decisão | Motivo | Alternativa descartada |
+|----|------|---------|--------|------------------------|
+| D-001 | 26/09/2026 | **Cliente próprio e fino para a API da Binance** (`httpx` + `websockets` + `cryptography`), em vez do SDK oficial `binance-sdk-spot` | O SDK oficial tipa preço e quantidade como `float` e os serializa com `str(float)`: `0.00001` vira `1e-05`, que a Binance rejeita (`-1100`). O SDK também traz muitas dependências (aiohttp, requests, websockets, websocket-client, pycryptodome) e código gerado difícil de simular em testes. A superfície necessária é pequena: cerca de 15 endpoints REST e a assinatura do *user data stream* | `binance-sdk-spot` (suporta OPOCO, mas com os problemas acima); CCXT (order lists só pela API implícita) |
+| D-002 | 26/09/2026 | Python 3.14 no desenvolvimento e na imagem Docker (projeto compatível com ≥ 3.12); `uv` com lockfile | Todas as dependências têm *wheels* para 3.14; `uv.lock` garante builds reprodutíveis | pip + venv sem lockfile |
+| D-003 | 26/09/2026 | Núcleo **assíncrono** (`asyncio`) | O agente combina WebSocket (*user data stream*), agendador, Telegram e HTTP concorrentes num único processo | Threads |
+| D-004 | 26/09/2026 | Cobertura de testes **100% (linhas e ramos)** exigida no CI para `src/`; testes `live` (Testnet/Demo) separados por marcador | Requisito de cobertura total. O que depende da exchange real é validado à parte, sem tornar a suíte padrão dependente de rede | Cobertura parcial |

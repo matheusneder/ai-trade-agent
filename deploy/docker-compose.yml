@@ -1,0 +1,40 @@
+# Implantação local/VPS. Uso: docker compose -f deploy/docker-compose.yml up -d
+# Serviços adicionais (Grafana) entram na Fase 6.
+name: trade-agent
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trade_agent
+      POSTGRES_USER: trade_agent
+      POSTGRES_PASSWORD: ${TA_POSTGRES_PASSWORD:-trade_agent_dev}
+    ports:
+      - "127.0.0.1:5432:5432"   # nunca expor publicamente
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trade_agent -d trade_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agent:
+    build:
+      context: ..
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      - ../secrets:/app/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  pgdata: {}

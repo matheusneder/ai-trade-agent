@@ -4,6 +4,12 @@ Plano para implementar a **Proposta B** ([03-arquitetura-recomendada.md](03-arqu
 
 **Premissas de estimativa:** 1 pessoa desenvolvedora experiente em Python, em tempo integral. Em meio período, multiplique por aproximadamente 2. As datas do cronograma são ilustrativas.
 
+## Andamento
+
+| Fase | Status | Observações |
+|------|--------|-------------|
+| 0 — Fundação e spike | 🟡 Fundação concluída; **spike aguardando chaves** de Testnet/Demo no `.env` | Tooling (`uv`, ruff, mypy, pytest 100%), cliente REST próprio (D-001), Docker/Compose, `scripts/spike_opoco.py`. Flags OPO/OCO/trailing confirmadas via API pública no Testnet e no Demo |
+
 ## 1. Fases
 
 ### Fase 0 — Fundação e spike técnico (1 semana)
@@ -23,7 +29,7 @@ Plano para implementar a **Proposta B** ([03-arquitetura-recomendada.md](03-arqu
 
 ### Fase 1 — Núcleo de exchange e execução (2–3 semanas)
 
-- `exchange/`: cliente `binance-sdk-spot` por ambiente, cache de `exchangeInfo`, **arredondamento e validação de filtros** (com testes de propriedade via Hypothesis), controle de peso e *backoff*, sincronia de relógio.
+- `exchange/`: cliente próprio (REST + WS API, decisão D-001) por ambiente, cache de `exchangeInfo`, **arredondamento e validação de filtros** (com testes de propriedade via Hypothesis), controle de peso e *backoff*, sincronia de relógio.
 - `execution/`: montagem de OPOCO e OCO a partir de um `TradePlan`, saída a mercado e IOC, ajuste de proteção (cancelar e recriar com *fail-safe*).
 - *User data stream* com reconexão (`serverShutdown`) e *polling* REST como alternativa.
 - CLI de operação manual para testes: `agent order open|close|protect`.
@@ -164,7 +170,7 @@ Rotina: resumo diário automático; revisão semanal de performance e das decis�
 | Comportamento de OPOCO ou trailing diferente do esperado | Média | Alto | Spike na Fase 0; plano B (Proposta A) |
 | Posição desprotegida (parcial, janela de ajuste, *price range*) | Baixa | Alto | FOK por padrão; *fail-safe* de venda; alerta crítico; reconciliação |
 | LLM alucinando ou manipulado por *prompt injection* | Média | Médio | Autoridade assimétrica, schema, exigência de fontes, peso limitado, degradação segura |
-| Mudanças na API da Binance | Média | Médio | SDK oficial; acompanhar o changelog; testes de integração no Testnet em CI |
+| Mudanças na API da Binance | Média | Médio | Cliente próprio com superfície pequena; acompanhar o changelog; testes `live` no Testnet/Demo |
 | Custo de LLM acima do previsto | Baixa | Baixo | Teto diário, *prompt caching*, cadência configurável, modelo configurável |
 | Restrição regulatória ou de localização | Baixa | Alto | VPS em região permitida; conta verificada; acompanhar os termos da Binance |
 | Obrigações fiscais | Certa | Médio | Exportação do diário de operações (`fills`, custos, PnL) para apuração. Consultar um contador |

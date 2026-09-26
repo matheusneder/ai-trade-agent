@@ -1,0 +1,17 @@
+.git
+.venv
+.env
+.env.*
+secrets
+var
+doc
+tests
+scripts
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+.coverage
+htmlcov
+.claude
