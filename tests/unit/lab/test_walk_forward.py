@@ -13,7 +13,8 @@ from lab import walk_forward as wf
 
 from trade_agent.strategy.profiles import load_strategy_config
 
-CONFIG = load_strategy_config(wf.ROOT / "config" / "profiles.yaml")
+PROFILES = wf.ROOT / "tests" / "fixtures" / "profiles.yaml"
+CONFIG = load_strategy_config(PROFILES)
 BASE = json.loads((wf.USER_DATA / "config.base.json").read_text(encoding="utf-8"))
 
 
@@ -226,8 +227,11 @@ def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeLab:
 
 def test_main_with_fixed_profile_params(lab: FakeLab) -> None:
     code = wf.main(
-        ["--profile", "conservador", "--start", "2025-01-01", "--end", "2025-07-01", "--download"]
-    )
+        [
+            "--profile", "conservador", "--start", "2025-01-01", "--end", "2025-07-01",
+            "--download", "--profiles-file", str(PROFILES),
+        ]
+    )  # fmt: skip
     assert code == 0
     assert lab.calls[0][0] == "download-data"
     assert "20241001-20250701" in lab.calls[0]
@@ -250,6 +254,7 @@ def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
         [
             "--profile", "conservador", "--start", "2025-01-01", "--end", "2025-04-01",
             "--optimize", "--train-months", "6", "--epochs", "30", "--download",
+            "--profiles-file", str(PROFILES),
         ]
     )  # fmt: skip
     assert code == 0

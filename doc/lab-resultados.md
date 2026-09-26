@@ -113,6 +113,14 @@ Para cada janela trimestral de validação (2024-01-01 a 2026-09-01, 11 janelas)
 
 **Parâmetros robustos sugeridos para o conservador** (mediana dos 11 treinos, a validar no *paper trading*): `tp_activation` ≈ 10,8%, `tp_trailing` ≈ 130 bps, `atr_stop_mult` ≈ 2,8, `exit_score` ≈ −0,59, `min_score` ≈ 0,54, `adx_min` ≈ 21, `rsi_pullback_max` ≈ 38, `vol_rel_min` ≈ 2,4. A mediana usa treinos posteriores às primeiras janelas, então esses valores **não** foram validados fora da amostra como conjunto.
 
+### 5.1 Decisões tomadas (D-018)
+
+- **Conservador calibrado** em `config/profiles.yaml` com as medianas acima. Além disso, sem *break-even* e com saída por score já no primeiro ciclo (`exit_after_cycles: 1`), para ficar igual ao que o laboratório simulou.
+- **Moderado desabilitado** até ser revalidado.
+- **Stop por ATR com fonte única:** com stop fixo, `protection.stop.atr_mult` e `max_pct` definem o stop tanto no agente quanto no laboratório. Antes, o agente usava o padrão dos sinais (ATR × 2,0) e ignorava o perfil.
+
+**Verificação de sanidade (não é resultado fora da amostra):** o conjunto calibrado, com parâmetros fixos, de 2024-01 a 2026-09 deu **+22,76%** compostos, 6 de 11 janelas positivas, 221 trades e pior drawdown de janela de 3,80%. A direção é coerente com o *walk-forward* otimizado (+11,47%). A diferença é o otimismo esperado de usar medianas que já "viram" o período. O *paper trading* no Demo (Fase 7) é a validação que vale.
+
 **Limitações conhecidas:**
 
 - **Viés de sobrevivência:** a lista de pares é estática, formada por ativos que existem desde 2023. O universo real (D-013) muda com o tempo.

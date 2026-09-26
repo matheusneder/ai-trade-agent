@@ -119,6 +119,10 @@ class LlmConfig(_Strict):
     on_failure: Literal["ta_only", "ta_only_reduced", "pause_entries"] = "ta_only_reduced"
 
 
+# Parâmetros de sinal definidos em ``protection.stop``: não podem ser ajustados em ``signals``.
+STOP_SIGNAL_PARAMS = frozenset({"atr_stop_mult", "max_stop_pct"})
+
+
 class ProfileConfig(_Strict):
     code: str = Field(pattern=r"^[a-z0-9]{1,12}$")
     """Código curto usado nos IDs de ordem (``ta1-{code}-...``)."""
@@ -140,10 +144,19 @@ class ProfileConfig(_Strict):
         unknown = set(value) - set(SignalParams.__dataclass_fields__)
         if unknown:
             raise ValueError(f"parâmetros de sinal desconhecidos: {sorted(unknown)}")
+        reserved = set(value) & STOP_SIGNAL_PARAMS
+        if reserved:
+            raise ValueError(f"defina {sorted(reserved)} em protection.stop")
         return value
 
     def signal_params(self) -> SignalParams:
+        """Parâmetros de sinal do perfil. Com stop fixo, o múltiplo do ATR e o teto do stop
+        vêm de ``protection.stop`` (fonte única para o agente e o laboratório)."""
         overrides: dict[str, Any] = dict(self.signals)
+        stop = self.protection.stop
+        if stop.mode is StopMode.FIXED:
+            overrides["atr_stop_mult"] = stop.atr_mult
+            overrides["max_stop_pct"] = float(stop.max_pct or 0) / 100
         return SignalParams(**overrides)
 
     def tier_limit(self, tier: Tier) -> Decimal:
