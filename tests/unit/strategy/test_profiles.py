@@ -9,10 +9,12 @@ from pydantic import ValidationError
 
 from trade_agent.execution.orders import StopMode, TakeProfitMode
 from trade_agent.market.universe import Tier
+from trade_agent.signals import SignalParams
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
 D = Decimal
-CONFIG_FILE = Path(__file__).parents[3] / "config" / "profiles.yaml"
+CONFIG_FILE = Path(__file__).parents[2] / "fixtures" / "profiles.yaml"
+REPOSITORY_FILE = Path(__file__).parents[3] / "config" / "profiles.yaml"
 
 
 def _raw() -> dict[str, Any]:
@@ -20,7 +22,20 @@ def _raw() -> dict[str, Any]:
     return data
 
 
-def test_repository_profiles_are_valid() -> None:
+def test_repository_profiles_are_valid_and_within_exchange_limits() -> None:
+    config = load_strategy_config(REPOSITORY_FILE)
+    enabled = list(config.enabled_profiles())
+    assert enabled
+    assert sum(config.profiles[name].capital_share for name in enabled) <= 1
+    for name in enabled:
+        protection = config.profiles[name].protection
+        policy = protection.policy(D("2"))
+        for bips in (policy.take_profit_trailing_bips, policy.stop_trailing_bips):
+            assert bips is None or 10 <= bips <= 2000  # filtro TRAILING_DELTA
+        assert protection.stop_distance_pct(D("100")) <= 10
+
+
+def test_fixture_profiles_are_valid() -> None:
     config = load_strategy_config(CONFIG_FILE)
     assert list(config.enabled_profiles()) == ["conservador", "moderado"]
     assert config.profile_capital("conservador") == D("500")
@@ -65,6 +80,16 @@ def test_signal_params_overrides() -> None:
     assert params.use_regime_filter is False
 
 
+def test_fixed_stop_drives_signal_atr_multiple_and_cap() -> None:
+    config = load_strategy_config(CONFIG_FILE)
+    moderate = config.profiles["moderado"].signal_params()  # stop: atr 2.5, máx. 7%
+    assert moderate.atr_stop_mult == 2.5
+    assert moderate.max_stop_pct == pytest.approx(0.07)
+    trailing = config.profiles["agressivo"].signal_params()  # stop trailing: padrões
+    assert trailing.atr_stop_mult == SignalParams().atr_stop_mult
+    assert trailing.max_stop_pct == SignalParams().max_stop_pct
+
+
 def test_max_holding_formats() -> None:
     data = _raw()
     data["profiles"]["moderado"]["protection"]["max_holding"] = "36h"
@@ -85,6 +110,7 @@ def test_max_holding_formats() -> None:
         (("profiles", "moderado", "code"), "Mod", "pattern"),
         (("profiles", "moderado", "timeframe"), "2h", "timeframe"),
         (("profiles", "moderado", "signals"), {"nao_existe": 1}, "desconhecidos"),
+        (("profiles", "moderado", "signals"), {"atr_stop_mult": 3}, "protection.stop"),
         (("profiles", "moderado", "protection", "stop"), {"mode": "fixed"}, "atr_mult"),
         (
             ("profiles", "moderado", "protection", "stop"),

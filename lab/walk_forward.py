@@ -135,9 +135,8 @@ def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
     signals = profile.signal_params()
     protection = profile.protection
     stop = protection.stop
-    if stop.mode is StopMode.FIXED:
-        stop_max = float(stop.max_pct or 0) / 100
-        atr_mult = stop.atr_mult or signals.atr_stop_mult
+    if stop.mode is StopMode.FIXED:  # já refletidos em signal_params()
+        stop_max, atr_mult = signals.max_stop_pct, signals.atr_stop_mult
     else:  # aproximação: stop trailing modelado como stop fixo na distância do trailing
         stop_max = (stop.trailing_delta_bps or 0) / 10_000
         atr_mult = 100.0

@@ -22,7 +22,7 @@ from trade_agent.strategy.portfolio import Candidate, Holding, MarketOpinion, pl
 from trade_agent.strategy.profiles import ProfileConfig, load_strategy_config
 
 D = Decimal
-CONFIG = load_strategy_config(Path(__file__).parents[3] / "config" / "profiles.yaml")
+CONFIG = load_strategy_config(Path(__file__).parents[2] / "fixtures" / "profiles.yaml")
 CONSERVATIVE = CONFIG.profiles["conservador"]
 MODERATE = CONFIG.profiles["moderado"]
 
