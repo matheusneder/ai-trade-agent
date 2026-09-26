@@ -156,6 +156,11 @@ class FakeBinance:
         self.lists: dict[int, FakeOrderList] = {}
         self.trades: list[dict[str, Any]] = []
         self.faults: deque[Fault] = deque()
+        # dados de mercado configuráveis pelos testes
+        self.volumes: dict[str, Decimal] = {}
+        self.spreads_bps: dict[str, Decimal] = {}
+        self.candles: dict[tuple[str, str], list[list[Any]]] = {}
+        self.delisted: set[str] = set()
         self.requests: list[httpx.Request] = []
         self._ids = itertools.count(1)
         self._list_ids = itertools.count(1)
@@ -250,6 +255,8 @@ class FakeBinance:
             ("GET", "/api/v3/exchangeInfo"): self._exchange_info,
             ("GET", "/api/v3/ticker/bookTicker"): self._book_ticker,
             ("GET", "/api/v3/avgPrice"): self._avg_price,
+            ("GET", "/api/v3/ticker/24hr"): self._tickers_24h,
+            ("GET", "/api/v3/klines"): self._klines,
         }
         if (method, path) in public:
             return public[(method, path)](params)
@@ -266,6 +273,7 @@ class FakeBinance:
             ("GET", "/api/v3/orderList"): self._get_list,
             ("DELETE", "/api/v3/orderList"): self._cancel_list,
             ("GET", "/api/v3/openOrderList"): self._open_lists,
+            ("GET", "/sapi/v1/spot/delist-schedule"): self._delist_schedule,
         }
         handler = signed.get((method, path))
         if handler is None:
@@ -287,15 +295,43 @@ class FakeBinance:
             wanted = list(self.symbols)
         return {**info, "symbols": [self.symbols[s] for s in wanted]}
 
-    def _book_ticker(self, params: dict[str, str]) -> Any:
-        price = self._price(params["symbol"])
+    def _book(self, symbol: str) -> dict[str, Any]:
+        price = self._price(symbol)
+        half = price * self.spreads_bps.get(symbol, D(0)) / BIPS / 2
         return {
-            "symbol": params["symbol"],
-            "bidPrice": str(price),
+            "symbol": symbol,
+            "bidPrice": str(price - half),
             "bidQty": "10",
-            "askPrice": str(price),
+            "askPrice": str(price + half),
             "askQty": "10",
         }
+
+    def _book_ticker(self, params: dict[str, str]) -> Any:
+        if "symbol" in params:
+            return self._book(params["symbol"])
+        return [self._book(symbol) for symbol in self.prices]
+
+    def _tickers_24h(self, _: dict[str, str]) -> Any:
+        return [
+            {
+                "symbol": symbol,
+                "lastPrice": str(price),
+                "priceChangePercent": "0",
+                "volume": "0",
+                "quoteVolume": str(self.volumes.get(symbol, D(0))),
+                "count": 1,
+            }
+            for symbol, price in self.prices.items()
+        ]
+
+    def _klines(self, params: dict[str, str]) -> Any:
+        key = (params["symbol"], params["interval"])
+        if key not in self.candles:
+            raise BinanceApiFault(400, -1121, "Invalid symbol.")
+        return self.candles[key][-int(params.get("limit", "500")) :]
+
+    def _delist_schedule(self, _: dict[str, str]) -> Any:
+        return [{"delistTime": self.clock() + 86_400_000, "symbols": sorted(self.delisted)}]
 
     def _avg_price(self, params: dict[str, str]) -> Any:
         return {"mins": 5, "price": str(self._price(params["symbol"])), "closeTime": self.clock()}

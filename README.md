@@ -83,6 +83,21 @@ Só pode haver uma instância ativa por banco (*advisory lock*). Migrações man
 uv run alembic -x url=postgresql+asyncpg://trade_agent:trade_agent_dev@localhost:5432/trade_agent upgrade head
 ```
 
+## Laboratório de backtest (Freqtrade via Docker)
+
+A estratégia "casca" do Freqtrade importa o mesmo pacote de sinais usado em produção (`trade_agent.signals`). A configuração e os parâmetros são gerados a partir de `config/profiles.yaml`.
+
+```bash
+# baixa os candles (dados públicos) e roda o walk-forward com os parâmetros fixos do perfil
+uv run python -m lab.walk_forward --profile conservador --start 2023-01-01 --end 2026-09-01 --download
+# walk-forward otimizado: hyperopt nos 12 meses anteriores a cada janela trimestral de validação
+uv run python -m lab.walk_forward --profile conservador --start 2024-01-01 --optimize --epochs 100 --download
+```
+
+Para comparar outra versão do código (A/B), aponte `TA_LAB_SRC` para a pasta `src/` dessa versão (ex.: um `git worktree`).
+
+Os relatórios ficam em `var/lab/`. O resumo comentado está em [`doc/lab-resultados.md`](doc/lab-resultados.md).
+
 ## Estrutura
 
 ```text
@@ -91,6 +106,8 @@ tests/unit/           testes unitários
 tests/integration/    testes de integração (Binance simulada, Postgres em contêiner)
 tests/live/           testes contra Testnet/Demo (marcador `live`)
 scripts/              utilitários operacionais (spike etc.)
+lab/                  laboratório de backtest (Freqtrade via Docker, walk-forward)
+config/               perfis de alocação (profiles.yaml)
 deploy/               docker-compose e provisionamento
 doc/                  arquitetura, plano e decisões
 ```

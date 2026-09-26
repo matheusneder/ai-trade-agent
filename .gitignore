@@ -34,3 +34,13 @@ Thumbs.db
 
 # Claude Code (configuração local)
 .claude/settings.local.json
+
+# Laboratório (dados e resultados gerados)
+lab/freqtrade/user_data/data/
+lab/freqtrade/user_data/backtest_results/
+lab/freqtrade/user_data/hyperopt_results/
+lab/freqtrade/user_data/logs/
+lab/freqtrade/user_data/config.*.json
+!lab/freqtrade/user_data/config.base.json
+lab/freqtrade/user_data/strategies/*.json
+lab/freqtrade/user_data/*.lock

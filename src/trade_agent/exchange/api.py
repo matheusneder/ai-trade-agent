@@ -3,7 +3,7 @@
 import json
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from trade_agent.exchange.errors import NO_SUCH_ORDER_CODE, BinanceRejectedError
 from trade_agent.exchange.models import (
@@ -12,6 +12,7 @@ from trade_agent.exchange.models import (
     CommissionRates,
     Order,
     OrderList,
+    Ticker24h,
     Trade,
 )
 from trade_agent.exchange.rest import BinanceRestClient
@@ -47,6 +48,44 @@ class BinanceSpotApi:
     async def book_ticker(self, symbol: str) -> BookTicker:
         data = await self.rest.public("GET", "/api/v3/ticker/bookTicker", {"symbol": symbol})
         return BookTicker.model_validate(data)
+
+    async def book_tickers(self) -> list[BookTicker]:
+        """Melhor bid/ask de todos os símbolos (peso 4)."""
+        data = await self.rest.public("GET", "/api/v3/ticker/bookTicker")
+        return [BookTicker.model_validate(item) for item in data]
+
+    async def tickers_24h(self) -> list[Ticker24h]:
+        """Estatísticas de 24 h de todos os símbolos (peso 80)."""
+        data = await self.rest.public("GET", "/api/v3/ticker/24hr")
+        return [Ticker24h.model_validate(item) for item in data]
+
+    async def klines(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        limit: int = 500,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[list[Any]]:
+        """Candles brutos (``[openTime, open, high, low, close, volume, closeTime, ...]``)."""
+        data: list[list[Any]] = await self.rest.public(
+            "GET",
+            "/api/v3/klines",
+            {
+                "symbol": symbol,
+                "interval": interval,
+                "limit": limit,
+                "startTime": start_time,
+                "endTime": end_time,
+            },
+        )
+        return data
+
+    async def delist_schedule(self) -> set[str]:
+        """Símbolos com delistagem agendada (``GET /sapi/v1/spot/delist-schedule``)."""
+        data = await self.rest.signed("GET", "/sapi/v1/spot/delist-schedule")
+        return {symbol for item in data for symbol in item.get("symbols", ())}
 
     async def avg_price(self, symbol: str) -> Decimal:
         """Preço médio ponderado dos últimos minutos (base do ``PERCENT_PRICE_BY_SIDE``)."""

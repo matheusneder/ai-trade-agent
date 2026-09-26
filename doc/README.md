@@ -30,6 +30,7 @@ Foram avaliadas **três arquiteturas**:
 | 03 | [Arquitetura recomendada](03-arquitetura-recomendada.md) | Detalhamento da Proposta B: stack, módulos, ciclo de decisão, analista LLM, perfis, OPOCO e ciclo de vida da posição, disjuntores, persistência e recuperação, monitoramento, segurança, implantação |
 | 04 | [Plano de construção](04-plano-de-construcao.md) | Fases com critérios de saída, cronograma, estratégia de testes, checklist de *go-live*, *runbook*, custos, riscos, decisões em aberto |
 | 05 | [Referências](05-referencias.md) | Links para documentação e projetos consultados |
+| — | [Resultados do laboratório](lab-resultados.md) | *Walk-forward* da Fase 3: baselines, diagnóstico, otimização fora da amostra e conclusão por perfil |
 | — | [Insights iniciais](insights-iniciais.md) | Documento de partida (Gemini), considerado na análise |
 
 ## Aviso
