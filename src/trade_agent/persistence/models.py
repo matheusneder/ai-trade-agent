@@ -199,6 +199,33 @@ class ResearchReportRecord(Base):
     cost_usd: Mapped[Decimal]
 
 
+class TelemetrySnapshotRecord(Base):
+    """Foto periódica do agente para os dashboards (Fase 6)."""
+
+    __tablename__ = "telemetry_snapshots"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    at: Mapped[datetime] = mapped_column(index=True)
+    equity: Mapped[Decimal]
+    realized_pnl: Mapped[Decimal]
+    unrealized_pnl: Mapped[Decimal]
+    day_start_equity: Mapped[Decimal]
+    peak_equity: Mapped[Decimal]
+    drawdown_pct: Mapped[float] = mapped_column(Float)
+    exposure: Mapped[Decimal]
+    active_positions: Mapped[int] = mapped_column(Integer)
+    api_error_rate: Mapped[float] = mapped_column(Float)
+    used_weight_1m: Mapped[int | None] = mapped_column(Integer)
+    clock_offset_ms: Mapped[int | None] = mapped_column(Integer)
+    btc_change_1h: Mapped[float | None] = mapped_column(Float)
+    quote_deviation: Mapped[float | None] = mapped_column(Float)
+    fear_greed: Mapped[int | None] = mapped_column(Integer)
+    states: Mapped[dict[str, Any]]
+    """Estado operacional por escopo (``global`` e perfis)."""
+    profiles: Mapped[dict[str, Any]]
+    """Por perfil: PnL realizado no dia e perdas seguidas."""
+
+
 class LlmUsageRecord(Base):
     """Uma chamada à API Claude: tokens, cache, buscas e custo (disjuntor de orçamento)."""
 

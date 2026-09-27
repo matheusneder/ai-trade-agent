@@ -116,6 +116,15 @@ uv run trade-agent research show                       # última leitura válida
 uv run trade-agent research eval                       # avaliação com 31 casos rotulados (~US$ 3)
 ```
 
+## Observabilidade (Fase 6)
+
+O agente grava uma foto de telemetria a cada 5 minutos (`telemetry_snapshots`) e envia um heartbeat a cada minuto para a URL de `TA_HEALTHCHECK_URL` (ex.: Healthchecks.io). O Grafana sobe junto no compose, com 5 dashboards (visão geral, posições, performance, decisões e pesquisa, saúde técnica) e alertas no Telegram. Acesse em `http://127.0.0.1:3000` (admin / `GRAFANA_ADMIN_PASSWORD`). Procedimentos de incidente: [`doc/runbook.md`](doc/runbook.md).
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml up -d postgres grafana
+uv run python -m scripts.grafana_dashboards   # regenera os dashboards após editar o gerador
+```
+
 ## Estrutura
 
 ```text

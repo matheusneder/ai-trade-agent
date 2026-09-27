@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     """Token do bot (@BotFather) para alertas e comandos do operador."""
     telegram_chat_id: int | None = None
     """Único chat autorizado a receber alertas e enviar comandos."""
+    healthcheck_url: SecretStr | None = None
+    """URL de ping do heartbeat externo (ex.: Healthchecks.io); contém um segredo."""
 
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
@@ -78,6 +80,7 @@ class Settings(BaseSettings):
         "anthropic_api_key",
         "telegram_bot_token",
         "telegram_chat_id",
+        "healthcheck_url",
         mode="before",
     )
     @classmethod

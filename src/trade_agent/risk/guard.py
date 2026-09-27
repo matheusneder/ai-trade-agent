@@ -54,6 +54,11 @@ class RiskSnapshot:
     fear_greed: int | None = None
     api_error_rate: float = 0.0
     reconcile_anomalies: int = 0
+    realized_pnl: Decimal = Decimal(0)
+    unrealized_pnl: Decimal = Decimal(0)
+    exposure: Decimal = Decimal(0)
+    """Custo das posições ativas (na moeda de cotação)."""
+    active_positions: int = 0
 
 
 @dataclass(frozen=True, slots=True)
