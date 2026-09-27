@@ -70,7 +70,14 @@ uv run trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
 
 ## Executar o agente
 
-O agente precisa de PostgreSQL e das chaves no `.env`. Na partida, ele aplica as migrações, sincroniza o relógio e reconcilia todas as posições com a Binance. Depois disso, reconcilia a cada 5 minutos e reage aos eventos do User Data Stream.
+O agente precisa de PostgreSQL e das chaves no `.env`. Na partida, ele aplica as migrações, sincroniza o relógio e reconcilia todas as posições com a Binance. Depois disso:
+
+- reconcilia a cada 5 minutos e reage aos eventos do User Data Stream;
+- avalia as condições de parada a cada minuto (`config/stop_conditions.yaml`);
+- coleta notícias a cada 15 minutos;
+- roda o ciclo de decisão de cada perfil habilitado no fechamento do candle (conservador: a cada 4h).
+
+Com `TA_TRADING_ENABLED=false` (padrão), o agente roda em **simulação**: decide e registra as entradas e saídas como eventos, sem enviar ordens. Com o Telegram configurado (`TA_TELEGRAM_BOT_TOKEN` e `TA_TELEGRAM_CHAT_ID`), ele envia alertas e aceita `/status`, `/pause`, `/resume`, `/halt` e `/flatten` (este com código de confirmação).
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d postgres   # banco local

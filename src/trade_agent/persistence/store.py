@@ -215,6 +215,29 @@ class Store:
             )
             return [_to_position(r) for r in records]
 
+    async def closed_positions(self, *, limit: int = 1000) -> list[Position]:
+        """Posições encerradas com resultado apurado, das mais recentes para as antigas."""
+        async with self.db.session() as session:
+            records = await session.scalars(
+                select(PositionRecord)
+                .where(
+                    PositionRecord.state == PositionState.CLOSED.value,
+                    PositionRecord.realized_pnl.is_not(None),
+                )
+                .order_by(PositionRecord.closed_at.desc(), PositionRecord.id.desc())
+                .limit(limit)
+            )
+            return [_to_position(r) for r in records]
+
+    async def realized_pnl_total(self) -> Decimal:
+        async with self.db.session() as session:
+            total = await session.scalar(
+                select(func.coalesce(func.sum(PositionRecord.realized_pnl), 0)).where(
+                    PositionRecord.state == PositionState.CLOSED.value
+                )
+            )
+            return Decimal(total or 0)
+
     async def update_position(self, position_id: int, **changes: Any) -> Position:
         """Atualiza campos da posição validando a transição de estado (com ``FOR UPDATE``)."""
         unknown = set(changes) - _POSITION_FIELDS
