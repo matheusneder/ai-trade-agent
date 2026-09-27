@@ -296,7 +296,8 @@ class FakeBinance:
         return {**info, "symbols": [self.symbols[s] for s in wanted]}
 
     def _book(self, symbol: str) -> dict[str, Any]:
-        price = self._price(symbol)
+        # preços de referência (ex.: USDCUSDT) podem existir sem regras de negociação
+        price = self.prices[symbol] if symbol in self.prices else self._price(symbol)
         half = price * self.spreads_bps.get(symbol, D(0)) / BIPS / 2
         return {
             "symbol": symbol,
