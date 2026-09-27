@@ -7,8 +7,10 @@ requires-python = ">=3.12"
 license = { text = "Proprietary" }
 dependencies = [
     "alembic>=1.16",
+    "anthropic>=1.8.0",
     "asyncpg>=0.30",
     "cryptography>=45",
+    "feedparser>=6.0.14",
     "httpx>=0.28",
     "numpy>=2.0",
     "pandas>=2.2",

@@ -9,6 +9,7 @@ Exemplos::
     trade-agent protect BTCUSDT --qty 0.0003 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
     trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
     trade-agent run          # agente: recuperação na partida + reconciliação contínua
+    trade-agent research ... # analista de mercado (ver trade_agent.research.commands)
 
 Ordens exigem ``TA_TRADING_ENABLED=true``; em produção exigem também ``--confirm-prod``.
 """
@@ -44,6 +45,12 @@ from trade_agent.execution.orders import (
 )
 from trade_agent.log import configure_logging
 from trade_agent.persistence.db import AlreadyRunningError
+from trade_agent.research.commands import (
+    DEFAULT_DEPS,
+    ResearchDeps,
+    add_research_parser,
+    run_research,
+)
 
 MANUAL_PROFILE = "man"
 BIPS = Decimal(10_000)
@@ -97,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     close.add_argument("--qty", type=Decimal, required=True)
     close.add_argument("--list-id", help="listClientOrderId da proteção ativa")
     close.add_argument("--confirm-prod", action="store_true")
+    add_research_parser(commands)
     return parser
 
 
@@ -176,10 +184,13 @@ async def _main_async(
     out: TextIO,
     err: TextIO,
     api_factory: ApiFactory,
+    research_deps: ResearchDeps,
 ) -> int:
     args = build_parser().parse_args(argv)
     settings = load_settings(env_file=args.env_file)
     configure_logging(settings.log_level, settings.log_format)
+    if args.command == "research":
+        return await run_research(args, settings, out, err, research_deps)
     if (
         args.command in _ORDER_COMMANDS
         and settings.binance_env is BinanceEnvironment.PROD
@@ -216,5 +227,6 @@ def main(
     out: TextIO = sys.stdout,
     err: TextIO = sys.stderr,
     api_factory: ApiFactory = _default_api,
+    research_deps: ResearchDeps = DEFAULT_DEPS,
 ) -> int:
-    return asyncio.run(_main_async(argv, out, err, api_factory))
+    return asyncio.run(_main_async(argv, out, err, api_factory, research_deps))

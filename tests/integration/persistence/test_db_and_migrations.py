@@ -6,6 +6,7 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -98,7 +99,8 @@ def test_env_uses_database_url_without_injected_connection(
         await engine.dispose()
         return str(version) if version is not None else None
 
-    assert asyncio.run(current()) == "0001"
+    head = ScriptDirectory.from_config(alembic_config()).get_current_head()
+    assert asyncio.run(current()) == head
 
 
 def test_env_requires_url() -> None:

@@ -98,6 +98,17 @@ Para comparar outra versão do código (A/B), aponte `TA_LAB_SRC` para a pasta `
 
 Os relatórios ficam em `var/lab/`. O resumo comentado está em [`doc/lab-resultados.md`](doc/lab-resultados.md).
 
+## Analista de mercado (Fase 4)
+
+Coleta notícias e métricas públicas, faz a triagem com `claude-sonnet-5` e produz uma leitura de mercado (`MarketView`) com `claude-opus-5`. As regras de segurança são aplicadas por código: o LLM só pode vetar ativos e reduzir a exposição. Modelos, fontes, orçamento (US$ 5/dia) e limites ficam em `config/research.yaml`; a chave vai no `.env` (`ANTHROPIC_API_KEY`).
+
+```bash
+uv run trade-agent research ingest                     # coleta notícias e métricas (PostgreSQL)
+uv run trade-agent research run --assets BTC,ETH,SOL   # um ciclo de pesquisa
+uv run trade-agent research show                       # última leitura válida
+uv run trade-agent research eval                       # avaliação com 31 casos rotulados (~US$ 3)
+```
+
 ## Estrutura
 
 ```text
@@ -107,7 +118,8 @@ tests/integration/    testes de integração (Binance simulada, Postgres em cont
 tests/live/           testes contra Testnet/Demo (marcador `live`)
 scripts/              utilitários operacionais (spike etc.)
 lab/                  laboratório de backtest (Freqtrade via Docker, walk-forward)
-config/               perfis de alocação (profiles.yaml)
+config/               perfis de alocação (profiles.yaml) e analista (research.yaml)
+evals/                casos rotulados para avaliar o analista LLM
 deploy/               docker-compose e provisionamento
 doc/                  arquitetura, plano e decisões
 ```

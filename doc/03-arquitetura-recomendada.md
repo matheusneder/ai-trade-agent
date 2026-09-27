@@ -173,9 +173,12 @@ sequenceDiagram
 ### 7.1 Fluxo
 
 1. **Ingestão** (`news_ingest`, a cada 15 min): coleta RSS, anúncios e delistagens da Binance, Fear & Greed, *funding*/OI; remove duplicatas por *hash*; marca os ativos citados (dicionário símbolo → nomes); grava em `news_items`.
-2. **Pesquisa** (`research_cycle`, a cada 4 h e em gatilhos): o LLM recebe o **digest** das últimas horas (global e dos candidatos e posições), métricas de mercado e a lista de candidatos do TA. Ele pode usar `web_search` (com `max_uses` limitado) e `web_fetch` para confirmar catalisadores.
-3. **Gatilhos extras:** movimento forte do BTC (ex.: ±4% em 1h), rajada de notícias sobre um ativo em carteira, ou relatório com mais de N horas antes de uma nova entrada. Neste último caso, a checagem pré-trade é curta e focada no ativo.
-4. **Saída** validada por schema (pydantic) e gravada em `research_reports` com modelo, versão do *prompt*, fontes, tokens e custo.
+2. **Triagem** (modelo menor, `claude-sonnet-5`): as notícias ainda não classificadas recebem relevância, categoria, severidade e ativos. As de baixa relevância saem do digest.
+3. **Pesquisa** (`research_cycle`, a cada 4 h e em gatilhos), em **duas etapas** (D-019):
+   - **(a) verificação web**, opcional: o modelo principal usa `web_search`/`web_fetch` (com `max_uses`) para confirmar riscos e catalisadores dos candidatos e das manchetes críticas, e devolve achados em texto com as URLs;
+   - **(b) leitura estruturada**, sem ferramentas: o modelo recebe o **digest** das últimas horas, as métricas de mercado, os candidatos do TA e os achados da etapa (a), e produz o `MarketView` com *structured outputs*.
+4. **Gatilhos extras:** movimento forte do BTC (ex.: ±4% em 1h), rajada de notícias sobre um ativo em carteira, ou relatório com mais de N horas antes de uma nova entrada. Neste último caso, a checagem pré-trade é curta e focada no ativo.
+5. **Saída** validada por schema (pydantic) e gravada em `research_reports` com modelo, versão do *prompt*, fontes, tokens e custo.
 
 ### 7.2 Contrato de saída (`MarketView`)
 
@@ -213,10 +216,10 @@ sequenceDiagram
 ### 7.4 Uso da API Claude
 
 - Modelo padrão **`claude-opus-5`** com *adaptive thinking*. O modelo é configurável; para triagem de manchetes em volume, um modelo menor (ex.: `claude-sonnet-5`) pode fazer a pré-classificação.
-- **Structured outputs** (`output_config.format` com JSON Schema) para garantir o contrato.
+- **Structured outputs** (`output_config.format` com JSON Schema gerado pelo SDK) na etapa (b). O schema pedido ao modelo não tem restrições numéricas: as faixas são aplicadas pelo código (§7.3), para que um valor fora da faixa seja truncado em vez de invalidar a resposta inteira.
 - Ferramentas de servidor `web_search_20260209` / `web_fetch_20260209` com `max_uses` e, opcionalmente, `allowed_domains`.
 - **Prompt caching** do *system prompt*, das instruções e do schema, que formam o prefixo estável.
-- **Teto de custo diário** (disjuntor `llm_daily_budget_usd`). Tokens, buscas e custo por chamada ficam em `llm_usage`.
+- **Teto de custo diário** (disjuntor `llm_daily_budget_usd`, hoje US$ 5 em `config/research.yaml`). Tokens, cache, buscas e custo por chamada ficam em `llm_usage`, inclusive quando a resposta é inválida.
 - Estimativa: 6 ciclos/dia × (~40k tokens de entrada, ~4k de saída, ~8 buscas) ≈ **US$ 0,35–0,40 por ciclo com Opus 5**, algo em torno de **US$ 60–100/mês** com gatilhos extras. Com Sonnet 5, cerca de metade. Preços em [05-referencias.md](05-referencias.md).
 
 ### 7.5 Avaliação contínua do LLM
@@ -540,3 +543,6 @@ volumes: {pgdata: {}, grafana: {}}
 | D-016 | 26/09/2026 | Setups de entrada só **a favor da tendência** (EMA rápida > lenta, também no rompimento) e com **filtro de regime**: benchmark (BTC) acima da própria EMA lenta; desligável por perfil (`signals.use_regime_filter`) | O primeiro *walk-forward* mostrou compras de *altcoins* com o BTC em queda e rompimentos contra a tendência. São filtros clássicos, definidos antes da otimização | Filtro de regime apenas via LLM (Fase 4) |
 | D-017 | 26/09/2026 | Método do laboratório: **walk-forward com otimização**. *Hyperopt* (`SharpeHyperOptLossDaily`, 100 épocas, semente fixa) nos **12 meses anteriores** a cada janela trimestral de validação; os parâmetros escolhidos são aplicados sem ajuste na janela seguinte. Os parâmetros de **risco** do perfil (stop máximo, risco por trade, tamanho máximo) **nunca são otimizados**. Comparação com o *buy & hold* da cesta e do BTC | Avalia fora da amostra e evita escolher parâmetros olhando o período de teste | Backtest com parâmetros fixos (usado só como baseline); otimizar o período inteiro |
 | D-018 | 26/09/2026 | Resultado da Fase 3: **conservador (4h) calibrado** com as medianas dos treinos do *walk-forward* (sem *break-even*, saída por score no 1º ciclo, como no laboratório) e **moderado (1h) desabilitado**. Com stop fixo, `protection.stop` (`atr_mult`, `max_pct`) é a **fonte única** do stop por ATR no agente e no laboratório | Decisão do usuário a partir de [lab-resultados.md](lab-resultados.md): expectativa positiva fora da amostra só no conservador | Manter os parâmetros ilustrativos; iterar mais na Fase 3 |
+| D-019 | 26/09/2026 | Analista em **duas etapas**: (a) verificação web opcional em texto livre com fontes; (b) leitura **estruturada sem ferramentas** (JSON Schema). Triagem das manchetes com `claude-sonnet-5`; leitura com `claude-opus-5` (*effort* `high`); teto de **US$ 5/dia** | Decisão do usuário (modelos e orçamento). A documentação não garante *structured outputs* junto com ferramentas de servidor; separar as etapas também isola o conteúdo web não confiável da etapa que decide | Uma única chamada com busca e schema |
+| D-020 | 26/09/2026 | Fontes do MVP (todas públicas, sem chave): anúncios do site da Binance, RSS (CoinDesk, Cointelegraph, The Block, Decrypt), Fear & Greed (alternative.me) e *funding*/*open interest* da Binance Futures. Configuradas em `config/research.yaml` | Decisão do usuário; cada fonte falha de forma isolada | CryptoPanic e outras fontes pagas |
+| D-021 | 26/09/2026 | Avaliação do analista com **31 casos rotulados** (19 históricos com manchetes parafraseadas e 12 sintéticos com ativos fictícios, incluindo injeção de prompt), rodando só a etapa (b), **sem busca web** | Evita viés retrospectivo da busca. Os casos sintéticos reduzem o efeito de o modelo já conhecer os eventos históricos | Avaliar com busca web; só casos históricos |

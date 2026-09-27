@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     DateTime,
+    Float,
     ForeignKey,
     Identity,
     Index,
@@ -156,3 +157,61 @@ class CheckpointRecord(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict[str, Any]]
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+# ============================================================================ analista (Fase 4)
+class NewsItemRecord(Base):
+    """Notícia coletada (conteúdo externo, não confiável) e a sua triagem."""
+
+    __tablename__ = "news_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    dedupe_key: Mapped[str] = mapped_column(String(32), unique=True)
+    source: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[datetime] = mapped_column(index=True)
+    assets: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    relevance: Mapped[float | None] = mapped_column(Float)
+    category: Mapped[str | None] = mapped_column(String(16))
+    severity: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ResearchReportRecord(Base):
+    """Resultado de um ciclo de pesquisa (leitura saneada, ajustes, fontes e custo)."""
+
+    __tablename__ = "research_reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
+    as_of: Mapped[datetime]
+    trigger: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(48))
+    prompt_version: Mapped[str] = mapped_column(String(16))
+    view: Mapped[dict[str, Any] | None]
+    draft: Mapped[dict[str, Any] | None]
+    adjustments: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    sources: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    cost_usd: Mapped[Decimal]
+
+
+class LlmUsageRecord(Base):
+    """Uma chamada à API Claude: tokens, cache, buscas e custo (disjuntor de orçamento)."""
+
+    __tablename__ = "llm_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    at: Mapped[datetime] = mapped_column(index=True)
+    purpose: Mapped[str] = mapped_column(String(24))
+    model: Mapped[str] = mapped_column(String(48))
+    input_tokens: Mapped[int] = mapped_column(Integer)
+    output_tokens: Mapped[int] = mapped_column(Integer)
+    cache_creation_input_tokens: Mapped[int] = mapped_column(Integer)
+    cache_read_input_tokens: Mapped[int] = mapped_column(Integer)
+    web_search_requests: Mapped[int] = mapped_column(Integer)
+    web_fetch_requests: Mapped[int] = mapped_column(Integer)
+    cost_usd: Mapped[Decimal]
