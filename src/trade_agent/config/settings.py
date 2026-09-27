@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trade_agent.exchange.environments import BinanceEnvironment
@@ -36,6 +36,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     binance_env: BinanceEnvironment = BinanceEnvironment.TESTNET
@@ -51,6 +52,13 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     """URL SQLAlchemy do PostgreSQL, ex.: ``postgresql+asyncpg://user:senha@host/db``."""
 
+    anthropic_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TA_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+    )
+    """Chave da API Claude (analista de mercado, Fase 4)."""
+    research_config: Path = Path("config/research.yaml")
+
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
 
@@ -60,6 +68,7 @@ class Settings(BaseSettings):
         "binance_private_key_passphrase",
         "binance_api_secret",
         "database_url",
+        "anthropic_api_key",
         mode="before",
     )
     @classmethod

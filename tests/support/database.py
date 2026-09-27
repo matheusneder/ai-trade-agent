@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.migrate import upgrade_to_head
 
-TABLES = "positions, intents, exchange_orders, fills, events, checkpoints"
+TABLES = (
+    "positions, intents, exchange_orders, fills, events, checkpoints, "
+    "news_items, research_reports, llm_usage"
+)
 
 
 async def _migrate(url: str) -> None:
