@@ -54,7 +54,8 @@ async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -
         build_runtime(settings, aux_http=aux, user_stream=False) as runtime,
     ):
         assert [tf for tf, _ in runtime._candle_jobs] == ["4h"]  # só o conservador
-        assert len(runtime._periodic) == 2  # risco e coleta de notícias
+        assert len(runtime._periodic) == 3  # risco, notícias e telemetria
+        assert runtime._heartbeat is None  # sem TA_HEALTHCHECK_URL
 
 
 async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Database) -> None:

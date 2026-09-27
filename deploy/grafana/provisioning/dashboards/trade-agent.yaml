@@ -1,0 +1,11 @@
+# Dashboards versionados em deploy/grafana/dashboards (gerados por scripts/grafana_dashboards.py).
+apiVersion: 1
+
+providers:
+  - name: trade-agent
+    folder: Trade Agent
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

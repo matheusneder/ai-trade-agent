@@ -104,8 +104,12 @@ class RiskMonitor:
             Decimal(0),
         )
         baseline = self._strategy.account.managed_capital
-        equity = baseline + await self._store.realized_pnl_total() + unrealized
+        realized = await self._store.realized_pnl_total()
+        equity = baseline + realized + unrealized
         day_start, peak = await self._equity_marks(equity, now)
+        exposure = sum(
+            (p.entry_quote or p.planned_qty * p.planned_price for p in active), Decimal(0)
+        )
 
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         daily: dict[str, Decimal] = {}
@@ -138,4 +142,8 @@ class RiskMonitor:
             fear_greed=self._fear_greed(),
             api_error_rate=self._health.error_rate(),
             reconcile_anomalies=self.reconcile_anomalies,
+            realized_pnl=realized,
+            unrealized_pnl=unrealized,
+            exposure=exposure,
+            active_positions=len(active),
         )

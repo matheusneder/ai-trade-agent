@@ -59,8 +59,8 @@ def _center(store: Store, http: httpx.AsyncClient, clock: Clock) -> tuple[Comman
 
     guard.set_flattener(flatten)
 
-    async def status() -> str:
-        return "tudo certo"
+    async def status(args: list[str]) -> str:
+        return f"tudo certo {args}"
 
     center = CommandCenter(
         bot=TelegramBot(http, "TOKEN", base_url="https://tg.example"),
@@ -68,7 +68,7 @@ def _center(store: Store, http: httpx.AsyncClient, clock: Clock) -> tuple[Comman
         guard=guard,
         store=store,
         scopes=["conservador", "moderado"],
-        status=status,
+        queries={"/status": status},
         clock=clock,
         new_code=lambda: "ABC123",
     )
@@ -78,9 +78,9 @@ def _center(store: Store, http: httpx.AsyncClient, clock: Clock) -> tuple[Comman
 async def test_commands_change_operational_states(store: Store, http: httpx.AsyncClient) -> None:
     clock = Clock()
     center, guard = _center(store, http, clock)
-    assert (await center.handle("oi")).startswith("Comandos:")
-    assert (await center.handle("/desconhecido")).startswith("Comandos:")
-    assert await center.handle("/status@meubot") == "tudo certo"
+    assert (await center.handle("oi")).startswith("Consultas: /status. Controle:")
+    assert (await center.handle("/desconhecido")).startswith("Consultas:")
+    assert await center.handle("/status@meubot x") == "tudo certo ['x']"
     assert "Escopo inválido" in await center.handle("/pause marte")
     assert "pausado" in await center.handle("/pause conservador")
     assert (await guard.state("conservador")).state is OpState.PAUSED

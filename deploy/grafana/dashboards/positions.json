@@ -1,0 +1,154 @@
+{
+  "uid": "ta-positions",
+  "title": "Trade Agent — Posições",
+  "tags": [
+    "trade-agent"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Posições ativas",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 9,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT symbol AS ativo, profile AS perfil, state AS estado, entry_price::float AS entrada, protected_qty::float AS quantidade, (policy->>'stop_pct')::float AS stop_pct, (policy->>'take_profit_pct')::float AS tp_pct, (policy->>'take_profit_trailing_bips')::int AS trailing_bips, opened_at AS aberta_em, now() - opened_at AS tempo FROM positions WHERE state NOT IN ('closed', 'rejected') ORDER BY opened_at"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 1
+    },
+    {
+      "type": "timeseries",
+      "title": "PnL não realizado",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, unrealized_pnl::float AS nao_realizado FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 2
+    },
+    {
+      "type": "timeseries",
+      "title": "Exposição",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, exposure::float AS exposicao FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "table",
+      "title": "Encerradas no período",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 9,
+        "x": 0,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT closed_at AS time, symbol AS ativo, profile AS perfil, exit_reason AS motivo, entry_price::float AS entrada, exit_price::float AS saida, realized_pnl::float AS pnl FROM positions WHERE state = 'closed' AND realized_pnl IS NOT NULL AND $__timeFilter(closed_at) ORDER BY closed_at DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
+    }
+  ]
+}

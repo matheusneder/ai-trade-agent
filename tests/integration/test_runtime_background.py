@@ -94,11 +94,16 @@ async def test_assemble_without_telegram(
         assert isinstance(parts.notifier, LogNotifier) and parts.commands is None
         assert parts.services == []
         assert [tf for tf, _ in parts.candle_jobs] == ["4h", "1h"]  # perfis habilitados
-        (risk_interval, check_risk), (ingest_interval, ingest) = parts.periodic
-        assert (risk_interval, ingest_interval) == (60.0, 900.0)
+        (risk_s, check_risk), (ingest_s, ingest), (telemetry_s, record) = parts.periodic
+        assert (risk_s, ingest_s, telemetry_s) == (60.0, 900.0, 300.0)
+        assert parts.heartbeat is None
+        assert await record() is False  # nada observado ainda
         fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
         await check_risk()
         assert (await parts.guard.state(GLOBAL)).state is OpState.RUNNING
+        assert await record() is True
+        saved = await parts.telemetry.last_recorded()
+        assert saved is not None and saved.states["global"] == "running"
         await ingest()
         parts.research.metrics = MarketMetrics(fear_greed=FearGreed(5, "Extreme Fear"))
         await check_risk()  # Fear & Greed abaixo de 10 → pausa
@@ -114,7 +119,12 @@ async def test_assemble_with_telegram_and_decision_job(
     service: PositionService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = _settings(telegram_bot_token="TOKEN", telegram_chat_id=7, trading_enabled=True)
+    settings = _settings(
+        telegram_bot_token="TOKEN",
+        telegram_chat_id=7,
+        trading_enabled=True,
+        healthcheck_url="https://hc.example/ping/abc",
+    )
     async with httpx.AsyncClient() as http:
         parts = assemble(
             settings,
@@ -125,8 +135,13 @@ async def test_assemble_with_telegram_and_decision_job(
         )  # fmt: skip
         assert isinstance(parts.notifier, TelegramNotifier)
         assert parts.commands is not None and parts.services == [parts.commands.run]
+        assert parts.heartbeat is not None
         status = await parts.commands.handle("/status")
         assert status.startswith("Ordens: habilitadas")
+        assert (await parts.commands.handle("/positions")) == "Posições ativas: 0"
+        assert (await parts.commands.handle("/pnl semana")).startswith("PnL realizado (semana)")
+        assert (await parts.commands.handle("/report")) == "Analista: sem leitura válida."
+        assert (await parts.commands.handle("/config")).startswith("Configuração ")
 
         async def fake_cycle(name: str) -> str:
             return f"ciclo {name}"

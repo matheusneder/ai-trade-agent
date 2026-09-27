@@ -1,5 +1,6 @@
-# Implantação local/VPS. Uso: docker compose -f deploy/docker-compose.yml up -d
-# Serviços adicionais (Grafana) entram na Fase 6.
+# Implantação local/VPS. Uso (a partir da raiz do repositório):
+#   docker compose --env-file .env -f deploy/docker-compose.yml up -d
+# Portas publicadas só em 127.0.0.1: acesse o Grafana por túnel SSH em uma VPS.
 name: trade-agent
 
 services:
@@ -10,10 +11,12 @@ services:
       POSTGRES_DB: trade_agent
       POSTGRES_USER: trade_agent
       POSTGRES_PASSWORD: ${TA_POSTGRES_PASSWORD:-trade_agent_dev}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_ro_dev}
     ports:
       - "127.0.0.1:5432:5432"   # nunca expor publicamente
     volumes:
       - pgdata:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro   # usuário somente leitura do Grafana
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U trade_agent -d trade_agent"]
       interval: 10s
@@ -39,5 +42,37 @@ services:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
 
+  grafana:
+    image: grafana/grafana:12.2.0
+    restart: unless-stopped
+    # renderiza o chatid do Telegram como texto numa cópia do provisionamento e inicia o Grafana
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        rm -rf /tmp/provisioning && cp -r /etc/grafana/provisioning-src /tmp/provisioning &&
+        sed -i "s/__TELEGRAM_CHAT_ID__/$${TELEGRAM_CHAT_ID}/" /tmp/provisioning/alerting/telegram.yaml &&
+        exec /run.sh
+    environment:
+      GF_PATHS_PROVISIONING: /tmp/provisioning
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_ro_dev}
+      # alertas do Grafana no mesmo chat do agente (placeholder mantém o provisionamento válido)
+      TELEGRAM_BOT_TOKEN: ${TA_TELEGRAM_BOT_TOKEN:-nao-configurado}
+      TELEGRAM_CHAT_ID: ${TA_TELEGRAM_CHAT_ID:-0}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning-src:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata: {}
+  grafana: {}

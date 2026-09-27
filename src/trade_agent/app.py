@@ -6,7 +6,7 @@ import signal
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import anthropic
 import httpx
@@ -21,9 +21,16 @@ from trade_agent.exchange.user_stream import UserDataStream
 from trade_agent.execution.gateway import ExecutionGateway
 from trade_agent.execution.service import PositionService, RulesCache
 from trade_agent.market.universe import UniverseConfig
-from trade_agent.notify.commands import CommandCenter
+from trade_agent.notify.commands import CommandCenter, Query
 from trade_agent.notify.notifier import LogNotifier, Notifier, TelegramNotifier
-from trade_agent.notify.status import status_text
+from trade_agent.notify.status import (
+    config_hash,
+    config_text,
+    pnl_text,
+    positions_text,
+    report_text,
+    status_text,
+)
 from trade_agent.notify.telegram import TelegramBot
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.research_store import ResearchStore
@@ -39,9 +46,12 @@ from trade_agent.risk.monitor import RiskMonitor
 from trade_agent.risk.state import StateStore
 from trade_agent.runtime import Action, AgentRuntime, Service
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
+from trade_agent.telemetry.heartbeat import Heartbeat
+from trade_agent.telemetry.recorder import TelemetryRecorder
 
 RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
+TELEMETRY_INTERVAL_S = 300.0
 
 
 @dataclass
@@ -51,7 +61,9 @@ class AgentParts:
     monitor: RiskMonitor
     research: ResearchService
     notifier: Notifier
+    telemetry: TelemetryRecorder
     commands: CommandCenter | None
+    heartbeat: Heartbeat | None = None
     periodic: list[tuple[float, Action]] = field(default_factory=list)
     candle_jobs: list[tuple[str, Action]] = field(default_factory=list)
     services: list[Service] = field(default_factory=list)
@@ -113,8 +125,12 @@ def assemble(
         api=api, store=store, strategy=strategy, health=api.rest.health, fear_greed=fear_greed
     )
 
+    telemetry = TelemetryRecorder(db=db, guard=guard, rest=api.rest, scopes=list(strategy.profiles))
+
     async def check_risk() -> None:
-        await guard.apply(evaluate(conditions, await monitor.snapshot()))
+        snapshot = await monitor.snapshot()
+        telemetry.observe(snapshot)
+        await guard.apply(evaluate(conditions, snapshot))
 
     symbols = [f"{asset}{strategy.account.quote_asset}" for asset in names]
 
@@ -130,8 +146,11 @@ def assemble(
     commands: CommandCenter | None = None
     services: list[Service] = []
     if bot is not None and settings.telegram_chat_id is not None:
+        digest = config_hash(
+            [settings.strategy_config, settings.stop_conditions, settings.research_config]
+        )
 
-        async def status() -> str:
+        async def status_query(_: list[str]) -> str:
             return await status_text(
                 guard=guard,
                 store=store,
@@ -140,24 +159,54 @@ def assemble(
                 trading_enabled=settings.trading_enabled,
             )
 
+        async def positions_query(_: list[str]) -> str:
+            return await positions_text(store)
+
+        async def pnl_query(args: list[str]) -> str:
+            return await pnl_text(store, strategy, args, datetime.now(UTC))
+
+        async def report_query(_: list[str]) -> str:
+            return await report_text(research_store)
+
+        async def config_query(_: list[str]) -> str:
+            return config_text(strategy, conditions, digest)
+
+        queries: dict[str, Query] = {
+            "/status": status_query,
+            "/positions": positions_query,
+            "/pnl": pnl_query,
+            "/report": report_query,
+            "/config": config_query,
+        }
         commands = CommandCenter(
             bot=bot,
             chat_id=settings.telegram_chat_id,
             guard=guard,
             store=store,
             scopes=list(strategy.profiles),
-            status=status,
+            queries=queries,
         )
         services.append(commands.run)
 
+    heartbeat = (
+        Heartbeat(http, settings.healthcheck_url.get_secret_value())
+        if settings.healthcheck_url is not None
+        else None
+    )
     return AgentParts(
         guard=guard,
         engine=engine,
         monitor=monitor,
         research=research,
         notifier=notifier,
+        telemetry=telemetry,
         commands=commands,
-        periodic=[(RISK_INTERVAL_S, check_risk), (INGEST_INTERVAL_S, ingest)],
+        heartbeat=heartbeat,
+        periodic=[
+            (RISK_INTERVAL_S, check_risk),
+            (INGEST_INTERVAL_S, ingest),
+            (TELEMETRY_INTERVAL_S, telemetry.record),
+        ],
         candle_jobs=[
             (profile.timeframe, decide(name))
             for name, profile in strategy.enabled_profiles().items()
@@ -224,6 +273,7 @@ async def build_runtime(
                 store=store,
                 reconciler=Reconciler(api, positions, store),
                 events=stream.events if user_stream else None,
+                heartbeat=parts.heartbeat.ping if parts.heartbeat else None,
                 periodic=parts.periodic,
                 candle_jobs=parts.candle_jobs,
                 services=parts.services,

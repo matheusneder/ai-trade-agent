@@ -481,7 +481,7 @@ flowchart TD
 
 ### 12.3 Comandos do Telegram
 
-`/status` · `/positions` · `/pnl [dia|semana|mês]` · `/pause [perfil]` · `/resume [perfil]` · `/halt` · `/flatten [perfil|all]` (exige código de confirmação) · `/report` (último `MarketView`) · `/config` (perfis ativos e *hash*).
+`/status` · `/positions` · `/pnl [dia|semana|mes]` · `/pause [escopo]` · `/resume [escopo]` · `/halt [escopo]` · `/flatten [escopo]` (exige código de confirmação) · `/report` (último `MarketView`) · `/config` (perfis ativos e *hash* da configuração). O escopo é `global` (padrão) ou o nome de um perfil.
 Apenas um `chat_id` autorizado. Todo comando é auditado em `events`.
 
 ## 13. Segurança
@@ -550,3 +550,4 @@ volumes: {pgdata: {}, grafana: {}}
 | D-022 | 26/09/2026 | Telegram por **cliente próprio fino** (Bot API com `sendMessage` e `getUpdates` em *long polling*, via httpx). Um único `chat_id` autorizado; outros chats são ignorados e registrados; `/flatten` exige código de confirmação (2 min); o *offset* é persistido antes de executar o comando (no máximo uma execução) | Decisão do usuário: poucas linhas, sem framework, testável com respx (análogo à D-001) | python-telegram-bot |
 | D-023 | 26/09/2026 | Ciclo de decisão **no fechamento do candle** de cada perfil (+20 s), como no laboratório. Com a trava `TA_TRADING_ENABLED` desligada, o agente roda em **simulação**: decide e registra, sem enviar ordens. O analista só é chamado quando há setups ou posições | Decisão do usuário; a simulação permite observar o agente no Demo/produção sem risco | Intervalo fixo |
 | D-024 | 26/09/2026 | Condições de parada com os valores do doc 03 §10.3, medidas sobre o **patrimônio do agente** (capital gerido + PnL realizado + aberto, a preço de venda); abertura do dia e pico persistidos. Paridade do USDT pela mediana de USDC/USDT e FDUSD/USDT. Estados só escalam por gatilho; `flatten` → `HALTED` marcado (não se repete) | Decisão do usuário (valores). Saldos que não pertencem ao agente não distorcem as perdas | Patrimônio da conta inteira |
+| D-025 | 26/09/2026 | Observabilidade: `telemetry_snapshots` a cada 5 min (do snapshot de risco de 1 min), heartbeat externo por URL (Healthchecks.io), **Grafana 12.2 provisionado como código**: 5 dashboards gerados por `scripts/grafana_dashboards.py`, *datasource* com usuário **somente leitura** (`grafana_ro`) e 3 regras independentes do agente (sem telemetria, posição sem proteção, drawdown) com contato no Telegram. O `chatid` é renderizado na partida do contêiner, porque o Grafana converte variáveis de ambiente numéricas em número | Verificado num Grafana real: provisionamento, 34 consultas pela API e avaliação das regras | Prometheus + exporter; alertas só pelo agente |

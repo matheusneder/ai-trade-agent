@@ -1,0 +1,288 @@
+{
+  "uid": "ta-health",
+  "title": "Trade Agent — Saúde técnica",
+  "tags": [
+    "trade-agent"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Segundos desde a última foto",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT coalesce(extract(epoch FROM now() - max(at)), -1)::float AS atraso FROM telemetry_snapshots"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Intenções pendentes",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS pendentes FROM intents WHERE status IN ('pending', 'unknown')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Posições sem proteção",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS sem_protecao FROM positions WHERE state = 'unprotected'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Eventos críticos (24h)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS criticos FROM events WHERE severity = 'critical' AND created_at > now() - interval '24 hours'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
+    },
+    {
+      "type": "timeseries",
+      "title": "Erros de API (%)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, api_error_rate * 100 AS erros FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 5
+    },
+    {
+      "type": "timeseries",
+      "title": "Peso usado (1 min)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 8,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, used_weight_1m AS peso FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 6
+    },
+    {
+      "type": "timeseries",
+      "title": "Offset de relógio (ms)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 16,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, clock_offset_ms AS offset_ms FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 7
+    },
+    {
+      "type": "table",
+      "title": "Eventos altos e críticos",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 9,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, kind AS evento, severity AS severidade, position_id AS posicao, payload::text AS detalhes FROM events WHERE severity IN ('high', 'critical') AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 8
+    }
+  ]
+}

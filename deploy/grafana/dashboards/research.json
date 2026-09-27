@@ -1,0 +1,218 @@
+{
+  "uid": "ta-research",
+  "title": "Trade Agent — Decisões e pesquisa",
+  "tags": [
+    "trade-agent"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Ciclos de decisão",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 9,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 1
+    },
+    {
+      "type": "table",
+      "title": "Última leitura do analista",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 16,
+        "h": 9,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT a->>'asset' AS ativo, (a->>'sentiment')::float AS sentimento, (a->>'confidence')::float AS confianca, (a->>'veto')::bool AS veto, a->>'rationale' AS justificativa FROM research_reports r, jsonb_array_elements(r.view->'assets') a WHERE r.id = (SELECT max(id) FROM research_reports WHERE status = 'ok')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Regime e exposição",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 4,
+        "x": 16,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT view->>'market_regime' AS regime, (view->>'exposure_multiplier')::float AS exposicao FROM research_reports WHERE id = (SELECT max(id) FROM research_reports WHERE status = 'ok')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "barchart",
+      "title": "Custo diário do LLM",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', at) AS time, sum(cost_usd)::float AS custo FROM llm_usage WHERE $__timeFilter(at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
+    },
+    {
+      "type": "barchart",
+      "title": "Ciclos do analista por status",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', created_at) AS time, count(*) FILTER (WHERE status = 'ok') AS ok, count(*) FILTER (WHERE status = 'failed') AS falhas FROM research_reports WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 5
+    },
+    {
+      "type": "table",
+      "title": "Notícias coletadas por fonte",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 7,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT source AS fonte, count(*) AS noticias, count(*) FILTER (WHERE severity = 'critical') AS criticas FROM news_items WHERE $__timeFilter(published_at) GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 6
+    }
+  ]
+}

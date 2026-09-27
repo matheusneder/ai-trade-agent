@@ -1,6 +1,7 @@
 """Comandos do operador pelo Telegram, com autorização por ``chat_id``.
 
-``/status`` · ``/pause [escopo]`` · ``/resume [escopo]`` · ``/halt [escopo]`` ·
+Consultas (``/status``, ``/positions``, ``/pnl``, ``/report``, ``/config``) são injetadas
+pela aplicação. Controle: ``/pause [escopo]`` · ``/resume [escopo]`` · ``/halt [escopo]`` ·
 ``/flatten [escopo]`` (pede confirmação com código, válido por 2 min) · ``/help``.
 O escopo é ``global`` (padrão) ou o nome de um perfil. Mensagens de outros chats são
 ignoradas e registradas como evento.
@@ -9,7 +10,7 @@ ignoradas e registradas como evento.
 import asyncio
 import contextlib
 import secrets
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -24,10 +25,9 @@ log = structlog.get_logger(__name__)
 
 OFFSET_KEY = "telegram.offset"
 CONFIRMATION_TTL = timedelta(minutes=2)
-HELP = (
-    "Comandos: /status · /pause [escopo] · /resume [escopo] · /halt [escopo] · "
-    "/flatten [escopo] · /help. Escopo: global (padrão) ou o nome de um perfil."
-)
+CONTROL = "/pause [escopo] · /resume [escopo] · /halt [escopo] · /flatten [escopo]"
+
+type Query = Callable[[list[str]], Awaitable[str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +46,7 @@ class CommandCenter:
         guard: RiskGuard,
         store: Store,
         scopes: Collection[str],
-        status: Callable[[], Awaitable[str]],
+        queries: Mapping[str, Query],
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         new_code: Callable[[], str] = lambda: secrets.token_hex(3).upper(),
     ) -> None:
@@ -55,10 +55,18 @@ class CommandCenter:
         self._guard = guard
         self._store = store
         self._scopes = {GLOBAL, *scopes}
-        self._status = status
+        self._queries = dict(queries)
         self._clock = clock
         self._new_code = new_code
         self._pending: _Pending | None = None
+
+    @property
+    def help(self) -> str:
+        queries = " · ".join(sorted(self._queries))
+        return (
+            f"Consultas: {queries}. Controle: {CONTROL}. "
+            "Escopo: global (padrão) ou o nome de um perfil."
+        )
 
     def _scope(self, args: list[str]) -> str | None:
         scope = args[0].lower() if args else GLOBAL
@@ -67,12 +75,12 @@ class CommandCenter:
     async def handle(self, text: str) -> str:
         parts = text.strip().split()
         if not parts or not parts[0].startswith("/"):
-            return HELP
+            return self.help
         command, args = parts[0].split("@")[0].lower(), parts[1:]
-        if command == "/status":
-            return await self._status()
+        if command in self._queries:
+            return await self._queries[command](args)
         if command not in {"/pause", "/resume", "/halt", "/flatten"}:
-            return HELP
+            return self.help
         scope = self._scope(args)
         if scope is None:
             return f"Escopo inválido. Use: {', '.join(sorted(self._scopes))}."
