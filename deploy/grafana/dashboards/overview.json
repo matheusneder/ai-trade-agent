@@ -1,0 +1,325 @@
+{
+  "uid": "ta-overview",
+  "title": "Trade Agent — Visão geral",
+  "tags": [
+    "trade-agent"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Patrimônio",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT equity::float AS patrimonio FROM telemetry_snapshots WHERE id = (SELECT max(id) FROM telemetry_snapshots)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "PnL do dia",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT (equity - day_start_equity)::float AS pnl_dia FROM telemetry_snapshots WHERE id = (SELECT max(id) FROM telemetry_snapshots)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Drawdown",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT drawdown_pct AS drawdown FROM telemetry_snapshots WHERE id = (SELECT max(id) FROM telemetry_snapshots)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Posições ativas",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT active_positions AS posicoes, exposure::float AS exposicao FROM telemetry_snapshots WHERE id = (SELECT max(id) FROM telemetry_snapshots)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
+    },
+    {
+      "type": "timeseries",
+      "title": "Patrimônio e pico",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, equity::float AS patrimonio, peak_equity::float AS pico FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 5
+    },
+    {
+      "type": "timeseries",
+      "title": "Drawdown (%)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, drawdown_pct AS drawdown FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 6
+    },
+    {
+      "type": "table",
+      "title": "Estado operacional",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT key AS escopo, value AS estado FROM telemetry_snapshots, jsonb_each_text(states) WHERE id = (SELECT max(id) FROM telemetry_snapshots) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 7
+    },
+    {
+      "type": "table",
+      "title": "Mudanças de estado (risco)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 16,
+        "h": 8,
+        "x": 8,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, payload->>'scope' AS escopo, payload->>'state' AS estado, payload->>'reason' AS motivo, payload->>'source' AS origem FROM events WHERE kind = 'risk.state_changed' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 8
+    },
+    {
+      "type": "table",
+      "title": "Última execução por tarefa",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 6,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT kind AS tarefa, max(created_at) AS ultima FROM events WHERE kind IN ('agent.started', 'decision.cycle', 'risk.state_changed') GROUP BY kind ORDER BY 2 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 9
+    }
+  ]
+}

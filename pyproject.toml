@@ -66,6 +66,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "PLR0917", "SLF001", "PT018", "C408"]
 "scripts/**" = ["T201", "S101"]
+# consultas SQL constantes dos painéis (sem entrada externa)
+"scripts/grafana_dashboards.py" = ["T201", "E501", "S608"]
 "src/trade_agent/persistence/migrations/**" = ["E501"]
 "lab/freqtrade/**" = ["E501", "ARG002", "PLR0917"]
 

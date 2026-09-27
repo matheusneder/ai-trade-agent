@@ -1,0 +1,103 @@
+# Regras que independem do próprio agente estar vivo (doc 03, §12.2). As mudanças de
+# estado e os disjuntores já são avisados pelo agente; aqui ficam os sinais de que ele
+# parou ou de que algo ficou sem proteção.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: trade-agent
+    folder: Trade Agent
+    interval: 1m
+    rules:
+      - uid: ta-no-telemetry
+        title: Agente sem telemetria
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: trade-agent-pg
+            model:
+              refId: A
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: SELECT coalesce(extract(epoch FROM now() - max(at)), 999999)::float AS atraso FROM telemetry_snapshots
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [900]}
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: O agente não grava telemetria há mais de 15 minutos (parado ou travado).
+
+      - uid: ta-unprotected
+        title: Posição sem proteção
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: trade-agent-pg
+            model:
+              refId: A
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: SELECT count(*)::float AS posicoes FROM positions WHERE state = 'unprotected' AND updated_at < now() - interval '1 minute'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Alerting
+        for: 0s
+        labels: {severity: critical}
+        annotations:
+          summary: Há posição sem OCO de proteção há mais de 1 minuto.
+
+      - uid: ta-drawdown
+        title: Drawdown elevado
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: trade-agent-pg
+            model:
+              refId: A
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: SELECT drawdown_pct AS drawdown FROM telemetry_snapshots WHERE id = (SELECT max(id) FROM telemetry_snapshots)
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [10]}
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        labels: {severity: high}
+        annotations:
+          summary: Drawdown acima de 10% do pico (o disjuntor de halt atua em 15%).

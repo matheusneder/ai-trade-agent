@@ -1,0 +1,19 @@
+# Fonte de dados do Grafana: o banco do agente com usuário SOMENTE LEITURA (grafana_ro).
+apiVersion: 1
+
+datasources:
+  - name: Trade Agent
+    uid: trade-agent-pg
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: grafana_ro
+    isDefault: true
+    jsonData:
+      database: trade_agent
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false
+      maxOpenConns: 5
+    secureJsonData:
+      password: $GRAFANA_DB_PASSWORD
