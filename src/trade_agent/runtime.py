@@ -1,15 +1,19 @@
 """Ciclo de vida do agente.
 
-*Lock* exclusivo, migrações, recuperação na partida, reconciliação periódica, *heartbeat*
-e reação aos eventos do User Data Stream.
+*Lock* exclusivo, migrações, recuperação na partida, reconciliação periódica, *heartbeat*,
+reação aos eventos do User Data Stream e as tarefas de fundo montadas pela aplicação:
+periódicas (risco, coleta de notícias), no fechamento do candle (ciclo de decisão por
+perfil) e serviços de longa duração (comandos do Telegram), supervisionados.
 """
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from trade_agent.decision.schedule import run_on_candle_close
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.user_stream import (
     ExecutionReport,
@@ -21,12 +25,13 @@ from trade_agent.execution.ids import parse_client_id
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.migrate import upgrade_to_head
 from trade_agent.persistence.store import Severity, Store
-from trade_agent.reconcile.reconciler import Reconciler
+from trade_agent.reconcile.reconciler import Reconciler, ReconcileReport
 
 log = structlog.get_logger(__name__)
 
 type EventSource = Callable[[], AsyncIterator[UserEvent]]
 type Action = Callable[[], Awaitable[object]]
+type Service = Callable[[asyncio.Event], Awaitable[None]]
 
 
 def affected_decision(event: UserEvent) -> str | None:
@@ -53,6 +58,13 @@ class AgentRuntime:
         reconcile_interval_s: float = 300.0,
         heartbeat: Action | None = None,
         heartbeat_interval_s: float = 60.0,
+        periodic: Sequence[tuple[float, Action]] = (),
+        candle_jobs: Sequence[tuple[str, Action]] = (),
+        services: Sequence[Service] = (),
+        on_reconcile: Callable[[ReconcileReport], Awaitable[None]] | None = None,
+        candle_delay: timedelta = timedelta(seconds=20),
+        service_backoff_s: float = 5.0,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.db = db
         self.api = api
@@ -62,30 +74,48 @@ class AgentRuntime:
         self._reconcile_interval_s = reconcile_interval_s
         self._heartbeat = heartbeat
         self._heartbeat_interval_s = heartbeat_interval_s
+        self._periodic = list(periodic)
+        self._candle_jobs = list(candle_jobs)
+        self._services = list(services)
+        self._on_reconcile = on_reconcile
+        self._candle_delay = candle_delay
+        self._service_backoff_s = service_backoff_s
+        self._clock = clock
 
     async def run(self, stop: asyncio.Event) -> None:
         """Executa até ``stop``; levanta ``AlreadyRunningError`` se houver outra instância."""
         async with self.db.exclusive_lock():
             await upgrade_to_head(self.db.engine)
             offset = await self.api.rest.sync_time()
-            report = await self.reconciler.reconcile_all()
+            report = await self._reconcile()
             await self.store.record_event(
                 "agent.started",
                 Severity.INFO,
                 {"clock_offset_ms": offset, "reconcile": report.as_dict()},
             )
             log.info("agent.started", positions=report.positions, clock_offset_ms=offset)
-            periodic = [
-                asyncio.create_task(
-                    self._every(self._reconcile_interval_s, stop, self.reconciler.reconcile_all)
-                )
-            ]
+            jobs: list[tuple[float, Action]] = [(self._reconcile_interval_s, self._reconcile)]
             if self._heartbeat is not None:
-                periodic.append(
-                    asyncio.create_task(
-                        self._every(self._heartbeat_interval_s, stop, self._heartbeat)
+                jobs.append((self._heartbeat_interval_s, self._heartbeat))
+            periodic = [
+                asyncio.create_task(self._every(interval, stop, action))
+                for interval, action in [*jobs, *self._periodic]
+            ]
+            periodic += [
+                asyncio.create_task(
+                    run_on_candle_close(
+                        timeframe,
+                        stop,
+                        self._guarded_action(action),
+                        delay=self._candle_delay,
+                        clock=self._clock,
                     )
                 )
+                for timeframe, action in self._candle_jobs
+            ]
+            periodic += [
+                asyncio.create_task(self._supervise(service, stop)) for service in self._services
+            ]
             consumer = asyncio.create_task(self._consume(self._events)) if self._events else None
             try:
                 await stop.wait()
@@ -98,6 +128,33 @@ class AgentRuntime:
                 )
                 await self.store.record_event("agent.stopped", Severity.INFO)
                 log.info("agent.stopped")
+
+    async def _reconcile(self) -> ReconcileReport:
+        report = await self.reconciler.reconcile_all()
+        if self._on_reconcile is not None:
+            await self._on_reconcile(report)
+        return report
+
+    def _guarded_action(self, action: Action) -> Action:
+        async def guarded() -> object:
+            await self._guarded(action)
+            return None
+
+        return guarded
+
+    async def _supervise(self, service: Service, stop: asyncio.Event) -> None:
+        """Mantém um serviço de longa duração vivo: falhas são registradas e ele reinicia."""
+        while not stop.is_set():
+            try:
+                await service(stop)
+            except Exception as exc:
+                log.error("runtime.service_failed", error=repr(exc))
+                with contextlib.suppress(Exception):
+                    await self.store.record_event(
+                        "runtime.service_failed", Severity.HIGH, {"error": repr(exc)}
+                    )
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=self._service_backoff_s)
 
     async def _every(self, interval_s: float, stop: asyncio.Event, action: Action) -> None:
         while not stop.is_set():
@@ -120,7 +177,7 @@ class AgentRuntime:
         async for event in events():
             if isinstance(event, StreamConnected):
                 if event.reconnected:
-                    await self._guarded(self.reconciler.reconcile_all)
+                    await self._guarded(self._reconcile)
                 continue
             decision = affected_decision(event)
             if decision is not None:

@@ -1,0 +1,25 @@
+# Condições de parada (doc 03, §10.3). Ações: pause (volta após o cooldown ou manual),
+# halt (volta só com /resume) e flatten (vende tudo e termina em halt).
+# O teto de gasto com o LLM fica em config/research.yaml (budget.daily_usd): ao atingi-lo,
+# cada perfil degrada conforme llm.on_failure.
+
+global:
+  max_daily_loss_pct:      {value: 3,   action: pause, cooldown: 24h}   # sobre o capital gerido
+  max_drawdown_pct:        {value: 15,  action: halt}                   # a partir do pico
+  max_consecutive_losses:  {value: 4,   action: pause, cooldown: 12h}
+  btc_move_1h_pct:         {value: -6,  action: pause, cooldown: 4h}
+  quote_depeg_pct:         {value: 1.5, action: flatten}                # USDT fora da paridade
+  fear_greed_below:        {value: 10,  action: pause, cooldown: 24h}
+  api_error_rate_5m:       {value: 0.2, action: pause, cooldown: 30m}
+  reconcile_mismatch:      {action: pause}                              # até diagnóstico
+  profit_target_pct:       null                                         # ex.: {value: 30, action: halt}
+  trading_window_utc:      null                                         # ex.: ["00:00-23:59"]
+
+per_profile:
+  moderado:
+    max_daily_loss_pct:    {value: 2, action: pause, cooldown: 24h}
+
+pre_trade:
+  min_reward_risk: 1.5       # ativação do take-profit ÷ stop, após taxas de ida e volta
+  round_trip_fee_pct: 0.2
+  risk_tolerance_pct: 5

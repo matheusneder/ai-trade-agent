@@ -102,17 +102,17 @@ deploy/
 |-----|-----------|--------|
 | `user_data_stream` | contínuo | Eventos de ordem e saldo via WebSocket API (`userDataStream.subscribe.signature`); reconecta ao receber `serverShutdown` |
 | `heartbeat` | 1 min | Ping externo e snapshot de saúde |
-| `position_manager` | 1 min + eventos | Detecção de posição sem proteção, *timeouts*, *break-even*, saída por tempo |
+| `risk_check` | 1 min | Patrimônio do agente (capital + PnL realizado + aberto), BTC 1h, paridade do USDT, Fear & Greed, erros de API → condições de parada → `pause`/`halt`/`flatten` |
 | `reconcile` | 5 min + a cada reconexão | Compara banco × Binance e corrige |
-| `equity_snapshot` | 5 min | Patrimônio, exposição e *drawdown* por perfil |
 | `news_ingest` | 15 min | RSS, anúncios e delistagens Binance, Fear & Greed, *funding*/OI |
-| `universe_refresh` | 4 h | Filtros de universo e *tiers* |
-| `research_cycle` | 4 h + gatilhos | Analista LLM → `MarketView` |
-| `decision_cycle` | no fechamento do candle do perfil (ex.: 1h/4h) | Sinais → estratégia → risco → execução |
+| `universe_refresh` | até 6 h (cache) | Filtros de universo e *tiers* |
+| `research_cycle` | dentro do `decision_cycle`, só com setups ou posições | Analista LLM → `MarketView` (sem candidatos, vale a última leitura válida) |
+| `decision_cycle` | fechamento do candle do perfil + 20 s (ex.: 4h) | Sinais → analista → saídas por regra e *break-even* → entradas (validação pré-ordem) → OPOCO. Com `TA_TRADING_ENABLED=false`, roda em **simulação** (D-023) |
+| `telegram_commands` | contínuo (*long polling*) | `/status`, `/pause`, `/resume`, `/halt`, `/flatten` (D-022) |
 | `daily_report` | diário | Resumo no Telegram |
 | `backup` | diário | `pg_dump` criptografado para armazenamento externo |
 
-Cada `decision_cycle` tem uma **chave única** (`perfil + horário de fechamento do candle`). Se o processo reiniciar no meio do ciclo, o ciclo é refeito com segurança, porque as intenções já gravadas e os IDs determinísticos impedem duplicidade.
+Se o processo reiniciar no meio de um `decision_cycle`, o ciclo pode ser refeito com segurança: as intenções já gravadas e os IDs determinísticos impedem ordens duplicadas, e um ativo com posição ativa não recebe nova entrada (regra "um ativo por vez" e validação pré-ordem).
 
 ## 6. Ciclo de decisão
 
@@ -404,7 +404,6 @@ global:
   btc_move_1h_pct:         {value: -6,  action: pause,      cooldown: 4h}
   quote_depeg_pct:         {value: 1.5, action: flatten}                   # USDT fora da paridade
   fear_greed_below:        {value: 10,  action: pause,      cooldown: 24h}
-  llm_daily_budget_usd:    {value: 5,   action: ta_only}
   api_error_rate_5m:       {value: 0.2, action: pause,      cooldown: 30m}
   reconcile_mismatch:      {action: pause}                                 # até diagnóstico
   profit_target_pct:       {value: null, action: halt}                     # opcional: meta atingida
@@ -413,6 +412,8 @@ per_profile:
   moderado:
     max_daily_loss_pct:    {value: 2, action: pause, cooldown: 24h}
 ```
+
+O teto de gasto com o LLM fica em `config/research.yaml` (`budget.daily_usd`, D-019): ao atingi-lo, o analista não é chamado e cada perfil degrada conforme `llm.on_failure`. Semântica (D-024): as perdas e a meta são medidas sobre o **patrimônio do agente** (capital gerido + PnL realizado + PnL aberto), e não sobre o saldo da conta; gatilhos automáticos só **escalam** o estado; um `flatten` termina em `HALTED` marcado, e o mesmo gatilho não o repete até o `/resume`.
 
 **Kill switch:** `/halt` (mantém as proteções) e `/flatten` (zera as posições, com código de confirmação) no Telegram. Uma variável de ambiente `TRADING_ENABLED=false` impede qualquer envio de ordem desde a partida.
 
@@ -546,3 +547,6 @@ volumes: {pgdata: {}, grafana: {}}
 | D-019 | 26/09/2026 | Analista em **duas etapas**: (a) verificação web opcional em texto livre com fontes; (b) leitura **estruturada sem ferramentas** (JSON Schema). Triagem das manchetes com `claude-sonnet-5`; leitura com `claude-opus-5` (*effort* `high`); teto de **US$ 5/dia** | Decisão do usuário (modelos e orçamento). A documentação não garante *structured outputs* junto com ferramentas de servidor; separar as etapas também isola o conteúdo web não confiável da etapa que decide | Uma única chamada com busca e schema |
 | D-020 | 26/09/2026 | Fontes do MVP (todas públicas, sem chave): anúncios do site da Binance, RSS (CoinDesk, Cointelegraph, The Block, Decrypt), Fear & Greed (alternative.me) e *funding*/*open interest* da Binance Futures. Configuradas em `config/research.yaml` | Decisão do usuário; cada fonte falha de forma isolada | CryptoPanic e outras fontes pagas |
 | D-021 | 26/09/2026 | Avaliação do analista com **31 casos rotulados** (19 históricos com manchetes parafraseadas e 12 sintéticos com ativos fictícios, incluindo injeção de prompt), rodando só a etapa (b), **sem busca web** | Evita viés retrospectivo da busca. Os casos sintéticos reduzem o efeito de o modelo já conhecer os eventos históricos | Avaliar com busca web; só casos históricos |
+| D-022 | 26/09/2026 | Telegram por **cliente próprio fino** (Bot API com `sendMessage` e `getUpdates` em *long polling*, via httpx). Um único `chat_id` autorizado; outros chats são ignorados e registrados; `/flatten` exige código de confirmação (2 min); o *offset* é persistido antes de executar o comando (no máximo uma execução) | Decisão do usuário: poucas linhas, sem framework, testável com respx (análogo à D-001) | python-telegram-bot |
+| D-023 | 26/09/2026 | Ciclo de decisão **no fechamento do candle** de cada perfil (+20 s), como no laboratório. Com a trava `TA_TRADING_ENABLED` desligada, o agente roda em **simulação**: decide e registra, sem enviar ordens. O analista só é chamado quando há setups ou posições | Decisão do usuário; a simulação permite observar o agente no Demo/produção sem risco | Intervalo fixo |
+| D-024 | 26/09/2026 | Condições de parada com os valores do doc 03 §10.3, medidas sobre o **patrimônio do agente** (capital gerido + PnL realizado + aberto, a preço de venda); abertura do dia e pico persistidos. Paridade do USDT pela mediana de USDC/USDT e FDUSD/USDT. Estados só escalam por gatilho; `flatten` → `HALTED` marcado (não se repete) | Decisão do usuário (valores). Saldos que não pertencem ao agente não distorcem as perdas | Patrimônio da conta inteira |

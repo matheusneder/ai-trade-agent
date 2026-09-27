@@ -68,6 +68,32 @@ class RateLimitUsage:
         self.order_count_1d = _int_header(headers, "x-mbx-order-count-1d", self.order_count_1d)
 
 
+class CallHealth:
+    """Janela deslizante de chamadas para a taxa de **falhas de infraestrutura** (sem
+    conexão, resultado desconhecido, HTTP 5xx, 418 e 429). Rejeições de negócio (4xx)
+    não contam como falha: são respostas válidas da exchange."""
+
+    def __init__(
+        self, *, window_s: float = 300.0, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self._window_s = window_s
+        self._clock = clock
+        self._calls: list[tuple[float, bool]] = []
+
+    def record(self, ok: bool) -> None:
+        now = self._clock()
+        self._calls = [c for c in self._calls if now - c[0] <= self._window_s]
+        self._calls.append((now, ok))
+
+    def error_rate(self, *, min_calls: int = 5) -> float:
+        """Fração de falhas na janela; 0 com menos de ``min_calls`` chamadas."""
+        now = self._clock()
+        recent = [ok for at, ok in self._calls if now - at <= self._window_s]
+        if len(recent) < min_calls:
+            return 0.0
+        return recent.count(False) / len(recent)
+
+
 def _int_header(headers: httpx.Headers, name: str, default: int | None) -> int | None:
     raw = headers.get(name)
     if raw is None:
@@ -112,6 +138,7 @@ class BinanceRestClient:
         self._clock = clock
         self._time_offset_ms = 0
         self.usage = RateLimitUsage()
+        self.health = CallHealth()
 
     # ------------------------------------------------------------------ ciclo de vida
     async def __aenter__(self) -> Self:
@@ -195,12 +222,16 @@ class BinanceRestClient:
         try:
             response = await self._http.request(method, url, headers=headers)
         except _NOT_SENT_ERRORS as exc:
+            self.health.record(ok=False)
             raise BinanceConnectionError(f"falha de conexão em {method} {url}: {exc!r}") from exc
         except httpx.TransportError as exc:
+            self.health.record(ok=False)
             raise BinanceUnknownStatusError(
                 f"resultado desconhecido em {method} {url}: {exc!r}"
             ) from exc
 
+        status = response.status_code
+        self.health.record(ok=status < 500 and status not in {418, 429})
         self.usage.update(response.headers)
         if response.is_success:
             return response.json()

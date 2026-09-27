@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     )
     """Chave da API Claude (analista de mercado, Fase 4)."""
     research_config: Path = Path("config/research.yaml")
+    strategy_config: Path = Path("config/profiles.yaml")
+    stop_conditions: Path = Path("config/stop_conditions.yaml")
+
+    telegram_bot_token: SecretStr | None = None
+    """Token do bot (@BotFather) para alertas e comandos do operador."""
+    telegram_chat_id: int | None = None
+    """Único chat autorizado a receber alertas e enviar comandos."""
 
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
@@ -69,6 +76,8 @@ class Settings(BaseSettings):
         "binance_api_secret",
         "database_url",
         "anthropic_api_key",
+        "telegram_bot_token",
+        "telegram_chat_id",
         mode="before",
     )
     @classmethod

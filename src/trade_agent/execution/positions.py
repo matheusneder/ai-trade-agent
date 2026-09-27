@@ -82,6 +82,8 @@ class ExitReason(StrEnum):
     RESIDUAL = "residual"
     """Saldo remanescente abaixo do mínimo negociável (não pode ser protegido nem vendido)."""
     ENTRY_REJECTED = "entry_rejected"
+    RISK = "risk"
+    """Encerramento por condição de parada (*flatten*)."""
 
 
 # ---------------------------------------------------------------------- política (JSON)

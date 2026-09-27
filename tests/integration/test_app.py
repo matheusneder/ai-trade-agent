@@ -47,6 +47,16 @@ async def test_build_runtime_wires_user_stream(postgres_url: str) -> None:
         assert runtime._events is None
 
 
+async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -> None:
+    settings = _settings(postgres_url, anthropic_api_key="sk-test")
+    async with (
+        httpx.AsyncClient() as aux,
+        build_runtime(settings, aux_http=aux, user_stream=False) as runtime,
+    ):
+        assert [tf for tf, _ in runtime._candle_jobs] == ["4h"]  # só o conservador
+        assert len(runtime._periodic) == 2  # risco e coleta de notícias
+
+
 async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Database) -> None:
     fake = FakeBinance()
     stop = asyncio.Event()
