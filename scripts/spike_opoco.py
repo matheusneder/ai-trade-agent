@@ -124,12 +124,20 @@ class Spike:
         data = await self.c.public("GET", "/api/v3/ticker/bookTicker", {"symbol": self.symbol})
         return Decimal(data["bidPrice"]), Decimal(data["askPrice"])
 
-    async def free(self, asset: str) -> Decimal:
+    async def _balance(self, asset: str) -> tuple[Decimal, Decimal]:
         account = await self.c.signed("GET", "/api/v3/account", {"omitZeroBalances": "true"})
         for balance in account["balances"]:
             if balance["asset"] == asset:
-                return Decimal(balance["free"])
-        return Decimal(0)
+                return Decimal(balance["free"]), Decimal(balance["locked"])
+        return Decimal(0), Decimal(0)
+
+    async def free(self, asset: str) -> Decimal:
+        return (await self._balance(asset))[0]
+
+    async def holding(self, asset: str) -> Decimal:
+        """Saldo total (livre + travado): o OCO pendente trava o ativo recebido."""
+        free, locked = await self._balance(asset)
+        return free + locked
 
     def qty_for(self, price: Decimal) -> Decimal:
         notional = max(self.rules.min_notional * 2, Decimal(15))
@@ -177,6 +185,7 @@ class Spike:
     async def scenario_a(self, base: str) -> None:
         print("Cenário A — OPOCO FOK + TAKE_PROFIT(ativação+trailing) / STOP_LOSS fixo")
         before = await self.free(base)
+        held_before = await self.holding(base)
         _, ask = await self.book()
         list_cid = self.cid("A", "L")
         params = {
@@ -226,12 +235,14 @@ class Spike:
             tp.get("trailingDelta"),
         )
         self.r.check("A", "SL armado (NEW)", sl.get("status") == "NEW", sl.get("status"))
-        received = await self.free(base) - before
+        # o recebido fica travado pelo OCO pendente: medir pelo saldo total, não pelo livre
+        received = await self.holding(base) - held_before
+        pending = Decimal(tp.get("origQty", "0"))
         self.r.check(
             "A",
             "qtd pendente = qtd recebida (OPO)",
-            Decimal(tp.get("origQty", "0")) <= received + self.rules.step,
-            {"pending": tp.get("origQty"), "received": str(received)},
+            received > 0 and abs(pending - received) <= self.rules.step,
+            {"pending": str(pending), "received": str(received)},
         )
 
         # Idempotência: mesmo listClientOrderId com a lista ainda aberta.

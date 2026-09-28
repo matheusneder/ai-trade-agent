@@ -583,8 +583,18 @@ class FakeBinance:
             ],
         }
         if reports:
-            data["orderReports"] = [o.as_json() for o in orders]
+            data["orderReports"] = [self._report(order_list, o) for o in orders]
         return data
+
+    @staticmethod
+    def _report(order_list: FakeOrderList, order: FakeOrder) -> dict[str, Any]:
+        """Como na Binance real: na resposta do envio de uma lista OPO, as pernas pendentes
+        vêm ``PENDING_NEW`` e **sem** ``origQty`` (definida só quando a entrada executa)."""
+        report = order.as_json()
+        if order_list.opo and order.order_id in order_list.pending_ids:
+            report.pop("origQty")
+            report["status"] = "PENDING_NEW"
+        return report
 
     def _sell_leg(
         self,

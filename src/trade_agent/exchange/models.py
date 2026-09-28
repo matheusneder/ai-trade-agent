@@ -84,7 +84,9 @@ class Order(_Model):
     order_list_id: int = Field(default=-1, alias="orderListId")
     client_order_id: str = Field(alias="clientOrderId")
     price: Decimal = Decimal(0)
-    orig_qty: Decimal = Field(alias="origQty")
+    orig_qty: Decimal = Field(default=Decimal(0), alias="origQty")
+    """Ausente nas pernas pendentes de OPO/OPOCO na resposta do envio: a quantidade só é
+    definida quando a entrada executa (visto no Spot Testnet em 28/09/2026)."""
     executed_qty: Decimal = Field(default=Decimal(0), alias="executedQty")
     cummulative_quote_qty: Decimal = Field(default=Decimal(0), alias="cummulativeQuoteQty")
     status: OrderStatus
