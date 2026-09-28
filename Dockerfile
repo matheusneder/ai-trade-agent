@@ -18,6 +18,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
+# Perfis, disjuntores e analista (no compose, config/ é montado por cima para ajustes sem rebuild)
+COPY config ./config
+
 RUN useradd --create-home --uid 10001 agent
 USER agent
 

@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from structlog.testing import capture_logs
 
 from tests.support.candles import HOUR_MS, ohlcv, raw_klines, uptrend_with_pullback
 from tests.support.claude import FakeClaude, research_config
@@ -299,6 +300,19 @@ async def test_flatten_sells_filled_and_cancels_pending(
     monkeypatch.setattr(service, "close_position", broken)
     assert await engine.flatten(GLOBAL) == 0
     assert "flatten.failed" in [e.kind for e in await store.recent_events()]
+
+
+async def test_empty_universe_is_reported(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    fake.volumes.clear()  # como no Spot Testnet: nada passa no filtro de volume
+    engine, _ = _engine(api, service, store, dry_run=True)
+    with capture_logs() as logs:
+        report = await engine.run_profile("conservador")
+    assert report.evaluated == 0 and report.opened == ()
+    (warning,) = [e for e in logs if e["event"] == "decision.empty_universe"]
+    assert warning["excluded"] == {"volume insuficiente": 3}
 
 
 async def test_universe_cache_ttl(api: BinanceSpotApi, fake: FakeBinance) -> None:

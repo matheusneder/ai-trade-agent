@@ -79,7 +79,7 @@ O agente precisa de PostgreSQL e das chaves no `.env`. Na partida, ele aplica as
 - coleta notícias a cada 15 minutos;
 - roda o ciclo de decisão de cada perfil habilitado no fechamento do candle (conservador: a cada 4h).
 
-Com `TA_TRADING_ENABLED=false` (padrão), o agente roda em **simulação**: decide e registra as entradas e saídas como eventos, sem enviar ordens. Com o Telegram configurado (`TA_TELEGRAM_BOT_TOKEN` e `TA_TELEGRAM_CHAT_ID`), ele envia alertas e aceita `/status`, `/pause`, `/resume`, `/halt` e `/flatten` (este com código de confirmação).
+Use o **Demo Mode** (`TA_BINANCE_ENV=demo`) para rodar o agente: o Spot Testnet tem só ~20 dias de histórico, e o universo fica vazio (ver [`doc/runbook.md`](doc/runbook.md)). Com `TA_TRADING_ENABLED=false` (padrão), o agente roda em **simulação**: decide e registra as entradas e saídas como eventos, sem enviar ordens. Com o Telegram configurado (`TA_TELEGRAM_BOT_TOKEN` e `TA_TELEGRAM_CHAT_ID`), ele envia alertas e aceita `/status`, `/pause`, `/resume`, `/halt` e `/flatten` (este com código de confirmação).
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d postgres   # banco local
