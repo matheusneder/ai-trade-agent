@@ -51,7 +51,6 @@ from trade_agent.telemetry.recorder import TelemetryRecorder
 
 RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
-TELEMETRY_INTERVAL_S = 300.0
 
 
 @dataclass
@@ -129,7 +128,7 @@ def assemble(
 
     async def check_risk() -> None:
         snapshot = await monitor.snapshot()
-        telemetry.observe(snapshot)
+        await telemetry.observe(snapshot)
         await guard.apply(evaluate(conditions, snapshot))
 
     symbols = [f"{asset}{strategy.account.quote_asset}" for asset in names]
@@ -202,11 +201,7 @@ def assemble(
         telemetry=telemetry,
         commands=commands,
         heartbeat=heartbeat,
-        periodic=[
-            (RISK_INTERVAL_S, check_risk),
-            (INGEST_INTERVAL_S, ingest),
-            (TELEMETRY_INTERVAL_S, telemetry.record),
-        ],
+        periodic=[(RISK_INTERVAL_S, check_risk), (INGEST_INTERVAL_S, ingest)],
         candle_jobs=[
             (profile.timeframe, decide(name))
             for name, profile in strategy.enabled_profiles().items()

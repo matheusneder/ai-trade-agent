@@ -11,6 +11,7 @@ como eventos e nenhuma ordem é enviada.
 """
 
 import time
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -201,6 +202,9 @@ class DecisionEngine:
         state = await self._guard.effective(name)
         universe = await self._universe.get()
         members = [m for m in universe.members if profile.tier_limit(m.tier) > 0]
+        if not members:
+            reasons = Counter(universe.excluded.values()).most_common(3)
+            log.warning("decision.empty_universe", profile=name, excluded=dict(reasons))
         signals = await self._signals(members, profile, self._api.rest.now_ms())
 
         active = await self._store.active_positions()

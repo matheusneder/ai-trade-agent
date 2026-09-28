@@ -35,6 +35,7 @@ services:
       TA_LOG_FORMAT: json
     volumes:
       - ../secrets:/app/secrets:ro
+      - ../config:/app/config:ro   # perfis, disjuntores e analista: edite e reinicie o agente
     depends_on:
       postgres:
         condition: service_healthy
