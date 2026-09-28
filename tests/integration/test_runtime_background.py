@@ -1,6 +1,7 @@
 """Tarefas de fundo do runtime e composição da aplicação (Fase 5)."""
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -39,6 +40,12 @@ async def test_background_jobs_services_and_reconcile_hook(
     async def periodic() -> None:
         ticks.append("periodic")
 
+    async def hourly() -> None:
+        ticks.append("imediato")  # intervalo longo: só roda por ser executado na partida
+
+    async def heartbeat() -> None:
+        ticks.append("heartbeat")
+
     async def on_candle() -> None:
         ticks.append("candle")
         raise RuntimeError("falha no ciclo")  # registrada, não derruba o agendamento
@@ -51,7 +58,7 @@ async def test_background_jobs_services_and_reconcile_hook(
 
     async def on_reconcile(report: ReconcileReport) -> None:
         reports.append(report)
-        if len(reports) >= 2 and "candle" in ticks and "periodic" in ticks:
+        if len(reports) >= 2 and {"candle", "periodic", "imediato", "heartbeat"} <= set(ticks):
             stop.set()
 
     runtime = AgentRuntime(
@@ -60,7 +67,9 @@ async def test_background_jobs_services_and_reconcile_hook(
         store=store,
         reconciler=Reconciler(api, service, store),
         reconcile_interval_s=0.02,
-        periodic=[(0.01, periodic)],
+        periodic=[(0.01, periodic), (3600, hourly)],
+        heartbeat=heartbeat,
+        heartbeat_interval_s=3600,
         candle_jobs=[("1m", on_candle)],
         services=[flaky_service],
         on_reconcile=on_reconcile,
@@ -70,6 +79,7 @@ async def test_background_jobs_services_and_reconcile_hook(
     )
     await asyncio.wait_for(runtime.run(stop), timeout=15)
     assert len(attempts) >= 2  # o serviço foi reiniciado após a falha
+    assert ticks.count("imediato") == 1 and ticks.count("heartbeat") == 1
     kinds = [e.kind for e in await store.recent_events(200)]
     assert "runtime.service_failed" in kinds and "runtime.task_failed" in kinds
 
@@ -94,16 +104,20 @@ async def test_assemble_without_telegram(
         assert isinstance(parts.notifier, LogNotifier) and parts.commands is None
         assert parts.services == []
         assert [tf for tf, _ in parts.candle_jobs] == ["4h", "1h"]  # perfis habilitados
-        (risk_s, check_risk), (ingest_s, ingest), (telemetry_s, record) = parts.periodic
-        assert (risk_s, ingest_s, telemetry_s) == (60.0, 900.0, 300.0)
+        (risk_s, check_risk), (ingest_s, ingest) = parts.periodic
+        assert (risk_s, ingest_s) == (60.0, 900.0)
         assert parts.heartbeat is None
-        assert await record() is False  # nada observado ainda
+        assert await parts.telemetry.record() is False  # nada observado ainda
         fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
-        await check_risk()
+        await check_risk()  # a primeira verificação já grava a telemetria
         assert (await parts.guard.state(GLOBAL)).state is OpState.RUNNING
-        assert await record() is True
         saved = await parts.telemetry.last_recorded()
         assert saved is not None and saved.states["global"] == "running"
+        latest = parts.telemetry.latest
+        assert latest is not None
+        assert await parts.telemetry.observe(latest) is False  # dentro do intervalo
+        later = replace(latest, now=latest.now + timedelta(minutes=5))
+        assert await parts.telemetry.observe(later) is True
         await ingest()
         parts.research.metrics = MarketMetrics(fear_greed=FearGreed(5, "Extreme Fear"))
         await check_risk()  # Fear & Greed abaixo de 10 → pausa

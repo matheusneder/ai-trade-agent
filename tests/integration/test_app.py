@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 
 from tests.support.fake_binance import FakeBinance
 from trade_agent import cli
@@ -54,27 +55,46 @@ async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -
         build_runtime(settings, aux_http=aux, user_stream=False) as runtime,
     ):
         assert [tf for tf, _ in runtime._candle_jobs] == ["4h"]  # só o conservador
-        assert len(runtime._periodic) == 3  # risco, notícias e telemetria
+        assert len(runtime._periodic) == 2  # risco (com telemetria) e notícias
         assert runtime._heartbeat is None  # sem TA_HEALTHCHECK_URL
 
 
 async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Database) -> None:
     fake = FakeBinance()
+    fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
+    offline: list[str] = []
+
+    def no_internet(request: httpx.Request) -> httpx.Response:
+        offline.append(request.url.host)  # a coleta de notícias roda já na partida
+        return httpx.Response(503)
+
     stop = asyncio.Event()
-    async with httpx.AsyncClient(base_url="https://fake.binance", transport=fake.transport) as http:
+    async with (
+        httpx.AsyncClient(base_url="https://fake.binance", transport=fake.transport) as http,
+        httpx.AsyncClient(transport=httpx.MockTransport(no_internet)) as aux,
+    ):
         task = asyncio.create_task(
-            run_agent(_settings(postgres_url), stop=stop, http_client=http, user_stream=False)
+            run_agent(
+                _settings(postgres_url),
+                stop=stop,
+                http_client=http,
+                aux_http=aux,
+                user_stream=False,
+            )
         )
         store = Store(db)
-        for _ in range(100):
-            if any(e.kind == "agent.started" for e in await store.recent_events()):
+        for _ in range(200):
+            recorded = await Store(db).get_checkpoint("risk.equity")
+            if recorded is not None and offline:
                 break
             await asyncio.sleep(0.05)
         stop.set()
         await asyncio.wait_for(task, timeout=10)
     kinds = [e.kind for e in await store.recent_events()]
-    assert kinds[:2] == ["agent.stopped", "agent.started"]
+    assert kinds[0] == "agent.stopped" and "agent.started" in kinds
+    assert "runtime.task_failed" not in kinds  # risco e coleta rodaram já na partida, sem falha
     assert fake.calls("GET", "/api/v3/time")
+    assert "www.coindesk.com" in offline  # nenhum acesso real à internet nos testes
 
 
 async def test_install_signal_handlers_is_safe() -> None:
@@ -106,6 +126,8 @@ def _run_cli(
         (None, 0, ""),
         (AlreadyRunningError("outra instância"), 1, "outra instância"),
         (BinanceConfigurationError("sem banco"), 1, "sem banco"),
+        (FileNotFoundError("config/profiles.yaml"), 1, "Configuração ausente ou inválida"),
+        (yaml.YAMLError("tabulação inválida"), 1, "tabulação inválida"),
     ],
 )
 def test_cli_run_command(

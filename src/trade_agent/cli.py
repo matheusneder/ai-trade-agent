@@ -24,6 +24,9 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from decimal import Decimal
 from typing import Any, TextIO
 
+import yaml
+from pydantic import ValidationError
+
 from trade_agent.app import run_agent
 from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.api import BinanceSpotApi
@@ -217,6 +220,9 @@ async def _run_agent(settings: Settings, err: TextIO) -> int:
         await run_agent(settings)
     except (AlreadyRunningError, BinanceError) as exc:
         err.write(f"Erro: {exc}\n")
+        return 1
+    except (FileNotFoundError, ValidationError, yaml.YAMLError) as exc:
+        err.write(f"Configuração ausente ou inválida (pasta config/): {exc}\n")
         return 1
     return 0
 

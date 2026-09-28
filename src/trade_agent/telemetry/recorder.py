@@ -1,7 +1,9 @@
-"""Gravação periódica do último ``RiskSnapshot`` (a verificação de risco roda a cada
-minuto; a telemetria persiste uma foto a cada poucos minutos para os dashboards)."""
+"""Gravação periódica do ``RiskSnapshot``: a verificação de risco roda a cada minuto e
+entrega cada snapshot; a telemetria persiste o primeiro (já na partida) e depois um a cada
+``interval`` para os dashboards."""
 
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
@@ -25,15 +27,24 @@ class TelemetryRecorder:
         guard: RiskGuard,
         rest: BinanceRestClient,
         scopes: Sequence[str],
+        interval: timedelta = timedelta(minutes=5),
     ) -> None:
         self._db = db
         self._guard = guard
         self._rest = rest
         self._scopes = [GLOBAL, *scopes]
+        self._interval = interval
+        self._recorded_at: datetime | None = None
         self.latest: RiskSnapshot | None = None
 
-    def observe(self, snapshot: RiskSnapshot) -> None:
+    async def observe(self, snapshot: RiskSnapshot) -> bool:
+        """Recebe o snapshot da verificação de risco; persiste se a foto estiver vencida."""
         self.latest = snapshot
+        if self._recorded_at is not None and snapshot.now - self._recorded_at < self._interval:
+            return False
+        await self.record()
+        self._recorded_at = snapshot.now
+        return True
 
     async def record(self) -> bool:
         """Persiste o último snapshot observado; ``False`` se ainda não houver nenhum."""

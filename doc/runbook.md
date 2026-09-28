@@ -16,6 +16,10 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
 | Telemetria | Grafana → *Saúde técnica* → "Segundos desde a última foto" | abaixo de 360 s |
 | Heartbeat | painel do Healthchecks.io | ping a cada minuto |
 
+**Ambiente:** o **Spot Testnet** serve para validar ordens (spike e `pytest -m live`), mas não para o ciclo de decisão. Ele é reiniciado periodicamente e tem só ~20 dias de histórico (os sinais precisam de 201 candles e o universo, de 30 dias), além de volumes artificiais. O universo fica vazio e o log mostra `decision.empty_universe`. Para o *paper trading*, use o **Demo Mode** (`TA_BINANCE_ENV=demo`, com chaves criadas em demo.binance.com), que usa dados reais de mercado.
+
+As tarefas periódicas (risco, telemetria, notícias e heartbeat) rodam já na partida e depois a cada intervalo. O primeiro ciclo de decisão acontece no próximo fechamento do candle de 4h (00, 04, 08, 12, 16 e 20 UTC).
+
 O Grafana escuta só em `127.0.0.1:3000`. Numa VPS, use um túnel: `ssh -L 3000:127.0.0.1:3000 usuario@vps`.
 
 ## 2. Incidentes
@@ -82,5 +86,6 @@ Escopo: `global` (padrão) ou o nome do perfil. Só o `TA_TELEGRAM_CHAT_ID` conf
   ```
 
 - **Dashboards:** edite `scripts/grafana_dashboards.py` e rode `uv run python -m scripts.grafana_dashboards`. Um teste falha se os JSON versionados ficarem desatualizados.
+- **Configuração:** `config/` é montado no contêiner do agente. Edite os YAML e rode `docker compose ... restart agent` (sem rebuild).
 - **Mudança de parâmetros:** sempre via laboratório (`lab/walk_forward.py`) e *paper trading* no Demo antes de produção.
 - **Backup:** `docker compose ... exec postgres pg_dump -U trade_agent trade_agent | gzip > backup.sql.gz`, guardado fora da VPS.

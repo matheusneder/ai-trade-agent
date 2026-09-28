@@ -94,12 +94,17 @@ class AgentRuntime:
                 {"clock_offset_ms": offset, "reconcile": report.as_dict()},
             )
             log.info("agent.started", positions=report.positions, clock_offset_ms=offset)
-            jobs: list[tuple[float, Action]] = [(self._reconcile_interval_s, self._reconcile)]
+            # a reconciliação acabou de rodar; as demais tarefas rodam já na partida
+            # (sem esperar um intervalo inteiro sem risco, telemetria ou notícias)
+            jobs: list[tuple[float, Action, bool]] = [
+                (self._reconcile_interval_s, self._reconcile, False)
+            ]
             if self._heartbeat is not None:
-                jobs.append((self._heartbeat_interval_s, self._heartbeat))
+                jobs.append((self._heartbeat_interval_s, self._heartbeat, True))
+            jobs += [(interval, action, True) for interval, action in self._periodic]
             periodic = [
-                asyncio.create_task(self._every(interval, stop, action))
-                for interval, action in [*jobs, *self._periodic]
+                asyncio.create_task(self._every(interval, stop, action, immediate=immediate))
+                for interval, action, immediate in jobs
             ]
             periodic += [
                 asyncio.create_task(
@@ -156,7 +161,11 @@ class AgentRuntime:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=self._service_backoff_s)
 
-    async def _every(self, interval_s: float, stop: asyncio.Event, action: Action) -> None:
+    async def _every(
+        self, interval_s: float, stop: asyncio.Event, action: Action, *, immediate: bool = False
+    ) -> None:
+        if immediate:
+            await self._guarded(action)
         while not stop.is_set():
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval_s)
