@@ -52,6 +52,8 @@ uv run python scripts/spike_opoco.py --env-file .env --symbol ETHUSDT
 
 O script recusa o ambiente `prod`. Os resultados brutos ficam em `var/spike/`.
 
+Resultado da execução no Spot Testnet (19/19) e achados: [`doc/spike-opoco.md`](doc/spike-opoco.md).
+
 ## CLI de operação manual
 
 Consultas e ordens protegidas (Testnet/Demo). O envio de ordens exige `TA_TRADING_ENABLED=true`; em produção, também `--confirm-prod`.
