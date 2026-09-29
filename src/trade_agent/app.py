@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import anthropic
 import httpx
+import structlog
 
 from trade_agent.config.settings import Settings
 from trade_agent.decision.engine import DecisionEngine, UniverseCache
@@ -51,6 +52,8 @@ from trade_agent.telemetry.recorder import TelemetryRecorder
 
 RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -191,6 +194,16 @@ def assemble(
         Heartbeat(http, settings.healthcheck_url.get_secret_value())
         if settings.healthcheck_url is not None
         else None
+    )
+    log.debug(
+        "app.assembled",
+        env=settings.binance_env.value,
+        dry_run=not settings.trading_enabled,
+        profiles=list(strategy.enabled_profiles()),
+        telegram=commands is not None,
+        heartbeat=heartbeat is not None,
+        llm=llm is not None,
+        llm_budget_usd=str(research_config.budget.daily_usd),
     )
     return AgentParts(
         guard=guard,

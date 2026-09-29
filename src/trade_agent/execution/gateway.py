@@ -77,6 +77,7 @@ class ExecutionGateway:
         self, kind: OrderListKind, params: Mapping[str, ParamValue]
     ) -> OrderList:
         list_id = str(params["listClientOrderId"])
+        log.debug("order_list.submit", kind=kind, list_id=list_id, symbol=params.get("symbol"))
         return await self._submit(
             list_id,
             lambda: self.api.place_order_list(kind, params),
@@ -85,6 +86,14 @@ class ExecutionGateway:
 
     async def submit_order(self, params: Mapping[str, ParamValue]) -> Order:
         symbol, client_id = str(params["symbol"]), str(params["newClientOrderId"])
+        log.debug(
+            "order.submit",
+            symbol=symbol,
+            client_id=client_id,
+            side=params.get("side"),
+            type=params.get("type"),
+            quantity=params.get("quantity"),
+        )
         return await self._submit(
             client_id,
             lambda: self.api.new_order(params),
@@ -100,7 +109,7 @@ class ExecutionGateway:
         attempt = 0
         while True:
             try:
-                return await send()
+                result = await send()
             except BinanceConnectionError:
                 # A requisição não saiu da máquina: reenviar é seguro.
                 if attempt >= self._connection_retries:
@@ -111,6 +120,9 @@ class ExecutionGateway:
             except BinanceUnknownStatusError:
                 log.warning("order.unknown_status", client_id=client_id)
                 return await self._confirm(client_id, lookup)
+            else:
+                log.debug("order.accepted", client_id=client_id, retries=attempt)
+                return result
 
     async def _confirm[T](self, client_id: str, lookup: Callable[[], Awaitable[T | None]]) -> T:
         for attempt in range(self._confirm_attempts):
@@ -119,7 +131,14 @@ class ExecutionGateway:
             try:
                 found = await lookup()
             except (BinanceUnknownStatusError, BinanceConnectionError):
+                log.debug("order.confirm_lookup_failed", client_id=client_id, attempt=attempt)
                 continue
+            log.debug(
+                "order.confirm_lookup",
+                client_id=client_id,
+                attempt=attempt,
+                found=found is not None,
+            )
             if found is not None:
                 log.info("order.confirmed_after_unknown", client_id=client_id)
                 return found
@@ -128,6 +147,7 @@ class ExecutionGateway:
     # ------------------------------------------------------------------ cancelamento
     async def cancel_order_list(self, symbol: str, list_client_order_id: str) -> OrderList | None:
         """Cancela a lista; ``None`` se ela já não estava ativa (executada/expirada)."""
+        log.debug("order_list.cancel", symbol=symbol, list_id=list_client_order_id)
         try:
             return await self.api.cancel_order_list(
                 symbol, list_client_order_id=list_client_order_id
@@ -151,6 +171,12 @@ class ExecutionGateway:
         Se o OCO atual já tinha terminado (TP/SL executado na Binance), nada é enviado e o
         resultado indica ``already_closed``.
         """
+        log.debug(
+            "protection.replace",
+            symbol=symbol,
+            current_list_id=current_list_id,
+            new_list_id=new_oco_params.get("listClientOrderId"),
+        )
         cancelled = await self.cancel_order_list(symbol, current_list_id)
         if cancelled is None:
             return ProtectionReplacement(protection=None, already_closed=True)
@@ -177,6 +203,7 @@ class ExecutionGateway:
 
         Retorna ``None`` se a proteção já havia encerrado a posição na Binance.
         """
+        log.debug("position.close_submit", symbol=symbol, list_id=protection_list_id)
         if protection_list_id is not None:
             cancelled = await self.cancel_order_list(symbol, protection_list_id)
             if cancelled is None:

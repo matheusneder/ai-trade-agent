@@ -185,6 +185,19 @@ async def build_universe(api: BinanceSpotApi, config: UniverseConfig) -> Univers
     for symbol in ranked:
         daily = await api.klines(symbol, "1d", limit=config.min_history_days)
         history[symbol] = len(daily)
-    return select_universe(
+    universe = select_universe(
         rules, tickers, books, delisted=delisted, history_days=history, config=config
     )
+    tiers: dict[str, int] = {}
+    for member in universe.members:
+        tiers[member.tier.value] = tiers.get(member.tier.value, 0) + 1
+    log.debug(
+        "universe.built",
+        symbols=len(rules),
+        prefiltered=len(ranked),
+        members=len(universe.members),
+        tiers=tiers,
+        excluded=len(universe.excluded),
+        delisted=len(delisted),
+    )
+    return universe

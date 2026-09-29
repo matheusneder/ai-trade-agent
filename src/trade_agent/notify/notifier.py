@@ -36,3 +36,5 @@ class TelegramNotifier:
             await self._bot.send_message(self._chat_id, f"{_LABEL[severity]} {text}")
         except TelegramError as exc:
             log.error("alert.telegram_failed", error=str(exc), text=text)
+        else:
+            log.debug("alert.sent", severity=severity.value, chars=len(text))

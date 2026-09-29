@@ -22,6 +22,27 @@ As tarefas periódicas (risco, telemetria, notícias e heartbeat) rodam já na p
 
 O Grafana escuta só em `127.0.0.1:3000`. Numa VPS, use um túnel: `ssh -L 3000:127.0.0.1:3000 usuario@vps`.
 
+### 1.1 Logs e nível DEBUG
+
+`TA_LOG_LEVEL=DEBUG` no `.env` (depois `docker compose ... up -d agent`) mostra o detalhe de cada etapa. `INFO` volta ao resumo. Os logs em JSON trazem um campo `event`, filtrável:
+
+| Evento | O que mostra |
+|--------|--------------|
+| `rest.request` / `rest.request_failed` | método, caminho (sem *query*), status, latência, peso usado |
+| `risk.snapshot` / `risk.evaluated` / `risk.hit_unchanged` | patrimônio, abertura do dia, pico, BTC 1h, paridade, erros de API; gatilhos atingidos |
+| `decision.cycle_start` / `decision.signal` / `decision.reading` / `decision.plan` / `decision.exit_check` / `decision.pre_trade_rejected` | universo elegível, score e setup por ativo, leitura do analista, ideias e recusas, checagem de saída |
+| `position.sync` / `order.*` / `order_list.*` / `protection.replace` | veredito de cada sincronização e o caminho de cada ordem |
+| `reconcile.done` / `reconcile.position` / `reconcile.intent` | resumo e detalhe de cada reconciliação |
+| `llm.request` / `llm.response` / `analyst.*` / `research.*` | modelo, tokens, custo e regime (nunca o conteúdo); fontes e notícias coletadas |
+| `runtime.job` / `runtime.task_failed` / `schedule.next_run` | duração de cada tarefa, falhas com o nome da tarefa, próximo ciclo de decisão |
+| `telegram.*` / `alert.sent` / `heartbeat.ok` / `telemetry.recorded` | comandos e chamadas ao Telegram, alertas, heartbeat e telemetria |
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent | grep -E '"event": "(risk|decision)\.'
+```
+
+Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são mascarados (`***`) e as bibliotecas HTTP (que registram URLs com tokens) ficam em `WARNING`.
+
 ## 2. Incidentes
 
 ### 2.1 Agente fora do ar (alerta "Agente sem telemetria" ou Healthchecks.io)

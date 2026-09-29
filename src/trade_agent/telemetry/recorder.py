@@ -5,6 +5,7 @@ entrega cada snapshot; a telemetria persiste o primeiro (já na partida) e depoi
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
+import structlog
 from sqlalchemy import select
 
 from trade_agent.exchange.rest import BinanceRestClient
@@ -12,6 +13,8 @@ from trade_agent.persistence.db import Database
 from trade_agent.persistence.models import TelemetrySnapshotRecord
 from trade_agent.risk.guard import RiskGuard, RiskSnapshot
 from trade_agent.risk.state import GLOBAL
+
+log = structlog.get_logger(__name__)
 
 
 def drawdown_pct(snapshot: RiskSnapshot) -> float:
@@ -81,6 +84,7 @@ class TelemetryRecorder:
                     profiles=profiles,
                 )
             )
+        log.debug("telemetry.recorded", at=s.now.isoformat(), equity=str(s.equity), states=states)
         return True
 
     async def last_recorded(self) -> TelemetrySnapshotRecord | None:

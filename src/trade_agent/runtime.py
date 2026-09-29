@@ -8,6 +8,7 @@ perfil) e serviços de longa duração (comandos do Telegram), supervisionados.
 
 import asyncio
 import contextlib
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -122,6 +123,13 @@ class AgentRuntime:
                 asyncio.create_task(self._supervise(service, stop)) for service in self._services
             ]
             consumer = asyncio.create_task(self._consume(self._events)) if self._events else None
+            log.debug(
+                "runtime.tasks_started",
+                periodic=[(interval, getattr(a, "__qualname__", "?")) for interval, a, _ in jobs],
+                candle_jobs=[timeframe for timeframe, _ in self._candle_jobs],
+                services=len(self._services),
+                user_stream=consumer is not None,
+            )
             try:
                 await stop.wait()
             finally:
@@ -173,13 +181,18 @@ class AgentRuntime:
                 await self._guarded(action)
 
     async def _guarded(self, action: Action) -> None:
+        name = getattr(action, "__qualname__", type(action).__name__)
+        started = time.monotonic()
         try:
             await action()
+            log.debug(
+                "runtime.job", job=name, elapsed_ms=round((time.monotonic() - started) * 1000)
+            )
         except Exception as exc:  # as tarefas de fundo nunca podem morrer
-            log.error("runtime.task_failed", error=repr(exc))
+            log.error("runtime.task_failed", job=name, error=repr(exc))
             with contextlib.suppress(Exception):
                 await self.store.record_event(
-                    "runtime.task_failed", Severity.HIGH, {"error": repr(exc)}
+                    "runtime.task_failed", Severity.HIGH, {"job": name, "error": repr(exc)}
                 )
 
     async def _consume(self, events: EventSource) -> None:

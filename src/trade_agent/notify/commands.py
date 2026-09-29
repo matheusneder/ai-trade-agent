@@ -113,6 +113,13 @@ class CommandCenter:
         )
 
     async def process(self, update: Update) -> None:
+        command = update.text.split(maxsplit=1)[0] if update.text.strip() else ""
+        log.debug(
+            "telegram.update",
+            update_id=update.update_id,
+            authorized=update.chat_id == self._chat_id,
+            command=command,
+        )
         if update.chat_id != self._chat_id:
             await self._store.record_event(
                 "telegram.unauthorized", Severity.HIGH, {"chat_id": update.chat_id}
@@ -127,6 +134,7 @@ class CommandCenter:
         saved = await self._store.get_checkpoint(OFFSET_KEY)
         offset = int(saved["offset"]) if saved else None
         updates = await self._bot.get_updates(offset, timeout_s=timeout_s)
+        log.debug("telegram.poll", offset=offset, updates=len(updates))
         for update in updates:
             await self._store.set_checkpoint(OFFSET_KEY, {"offset": update.update_id + 1})
             await self.process(update)

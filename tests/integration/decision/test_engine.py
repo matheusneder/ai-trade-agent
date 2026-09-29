@@ -117,8 +117,15 @@ async def test_dry_run_simulates_entries_without_orders(
     _setup_market(fake)
     alerts: list[str] = []
     engine, _ = _engine(api, service, store, dry_run=True, alerts=alerts)
-    report = await engine.run_profile("conservador")
+    with capture_logs() as logs:
+        report = await engine.run_profile("conservador")
     assert report.opened == ("SOLUSDT",) and report.dry_run
+    events = {e["event"]: e for e in logs}
+    assert events["decision.cycle_start"]["eligible"] == 3
+    sol = next(e for e in logs if e["event"] == "decision.signal" and e["symbol"] == "SOLUSDT")
+    assert sol["setup"] == "trend_pullback" and sol["tier"] == "large"
+    assert events["decision.reading"]["degraded"] is True
+    assert [idea[0] for idea in events["decision.plan"]["ideas"]] == ["SOLUSDT"]
     assert report.evaluated == 2  # ETH sem histórico suficiente
     assert report.research == "sem analista"
     assert not fake.calls("POST", "/api/v3/orderList/opoco")

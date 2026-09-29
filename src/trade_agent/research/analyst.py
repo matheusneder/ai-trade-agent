@@ -5,6 +5,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+import structlog
+
 from trade_agent.research import digest
 from trade_agent.research.config import ResearchConfig
 from trade_agent.research.llm import (
@@ -24,6 +26,8 @@ from trade_agent.research.models import (
 )
 from trade_agent.research.prompts import ANALYST_SYSTEM, RESEARCH_SYSTEM, TRIAGE_SYSTEM
 from trade_agent.research.safety import apply_safety
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,7 @@ class MarketAnalyst:
             max_tokens=self._config.models.triage_max_tokens,
         )
         ids = {n.id for n in news}
+        log.debug("analyst.triage", sent=len(news), classified=len(draft.items))
         return {
             item.id: Triage(
                 relevance=min(max(item.relevance, 0.0), 1.0),
@@ -115,4 +120,16 @@ class MarketAnalyst:
             as_of=as_of,
             config=self._config.safety,
         )
-        return Analysis(result.view, draft, result.adjustments, findings, tuple(notes))
+        view = result.view
+        log.debug(
+            "analyst.view",
+            regime=view.market_regime.value,
+            exposure=view.exposure_multiplier,
+            assets=len(view.assets),
+            vetoed=[a.asset for a in view.assets if a.veto],
+            adjustments=len(result.adjustments),
+            web_sources=len(findings.sources) if findings else 0,
+            news=len(news),
+            candidates=len(candidates),
+        )
+        return Analysis(view, draft, result.adjustments, findings, tuple(notes))
