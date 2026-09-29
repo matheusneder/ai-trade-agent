@@ -20,6 +20,7 @@ from typing import Any, Literal, Self
 from urllib.parse import quote
 
 import httpx
+import structlog
 
 from trade_agent.exchange.errors import (
     INVALID_TIMESTAMP_CODE,
@@ -36,6 +37,8 @@ from trade_agent.exchange.errors import (
 )
 from trade_agent.exchange.serialization import ParamValue, encode_params
 from trade_agent.exchange.signing import Signer
+
+log = structlog.get_logger(__name__)
 
 type HttpMethod = Literal["GET", "POST", "PUT", "DELETE"]
 
@@ -178,6 +181,7 @@ class BinanceRestClient:
         after = self._clock()
         server_time = int(data["serverTime"])
         self._time_offset_ms = server_time - (before + after) // 2
+        log.debug("rest.clock_synced", offset_ms=self._time_offset_ms, round_trip_ms=after - before)
         return self._time_offset_ms
 
     # ------------------------------------------------------------------ requisições
@@ -219,20 +223,34 @@ class BinanceRestClient:
         return await self._send(method, url, headers={API_KEY_HEADER: self._api_key})
 
     async def _send(self, method: HttpMethod, url: str, headers: dict[str, str]) -> Any:
+        # só o caminho vai para logs e mensagens de erro: a query tem a assinatura
+        path = url.split("?", 1)[0]
+        started = time.monotonic()
         try:
             response = await self._http.request(method, url, headers=headers)
         except _NOT_SENT_ERRORS as exc:
             self.health.record(ok=False)
-            raise BinanceConnectionError(f"falha de conexão em {method} {url}: {exc!r}") from exc
+            log.debug("rest.request_failed", method=method, path=path, error=type(exc).__name__)
+            raise BinanceConnectionError(f"falha de conexão em {method} {path}: {exc!r}") from exc
         except httpx.TransportError as exc:
             self.health.record(ok=False)
+            log.debug("rest.request_failed", method=method, path=path, error=type(exc).__name__)
             raise BinanceUnknownStatusError(
-                f"resultado desconhecido em {method} {url}: {exc!r}"
+                f"resultado desconhecido em {method} {path}: {exc!r}"
             ) from exc
 
         status = response.status_code
         self.health.record(ok=status < 500 and status not in {418, 429})
         self.usage.update(response.headers)
+        log.debug(
+            "rest.request",
+            method=method,
+            path=path,
+            status=status,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+            weight_1m=self.usage.used_weight_1m,
+            signed=API_KEY_HEADER in headers,
+        )
         if response.is_success:
             return response.json()
         raise self._error_from(response)

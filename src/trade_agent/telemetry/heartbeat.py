@@ -23,4 +23,5 @@ class Heartbeat:
         except httpx.HTTPError as exc:
             log.warning("heartbeat.failed", error=type(exc).__name__)
             return False
+        log.debug("heartbeat.ok", status=response.status_code)
         return True

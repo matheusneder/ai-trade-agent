@@ -223,6 +223,8 @@ class RiskGuard:
     async def apply(self, hits: Iterable[Hit]) -> list[Hit]:
         """Aplica as ações dos gatilhos; retorna os que mudaram algum estado."""
         applied: list[Hit] = []
+        hits = list(hits)
+        log.debug("risk.evaluated", hits=[h.reason for h in hits])
         for hit in hits:
             now = self._clock()
             current = await self.state(hit.scope)
@@ -235,6 +237,7 @@ class RiskGuard:
                 proposed = ScopeState(OpState.FLATTENING, hit.reason, now)
             new = escalate(current, proposed)
             if new is None:
+                log.debug("risk.hit_unchanged", scope=hit.scope, state=current.state.value)
                 continue
             applied.append(hit)
             await self._set(hit.scope, new, source="gatilho")

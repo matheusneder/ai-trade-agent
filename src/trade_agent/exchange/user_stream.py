@@ -254,6 +254,11 @@ class UserDataStream:
                 async with self._connector(self._url) as ws:
                     subscription_id = await self._subscribe(ws)
                     failures = 0
+                    log.debug(
+                        "user_stream.subscribed",
+                        subscription_id=subscription_id,
+                        reconnected=connected_before,
+                    )
                     yield StreamConnected(subscription_id, reconnected=connected_before)
                     connected_before = True
                     async for raw in ws:
@@ -264,6 +269,13 @@ class UserDataStream:
                         if event.get("e") in _RECONNECT_NOW:
                             log.info("user_stream.reconnect_requested", reason=event.get("e"))
                             break
+                        log.debug(
+                            "user_stream.event",
+                            kind=event.get("e"),
+                            symbol=event.get("s"),
+                            client_id=event.get("c"),
+                            status=event.get("X") or event.get("L"),
+                        )
                         yield parse_user_event(event)
                     else:
                         log.warning("user_stream.closed_by_server")

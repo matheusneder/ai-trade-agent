@@ -7,9 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import structlog
 
 API_URL = "https://api.telegram.org"
 MAX_MESSAGE = 4096
+
+log = structlog.get_logger(__name__)
 
 
 class TelegramError(Exception):
@@ -52,6 +55,7 @@ class TelegramBot:
             data = response.json()
         except ValueError:
             data = {}
+        log.debug("telegram.call", method=method, status=response.status_code, ok=data.get("ok"))
         if response.status_code != 200 or not data.get("ok"):
             description = data.get("description", response.reason_phrase)
             raise TelegramError(f"{method}: HTTP {response.status_code} {description}")

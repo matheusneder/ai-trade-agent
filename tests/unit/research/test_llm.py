@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from anthropic.types import ServerToolUsage, Usage
+from structlog.testing import capture_logs
 
 from tests.support.claude import NOW, FakeClaude, research_config
 from trade_agent.research.config import WebResearchConfig
@@ -64,15 +65,28 @@ async def test_structured_output_request_and_cost() -> None:
     )
     ledger = TrackingLedger(MemoryLedger())
     claude = fake.claude(ledger=ledger)
-    result = await claude.structured(
-        purpose="triage",
-        model="claude-sonnet-5",
-        system="S",
-        content="C",
-        output=TriageDraft,
-        max_tokens=2000,
-    )
+    with capture_logs() as logs:
+        result = await claude.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
     assert result.items[0].assets == ["SOL"]
+    request, response = logs
+    assert (request["event"], request["purpose"], request["model"]) == (
+        "llm.request",
+        "triage",
+        "claude-sonnet-5",
+    )
+    assert (response["event"], response["stop_reason"], response["input_tokens"]) == (
+        "llm.response",
+        "end_turn",
+        100,
+    )
+    assert response["cost_usd"] == "0.00031" and "content" not in response
     body = fake.requests[0]
     assert body["model"] == "claude-sonnet-5"
     assert body["system"] == [{"type": "text", "text": "S", "cache_control": {"type": "ephemeral"}}]

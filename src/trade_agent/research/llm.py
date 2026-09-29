@@ -18,10 +18,13 @@ from decimal import Decimal
 from typing import Any, Protocol
 
 import anthropic
+import structlog
 from anthropic.types import Message, Usage
 from pydantic import BaseModel, ValidationError
 
 from trade_agent.research.config import ModelPrice, PricingConfig, ResearchConfig
+
+log = structlog.get_logger(__name__)
 
 MILLION = Decimal(1_000_000)
 
@@ -146,21 +149,29 @@ class ClaudeClient:
     async def _record(self, purpose: str, model: str, response: Message) -> None:
         usage = response.usage
         server = usage.server_tool_use
-        await self._ledger.record(
-            LlmUsage(
-                purpose=purpose,
-                model=model,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_creation_input_tokens=usage.cache_creation_input_tokens or 0,
-                cache_read_input_tokens=usage.cache_read_input_tokens or 0,
-                web_search_requests=server.web_search_requests if server else 0,
-                web_fetch_requests=(server.web_fetch_requests or 0) if server else 0,
-                cost_usd=usage_cost(
-                    usage, self._config.pricing.models[model], self._config.pricing
-                ),
-                at=self._clock(),
-            )
+        record = LlmUsage(
+            purpose=purpose,
+            model=model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_creation_input_tokens=usage.cache_creation_input_tokens or 0,
+            cache_read_input_tokens=usage.cache_read_input_tokens or 0,
+            web_search_requests=server.web_search_requests if server else 0,
+            web_fetch_requests=(server.web_fetch_requests or 0) if server else 0,
+            cost_usd=usage_cost(usage, self._config.pricing.models[model], self._config.pricing),
+            at=self._clock(),
+        )
+        await self._ledger.record(record)
+        log.debug(
+            "llm.response",
+            purpose=purpose,
+            model=model,
+            stop_reason=response.stop_reason,
+            input_tokens=record.input_tokens,
+            output_tokens=record.output_tokens,
+            cache_read_input_tokens=record.cache_read_input_tokens,
+            web_searches=record.web_search_requests,
+            cost_usd=str(record.cost_usd),
         )
 
     def _system(self, text: str) -> list[dict[str, Any]]:
@@ -168,6 +179,14 @@ class ClaudeClient:
 
     async def _create(self, purpose: str, **params: Any) -> Message:
         await self._check_budget()
+        log.debug(
+            "llm.request",
+            purpose=purpose,
+            model=params["model"],
+            max_tokens=params.get("max_tokens"),
+            tools=[t["type"] for t in params.get("tools", [])],
+            turns=len(params.get("messages", [])),
+        )
         try:
             response: Message = await self._client.messages.create(
                 timeout=self._config.models.timeout_s, **params

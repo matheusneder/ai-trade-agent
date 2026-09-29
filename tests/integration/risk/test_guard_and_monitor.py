@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
 from tests.support.fake_binance import FakeBinance
 from tests.support.risk import CONDITIONS, NOW, POLICY, TRIGGERS, closed_position, snapshot
@@ -148,7 +149,11 @@ async def test_monitor_snapshot(
         clock=lambda: NOW,
     )  # fmt: skip
     monitor.note_reconcile(ReconcileReport(started_at=NOW, orphans=["x"], errors=["e"]))
-    first = await monitor.snapshot()
+    with capture_logs() as logs:
+        first = await monitor.snapshot()
+    (reading,) = [e for e in logs if e["event"] == "risk.snapshot"]
+    assert reading["positions"] == 1 and reading["fear_greed"] == 22
+    assert reading["equity"] == str(first.equity)
     assert first.equity == D(1000) + D(-1) + unrealized  # capital + realizado + aberto
     assert first.day_start_equity == first.peak_equity == first.equity
     assert first.consecutive_losses == 3

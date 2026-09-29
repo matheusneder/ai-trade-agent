@@ -10,6 +10,8 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import structlog
+
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.models import BookTicker
 from trade_agent.exchange.rest import CallHealth
@@ -18,6 +20,8 @@ from trade_agent.persistence.store import Store
 from trade_agent.reconcile.reconciler import ReconcileReport
 from trade_agent.risk.guard import RiskSnapshot
 from trade_agent.strategy.profiles import StrategyConfig
+
+log = structlog.get_logger(__name__)
 
 EQUITY_KEY = "risk.equity"
 BENCHMARK = "BTCUSDT"
@@ -125,7 +129,7 @@ class RiskMonitor:
                 ),
                 Decimal(0),
             )
-        return RiskSnapshot(
+        snapshot = RiskSnapshot(
             now=now,
             equity=equity,
             day_start_equity=day_start,
@@ -147,3 +151,20 @@ class RiskMonitor:
             exposure=exposure,
             active_positions=len(active),
         )
+        log.debug(
+            "risk.snapshot",
+            equity=str(equity),
+            day_start=str(day_start),
+            peak=str(peak),
+            realized=str(realized),
+            unrealized=str(unrealized),
+            exposure=str(exposure),
+            positions=len(active),
+            consecutive_losses=snapshot.consecutive_losses,
+            btc_change_1h=snapshot.btc_change_1h,
+            quote_deviation=snapshot.quote_deviation,
+            fear_greed=snapshot.fear_greed,
+            api_error_rate=snapshot.api_error_rate,
+            reconcile_anomalies=snapshot.reconcile_anomalies,
+        )
+        return snapshot

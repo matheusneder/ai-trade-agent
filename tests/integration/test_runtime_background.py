@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from structlog.testing import capture_logs
 
 from tests.support.claude import FakeClaude
 from tests.support.fake_binance import FakeBinance
@@ -77,8 +78,15 @@ async def test_background_jobs_services_and_reconcile_hook(
         service_backoff_s=0.01,
         clock=lambda: datetime(2026, 9, 26, 16, tzinfo=UTC),  # congelado num fechamento
     )
-    await asyncio.wait_for(runtime.run(stop), timeout=15)
+    with capture_logs() as logs:
+        await asyncio.wait_for(runtime.run(stop), timeout=15)
     assert len(attempts) >= 2  # o serviço foi reiniciado após a falha
+    started = next(e for e in logs if e["event"] == "runtime.tasks_started")
+    assert started["candle_jobs"] == ["1m"] and started["services"] == 1
+    jobs = {e["job"] for e in logs if e["event"] == "runtime.job"}
+    assert any("hourly" in job for job in jobs)
+    failed = next(e for e in logs if e["event"] == "runtime.task_failed")
+    assert "on_candle" in failed["job"]
     assert ticks.count("imediato") == 1 and ticks.count("heartbeat") == 1
     kinds = [e.kind for e in await store.recent_events(200)]
     assert "runtime.service_failed" in kinds and "runtime.task_failed" in kinds

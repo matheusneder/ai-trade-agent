@@ -170,7 +170,16 @@ class PositionService:
         if pending is not None:
             return pending
         snapshot = await self._snapshot(position.symbol, position.protection_list_id)
-        return await self._apply(position, assess(snapshot), snapshot)
+        verdict = assess(snapshot)
+        log.debug(
+            "position.sync",
+            position_id=position.id,
+            symbol=position.symbol,
+            state=position.state.value,
+            verdict=verdict.kind.value,
+            reason=verdict.reason,
+        )
+        return await self._apply(position, verdict, snapshot)
 
     async def _snapshot(self, symbol: str, list_id: str) -> ListSnapshot | None:
         order_list = await self.api.find_order_list(list_id)

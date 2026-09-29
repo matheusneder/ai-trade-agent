@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import anthropic
+import structlog
 
 from trade_agent.persistence.research_store import ReportEntry, ResearchStore
 from trade_agent.research.analyst import Analysis, MarketAnalyst
@@ -27,6 +28,8 @@ from trade_agent.research.models import (
 from trade_agent.research.prompts import PROMPT_VERSION
 
 TRIAGE_BATCH = 80
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +79,12 @@ class ResearchService:
         )
         new_items = await self._store.add_news(collection.items)
         self.metrics = collection.metrics
+        log.debug(
+            "research.ingested",
+            collected=len(collection.items),
+            new=new_items,
+            errors=sorted(collection.errors),
+        )
         return IngestReport(len(collection.items), new_items, collection.metrics, collection.errors)
 
     async def _triaged_news(
@@ -138,6 +147,16 @@ class ResearchService:
             cost_usd=ledger.total,
         )
         report_id = await self._store.add_report(entry)
+        log.debug(
+            "research.cycle",
+            trigger=trigger,
+            report_id=report_id,
+            status=entry.status,
+            cost_usd=str(ledger.total),
+            candidates=len(candidates),
+            notes=len(entry.adjustments),
+            error=error,
+        )
         return CycleResult(
             report_id=report_id,
             view=analysis.view if analysis else None,

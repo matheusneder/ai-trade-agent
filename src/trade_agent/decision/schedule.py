@@ -4,7 +4,11 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+import structlog
+
 from trade_agent.market.candles import INTERVAL_MS
+
+log = structlog.get_logger(__name__)
 
 
 def next_candle_close(timeframe: str, now: datetime) -> datetime:
@@ -29,6 +33,9 @@ async def run_on_candle_close(
         # a partir de (now - delay): acordar entre o fechamento e o atraso não pula o ciclo
         target = next_candle_close(timeframe, now - delay) + delay
         wait_s = (target - now).total_seconds()
+        log.debug(
+            "schedule.next_run", timeframe=timeframe, at=target.isoformat(), wait_s=round(wait_s)
+        )
         try:
             await asyncio.wait_for(stop.wait(), timeout=max(wait_s, 0))
         except TimeoutError:

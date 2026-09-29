@@ -70,6 +70,16 @@ class Reconciler:
         await self.store.set_checkpoint(CHECKPOINT_KEY, report.as_dict())
         if report.transitions or report.orphans or report.errors:
             log.info("reconcile.report", **report.as_dict())
+        log.debug(
+            "reconcile.done",
+            positions=report.positions,
+            transitions=len(report.transitions),
+            intents_confirmed=report.intents_confirmed,
+            intents_failed=report.intents_failed,
+            orphans=len(report.orphans),
+            errors=len(report.errors),
+            elapsed_ms=round((report.finished_at - report.started_at).total_seconds() * 1000),
+        )
         return report
 
     async def reconcile_decision(self, decision_id: str) -> Position | None:
@@ -91,6 +101,13 @@ class Reconciler:
                 position_id=position.id,
             )
             return
+        log.debug(
+            "reconcile.position",
+            position_id=position.id,
+            symbol=position.symbol,
+            before=position.state.value,
+            after=updated.state.value,
+        )
         if updated.state is not position.state:
             report.transitions.append(
                 {"id": position.id, "from": position.state.value, "to": updated.state.value}
@@ -103,6 +120,12 @@ class Reconciler:
             except BinanceError as exc:
                 report.errors.append(f"intent {intent.client_id}: {exc}")
                 continue
+            log.debug(
+                "reconcile.intent",
+                client_id=intent.client_id,
+                status=intent.status.value,
+                found=found,
+            )
             if found:
                 await self.store.set_intent_status(intent.client_id, IntentStatus.CONFIRMED)
                 report.intents_confirmed += 1
@@ -126,6 +149,7 @@ class Reconciler:
         except BinanceError as exc:
             report.errors.append(f"open_order_lists: {exc}")
             return
+        log.debug("reconcile.open_lists", total=len(open_lists), known=len(known))
         for order_list in open_lists:
             list_id = order_list.list_client_order_id
             if is_agent_id(list_id) and list_id not in known:

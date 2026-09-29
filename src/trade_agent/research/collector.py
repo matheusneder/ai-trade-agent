@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import structlog
 
 from trade_agent.research.config import SourcesConfig
 from trade_agent.research.models import DerivativesSnapshot, FearGreed, MarketMetrics, NewsItem
@@ -19,6 +20,8 @@ from trade_agent.research.sources import (
     fetch_feed,
 )
 from trade_agent.research.tagging import AssetTagger
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,15 +68,25 @@ class NewsCollector:
         for name, result in zip(jobs, results, strict=True):
             if isinstance(result, BaseException):
                 errors[name] = f"{type(result).__name__}: {result}"
+                log.debug("research.source_failed", source=name, error=errors[name])
             elif isinstance(result, FearGreed):
                 fear_greed = result
             elif isinstance(result, DerivativesSnapshot):
                 derivatives = result
             else:
+                log.debug("research.source", source=name, items=len(result))
                 for item in result:
                     tagged = dataclasses.replace(
                         item, assets=self._tagger.tag(f"{item.title} {item.summary}")
                     )
                     items.setdefault(tagged.dedupe_key, tagged)
         metrics = MarketMetrics(fear_greed, derivatives, btc_change_24h)
+        log.debug(
+            "research.collected",
+            items=len(items),
+            sources=len(jobs),
+            failed=sorted(errors),
+            fear_greed=fear_greed.value if fear_greed else None,
+            funding_symbols=len(derivatives.funding_rate),
+        )
         return Collection(tuple(items.values()), metrics, errors)

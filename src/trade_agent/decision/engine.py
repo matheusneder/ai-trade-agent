@@ -150,7 +150,18 @@ class DecisionEngine:
                 continue  # histórico insuficiente para os indicadores
             reference = None if member.symbol == BENCHMARK else benchmark
             features = compute_features(frame, self._features, benchmark_close=reference)
-            signals[member.symbol] = evaluate(features, params)
+            signal = evaluate(features, params)
+            signals[member.symbol] = signal
+            log.debug(
+                "decision.signal",
+                profile=profile.code,
+                symbol=member.symbol,
+                tier=member.tier.value,
+                score=round(signal.score, 3),
+                setup=signal.setup,
+                stop_pct=round(signal.stop_pct, 4),
+                close=signal.close,
+            )
         return signals
 
     # ------------------------------------------------------------------ analista
@@ -205,11 +216,28 @@ class DecisionEngine:
         if not members:
             reasons = Counter(universe.excluded.values()).most_common(3)
             log.warning("decision.empty_universe", profile=name, excluded=dict(reasons))
+        log.debug(
+            "decision.cycle_start",
+            profile=name,
+            state=state.value,
+            universe=len(universe.members),
+            eligible=len(members),
+            dry_run=self._dry_run,
+        )
         signals = await self._signals(members, profile, self._api.rest.now_ms())
 
         active = await self._store.active_positions()
         own = [p for p in active if p.profile == profile.code]
         reading, research_status = await self._reading(name, profile, universe, signals, own)
+        log.debug(
+            "decision.reading",
+            profile=name,
+            research=research_status,
+            degraded=reading.degraded,
+            reason=reading.reason,
+            exposure=str(reading.exposure_multiplier),
+            vetoed=sorted(a for a, o in reading.opinions.items() if o.veto),
+        )
 
         exits = await self._exits(profile, own, signals, reading, state)
         opened: list[str] = []
@@ -264,6 +292,15 @@ class DecisionEngine:
             age = now - position.opened_at if position.opened_at else None
             reason = exit_reason(
                 profile=profile, age=age, weak_cycles=weak, veto=bool(opinion and opinion.veto)
+            )
+            log.debug(
+                "decision.exit_check",
+                position_id=position.id,
+                symbol=position.symbol,
+                weak_cycles=weak,
+                age_h=round(age.total_seconds() / 3600, 1) if age else None,
+                reason=reason,
+                rule_exits_allowed=state.allows_rule_exits,
             )
             if not state.allows_rule_exits:
                 continue
@@ -321,6 +358,14 @@ class DecisionEngine:
             exposure_multiplier=reading.exposure_multiplier,
             one_position_per_asset=self._strategy.account.one_position_per_asset,
         )
+        log.debug(
+            "decision.plan",
+            profile=name,
+            candidates=len(candidates),
+            ideas=[(i.symbol, str(i.notional), str(i.risk)) for i in plan.ideas],
+            rejections=[r for r in plan.rejections if r[1] != "sem setup"],
+            exposure=str(reading.exposure_multiplier),
+        )
         context = PreTradeContext(
             state=state,
             now=self._clock(),
@@ -339,6 +384,7 @@ class DecisionEngine:
                 conditions=self._guard.conditions,
             )
             if problems:
+                log.debug("decision.pre_trade_rejected", symbol=idea.symbol, problems=problems)
                 rejected.append((idea.symbol, "; ".join(problems)))
                 continue
             if self._dry_run:
