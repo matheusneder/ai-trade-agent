@@ -98,4 +98,7 @@ async def test_notifiers() -> None:
                 await notifier.notify(Severity.HIGH, "não chega")  # falha não propaga
     assert len(send.calls) == 2
     assert json.loads(send.calls[0].request.content)["text"] == "🚨 urgente"
-    assert logs[0]["event"] == "alert.telegram_failed"
+    events = [e["event"] for e in logs]
+    assert events == ["telegram.call", "alert.telegram_failed"]
+    assert logs[0]["method"] == "sendMessage" and logs[0]["status"] == 500
+    assert "TOKEN123" not in str(logs)  # a URL da API (com o token) nunca vai para o log
