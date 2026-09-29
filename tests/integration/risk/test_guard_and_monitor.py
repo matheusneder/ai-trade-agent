@@ -17,10 +17,10 @@ from trade_agent.execution.service import PositionService
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.reconcile.reconciler import ReconcileReport
 from trade_agent.risk.conditions import Action
-from trade_agent.risk.guard import RiskGuard, evaluate
+from trade_agent.risk.guard import RiskGuard, RiskSnapshot, evaluate
 from trade_agent.risk.monitor import EQUITY_KEY, RiskMonitor, quote_deviation
 from trade_agent.risk.state import GLOBAL, OpState, ScopeState, StateStore
-from trade_agent.strategy.profiles import load_strategy_config
+from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
 D = Decimal
 PROFILES = load_strategy_config(Path(__file__).parents[2] / "fixtures" / "profiles.yaml")
@@ -174,7 +174,57 @@ async def test_monitor_snapshot(
     third = await next_day.snapshot()
     assert third.day_start_equity == third.equity and third.fear_greed is None
     saved = await store.get_checkpoint(EQUITY_KEY)
-    assert saved is not None and saved["day"] == "2026-09-27"
+    assert saved is not None and saved["day"] == "2026-09-27" and saved["baseline"] == "1000"
+
+
+def _with_capital(capital: int) -> StrategyConfig:
+    account = PROFILES.account.model_copy(update={"managed_capital": D(capital)})
+    return PROFILES.model_copy(update={"account": account})
+
+
+async def test_monitor_rebases_marks_when_managed_capital_changes(
+    store: Store, api: BinanceSpotApi, fake: FakeBinance
+) -> None:
+    fake.candles[("BTCUSDT", "1m")] = _klines([60000.0] * 61)
+
+    async def reading(capital: int, *, days: int = 0) -> tuple[RiskSnapshot, list[Any]]:
+        monitor = RiskMonitor(
+            api=api, store=store, strategy=_with_capital(capital), health=CallHealth(),
+            clock=lambda: NOW + timedelta(days=days),
+        )  # fmt: skip
+        with capture_logs() as logs:
+            taken = await monitor.snapshot()
+        return taken, [e for e in logs if e["event"] == "risk.equity_rebased"]
+
+    # Incidente: 1000 → 1500 → 500 sem operar não é ganho, perda nem drawdown.
+    first, rebased = await reading(1000)
+    assert first.day_start_equity == first.peak_equity == D(1000) and rebased == []
+    for capital in (1500, 500):
+        taken, (rebased_event,) = await reading(capital)
+        assert taken.equity == taken.day_start_equity == taken.peak_equity == D(capital)
+    assert rebased_event["previous_baseline"] == "1500" and rebased_event["baseline"] == "500"
+    assert evaluate(CONDITIONS, taken) == []
+
+    # Uma perda real continua valendo: 100 abaixo do pico e 20 abaixo da abertura do dia.
+    today = NOW.date().isoformat()
+    marks = {"day": today, "day_start": "1020", "peak": "1100", "baseline": "1000"}
+    await store.set_checkpoint(EQUITY_KEY, marks)
+    cut, _ = await reading(800)
+    assert (cut.equity, cut.day_start_equity, cut.peak_equity) == (D(800), D(820), D(900))
+
+    # Novo dia: a abertura é o patrimônio atual; o pico acompanha a diferença de capital.
+    await store.set_checkpoint(EQUITY_KEY, marks)
+    next_day, (event,) = await reading(800, days=1)
+    assert (next_day.day_start_equity, next_day.peak_equity) == (D(800), D(900))
+    assert event["day_start"] == "800" and event["peak"] == "900"
+
+    # Marcas antigas, sem o capital de referência: recomeçam do patrimônio atual.
+    await store.set_checkpoint(EQUITY_KEY, {"day": today, "day_start": "1000", "peak": "1500"})
+    legacy, (event,) = await reading(500)
+    assert legacy.day_start_equity == legacy.peak_equity == D(500)
+    assert event["previous_baseline"] is None
+    saved = await store.get_checkpoint(EQUITY_KEY)
+    assert saved == {"day": today, "day_start": "500", "peak": "500", "baseline": "500"}
 
 
 async def test_monitor_without_market_references(

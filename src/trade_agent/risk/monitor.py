@@ -2,7 +2,8 @@
 
 O patrimônio considerado é o **do agente**: capital gerido + PnL realizado + PnL não
 realizado das posições abertas (a preço de venda). Saldos da conta que não pertencem ao
-agente não entram. A abertura do dia (UTC) e o pico ficam persistidos em ``checkpoints``.
+agente não entram. A abertura do dia (UTC) e o pico ficam persistidos em ``checkpoints``,
+junto com o capital gerido que valia quando foram gravados.
 """
 
 import statistics
@@ -82,14 +83,40 @@ class RiskMonitor:
         first, last = Decimal(str(candles[0][4])), Decimal(str(candles[-1][4]))
         return float(last / first - 1) if first > 0 else None
 
-    async def _equity_marks(self, equity: Decimal, now: datetime) -> tuple[Decimal, Decimal]:
-        """Abertura do dia (UTC) e pico do patrimônio, atualizados e persistidos."""
+    async def _equity_marks(
+        self, equity: Decimal, baseline: Decimal, now: datetime
+    ) -> tuple[Decimal, Decimal]:
+        """Abertura do dia (UTC) e pico do patrimônio, atualizados e persistidos.
+
+        Mudar o ``managed_capital`` não é ganho nem perda: as marcas acompanham a diferença
+        de capital, e só o resultado das operações conta para a perda diária e o drawdown.
+        Marcas gravadas sem o capital de referência recomeçam do patrimônio atual.
+        """
         day = now.date().isoformat()
         saved = await self._store.get_checkpoint(EQUITY_KEY) or {}
-        day_start = Decimal(saved["day_start"]) if saved.get("day") == day else equity
-        peak = max(Decimal(saved.get("peak", equity)), equity)
+        same_day = saved.get("day") == day
+        day_start = Decimal(saved["day_start"]) if same_day else equity
+        peak = Decimal(saved.get("peak", equity))
+        previous = saved.get("baseline")
+        if saved and (previous is None or Decimal(previous) != baseline):
+            if previous is None:
+                day_start = peak = equity
+            else:
+                shift = baseline - Decimal(previous)
+                peak += shift
+                if same_day:
+                    day_start += shift
+            log.warning(
+                "risk.equity_rebased",
+                previous_baseline=previous,
+                baseline=str(baseline),
+                day_start=str(day_start),
+                peak=str(peak),
+            )
+        peak = max(peak, equity)
         await self._store.set_checkpoint(
-            EQUITY_KEY, {"day": day, "day_start": str(day_start), "peak": str(peak)}
+            EQUITY_KEY,
+            {"day": day, "day_start": str(day_start), "peak": str(peak), "baseline": str(baseline)},
         )
         return day_start, peak
 
@@ -110,7 +137,7 @@ class RiskMonitor:
         baseline = self._strategy.account.managed_capital
         realized = await self._store.realized_pnl_total()
         equity = baseline + realized + unrealized
-        day_start, peak = await self._equity_marks(equity, now)
+        day_start, peak = await self._equity_marks(equity, baseline, now)
         exposure = sum(
             (p.entry_quote or p.planned_qty * p.planned_price for p in active), Decimal(0)
         )
