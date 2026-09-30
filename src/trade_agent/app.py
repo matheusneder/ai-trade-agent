@@ -22,6 +22,8 @@ from trade_agent.exchange.user_stream import UserDataStream
 from trade_agent.execution.gateway import ExecutionGateway
 from trade_agent.execution.service import PositionService, RulesCache
 from trade_agent.market.universe import UniverseConfig
+from trade_agent.metrics import configure_metrics
+from trade_agent.metrics import install as install_metrics
 from trade_agent.notify.commands import CommandCenter, Query
 from trade_agent.notify.notifier import LogNotifier, Notifier, TelegramNotifier
 from trade_agent.notify.status import (
@@ -208,6 +210,7 @@ def assemble(
         llm=llm is not None,
         llm_budget_usd=str(research_config.budget.daily_usd),
         tracing=settings.otlp_endpoint is not None,
+        metrics=settings.otlp_metrics_endpoint is not None,
     )
     return AgentParts(
         guard=guard,
@@ -314,7 +317,9 @@ async def run_agent(
 ) -> None:
     stop = stop or asyncio.Event()
     install_signal_handlers(stop)
-    traces = configure_tracing(settings.otlp_endpoint, environment=settings.binance_env.value)
+    environment = settings.binance_env.value
+    traces = configure_tracing(settings.otlp_endpoint, environment=environment)
+    agent_metrics = configure_metrics(settings.otlp_metrics_endpoint, environment=environment)
     try:
         async with build_runtime(
             settings, http_client=http_client, aux_http=aux_http, llm=llm, user_stream=user_stream
@@ -323,4 +328,7 @@ async def run_agent(
     finally:
         if traces is not None:
             traces.shutdown()  # envia os spans que ainda estão na fila
+        if agent_metrics is not None:
+            agent_metrics.shutdown()  # última exportação das métricas
         install_tracing(None)
+        install_metrics(None)

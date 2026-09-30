@@ -121,7 +121,8 @@ def test_jaeger_keeps_7_days_on_the_volume_and_listens_on_localhost() -> None:
 def test_agent_exports_to_the_jaeger_otlp_receiver() -> None:
     otlp = jaeger_config()["receivers"]["otlp"]["protocols"]["http"]["endpoint"]
     agent = COMPOSE["services"]["agent"]["environment"]
-    assert agent["TA_OTLP_ENDPOINT"] == f"http://jaeger:{port(otlp)}"
+    # o Jaeger é um dos destinos (o outro, o SigNoz: test_signoz.py)
+    assert f"http://jaeger:{port(otlp)}" in tracing.endpoints(agent["TA_OTLP_ENDPOINT"])
 
 
 def test_grafana_links_traces_and_logs_both_ways(
@@ -149,4 +150,4 @@ def test_grafana_links_traces_and_logs_both_ways(
     assert match and match.group(1) == trace_id and json.loads(line)["trace_id"] == trace_id
     assert spans.one("risk.snapshot").context.trace_id == current.get_span_context().trace_id
     # o Alloy guarda o trace_id do log como metadado (consulta do Grafana: | trace_id="...")
-    assert "trace_id" in alloy_blocks()["loki.process"]
+    assert "trace_id" in alloy_blocks()["loki.process.trade_agent"]

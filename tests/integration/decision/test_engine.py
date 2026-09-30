@@ -14,6 +14,7 @@ from structlog.testing import capture_logs
 from tests.support.candles import HOUR_MS, ohlcv, raw_klines, uptrend_with_pullback
 from tests.support.claude import FakeClaude, research_config
 from tests.support.fake_binance import FakeBinance
+from tests.support.metrics import Measured
 from tests.support.risk import CONDITIONS, POLICY
 from tests.support.tracing import Recorded
 from trade_agent.decision.engine import DecisionEngine, UniverseCache
@@ -155,11 +156,20 @@ async def test_live_cycle_opens_protected_position_once(
 
 
 async def test_live_cycle_traces_decision_through_execution(
-    spans: Recorded, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+    spans: Recorded,
+    measured: Measured,
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
 ) -> None:
     _setup_market(fake)
     engine, _ = _engine(api, service, store)
     await engine.run_profile("conservador")
+    live = {"profile": "conservador", "dry_run": False}
+    assert measured.value("trade_agent.decision.cycles", **live, state="running") == 1
+    assert measured.value("trade_agent.decision.entries", **live) == 1
+    assert "trade_agent.decision.exits" not in measured.points()  # nenhuma saída no ciclo
     cycle = spans.one("decision.cycle")
     attributes = cycle.attributes or {}
     assert attributes["trade_agent.profile"] == "conservador"

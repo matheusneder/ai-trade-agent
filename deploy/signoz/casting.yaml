@@ -1,0 +1,22 @@
+# SigNoz (traces, logs e métricas) gerado pelo Foundry, a ferramenta oficial de implantação.
+# Os manifestos em pours/ saem deste arquivo; para regenerar (a partir da raiz do repositório):
+#   docker run --rm -v "$PWD/deploy/signoz:/work" -w /work signoz/foundryctl:v0.3.0 \
+#     forge --no-ledger --no-updater
+# Ajustes locais (portas, logs, redes) ficam em deploy/signoz/compose.override.yaml.
+apiVersion: v1alpha1
+kind: Installation
+metadata:
+  name: signoz
+spec:
+  deployment:
+    mode: docker
+    flavor: compose
+  # O Foundry 0.3.0 grava `version`, mas não o aplica na imagem (fica :latest): fixe as duas.
+  signoz:
+    spec:
+      version: v0.144.0
+      image: signoz/signoz:v0.144.0
+  ingester:
+    spec:
+      version: v0.144.12
+      image: signoz/signoz-otel-collector:v0.144.12

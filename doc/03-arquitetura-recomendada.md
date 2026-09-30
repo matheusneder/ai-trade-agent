@@ -476,6 +476,8 @@ Os logs de todos os contêineres ficam centralizados no **Loki** por 30 dias. A 
 
 Os **traces** usam OpenTelemetry com exportação OTLP/HTTP ao **Jaeger** (7 dias em disco). Cada componente do agente é um serviço no namespace `trade-agent`: runtime, risco, decisão, pesquisa, LLM, execução, exchange, reconciliação, banco, Telegram e telemetria. Assim, o grafo *System Architecture* do Jaeger mostra as dependências entre eles. Cada tarefa de fundo é a raiz de um trace. Os spans nunca levam segredos nem conteúdo: só caminhos, métodos, contagens, identificadores, tokens e custos. O `trace_id` vai em cada log, e o Grafana liga logs e traces nos dois sentidos.
 
+O **SigNoz** roda em paralelo, para comparação. Ele recebe os mesmos traces, uma cópia OTLP dos logs e as **métricas** OpenTelemetry. As métricas do agente saem a cada minuto: patrimônio, drawdown, PnL, exposição, posições, erros e peso da Binance, relógio, estado do risco, custo e tokens do LLM, ciclos, entradas e saídas. As de cada contêiner (CPU, memória, rede e disco) vêm de um OpenTelemetry Collector com `docker_stats`. Latência, vazão e erros por operação o SigNoz calcula a partir dos spans.
+
 ### 12.2 Alertas
 
 | Severidade | Exemplos | Canal |

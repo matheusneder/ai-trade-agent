@@ -7,13 +7,15 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
 from tests.support.fake_binance import FakeBinance
+from tests.support.metrics import Measured
 from tests.support.tracing import Recorded
-from trade_agent import app, cli, tracing
+from trade_agent import app, cli, metrics, tracing
 from trade_agent.app import build_runtime, install_signal_handlers, run_agent
 from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.errors import BinanceConfigurationError
@@ -116,33 +118,47 @@ async def test_run_agent_traces_the_components(
         tracing.install(traces)
         return traces
 
+    reader = InMemoryMetricReader()
+
+    def in_memory_metrics(endpoint: str | None, *, environment: str) -> metrics.AgentMetrics:
+        configured.append((endpoint, environment))
+        agent_metrics = metrics.AgentMetrics(reader, environment=environment)
+        metrics.install(agent_metrics)
+        return agent_metrics
+
     monkeypatch.setattr(app, "configure_tracing", in_memory)
+    monkeypatch.setattr(app, "configure_metrics", in_memory_metrics)
     fake = FakeBinance()
     fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
     stop = asyncio.Event()
+    settings = _settings(
+        postgres_url,
+        otlp_endpoint="http://jaeger:4318,http://signoz-ingester:4318",
+        otlp_metrics_endpoint="http://signoz-ingester:4318",
+    )
     async with (
         httpx.AsyncClient(base_url="https://fake.binance", transport=fake.transport) as http,
         httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as aux,
     ):
         task = asyncio.create_task(
-            run_agent(
-                _settings(postgres_url, otlp_endpoint="http://jaeger:4318"),
-                stop=stop,
-                http_client=http,
-                aux_http=aux,
-                user_stream=False,
-            )
+            run_agent(settings, stop=stop, http_client=http, aux_http=aux, user_stream=False)
         )
-        recorded = Recorded(exporter)
+        recorded, measured = Recorded(exporter), Measured(reader)
         for _ in range(200):
             names = {s.name for s in recorded.spans}
-            if {"job check_risk", "job ingest"} <= names:
+            if {"job check_risk", "job ingest"} <= names and "trade_agent.equity" in (
+                points := measured.points()
+            ):
                 break
             await asyncio.sleep(0.05)
         stop.set()
         await asyncio.wait_for(task, timeout=10)
-    assert configured == [("http://jaeger:4318", "testnet")]
-    assert tracing._active is None  # desinstalado ao encerrar
+    assert configured == [
+        ("http://jaeger:4318,http://signoz-ingester:4318", "testnet"),
+        ("http://signoz-ingester:4318", "testnet"),
+    ]
+    assert tracing._active is None and not metrics.enabled()  # desinstalados ao encerrar
+    assert points["trade_agent.equity"] == [({}, 1000.0)]  # a verificação de risco alimentou
     names = {s.name for s in recorded.spans}
     assert {"agent.start", "reconcile.all", "risk.snapshot", "risk.apply"} <= names
     assert {"telemetry.observe", "research.ingest", "research.collect"} <= names
