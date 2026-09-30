@@ -1,6 +1,6 @@
 """Cliente fino da Bot API do Telegram (``sendMessage`` e ``getUpdates`` com long polling).
 
-O token faz parte da URL da API: mensagens de erro nunca incluem a URL.
+O token faz parte da URL da API: mensagens de erro e spans nunca incluem a URL.
 """
 
 from dataclasses import dataclass
@@ -8,9 +8,15 @@ from typing import Any
 
 import httpx
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
+from trade_agent import tracing
 
 API_URL = "https://api.telegram.org"
 MAX_MESSAGE = 4096
+UNTRACED = frozenset({"getUpdates"})
+"""A espera por mensagens (long polling a cada 30 s) não vira trace; o comando recebido, sim."""
 
 log = structlog.get_logger(__name__)
 
@@ -45,8 +51,22 @@ class TelegramBot:
     def __init__(self, http: httpx.AsyncClient, token: str, *, base_url: str = API_URL) -> None:
         self._http = http
         self._url = f"{base_url}/bot{token}"
+        self._host = httpx.URL(base_url).host
 
     async def _call(self, method: str, payload: dict[str, Any], wait_s: float) -> Any:
+        if method in UNTRACED:
+            return await self._post(method, payload, wait_s)
+        attributes: dict[str, tracing.AttributeValue] = {
+            "rpc.method": method,
+            "peer.service": "telegram",
+            "server.address": self._host,
+        }
+        with tracing.span(
+            "telegram", f"telegram {method}", kind=SpanKind.CLIENT, attributes=attributes
+        ):
+            return await self._post(method, payload, wait_s)
+
+    async def _post(self, method: str, payload: dict[str, Any], wait_s: float) -> Any:
         try:
             response = await self._http.post(f"{self._url}/{method}", json=payload, timeout=wait_s)
         except httpx.HTTPError as exc:
@@ -56,6 +76,7 @@ class TelegramBot:
         except ValueError:
             data = {}
         log.debug("telegram.call", method=method, status=response.status_code, ok=data.get("ok"))
+        trace.get_current_span().set_attribute("http.response.status_code", response.status_code)
         if response.status_code != 200 or not data.get("ok"):
             description = data.get("description", response.reason_phrase)
             raise TelegramError(f"{method}: HTTP {response.status_code} {description}")

@@ -16,6 +16,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
 | Telemetria | Grafana → *Saúde técnica* → "Segundos desde a última foto" | abaixo de 360 s |
 | Heartbeat | painel do Healthchecks.io | ping a cada minuto |
 | Logs | Grafana → *Logs* | linhas chegando de todos os serviços, sem tracebacks |
+| Traces | Jaeger → *System Architecture* | os componentes do agente ligados entre si |
 
 **Ambiente:** o **Spot Testnet** serve para validar ordens (spike e `pytest -m live`), mas não para o ciclo de decisão. Ele é reiniciado periodicamente e tem só ~20 dias de histórico (os sinais precisam de 201 candles e o universo, de 30 dias), além de volumes artificiais. O universo fica vazio e o log mostra `decision.empty_universe`. Para o *paper trading*, use o **Demo Mode** (`TA_BINANCE_ENV=demo`, com chaves criadas em demo.binance.com), que usa dados reais de mercado.
 
@@ -53,14 +54,29 @@ Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são masc
 sum by (event) (count_over_time({service="agent"} | event!="" [1h]))  # eventos mais frequentes
 ```
 
-Um traceback do Python chega como uma entrada só, com `level="error"`. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
+Um traceback do Python chega como uma entrada só, com `level="error"`.
+
+### 1.2 Traces (OpenTelemetry e Jaeger)
+
+Cada tarefa do agente vira um trace no Jaeger (`http://127.0.0.1:16686`, 7 dias em disco): a verificação de risco, a coleta de notícias, a reconciliação, cada ciclo de decisão, cada comando do Telegram e a partida. Cada componente aparece como um serviço (`trade-agent.runtime`, `.risk`, `.decision`, `.research`, `.llm`, `.execution`, `.exchange`, `.reconcile`, `.db`, `.telegram`, `.telemetry`), e a aba **System Architecture** desenha quem chama quem, com a contagem de chamadas.
+
+| Onde | Para quê |
+|------|----------|
+| Jaeger → *Search* (serviço `trade-agent.runtime`, operação `job ...`) | a tarefa inteira, passo a passo, com a duração de cada chamada |
+| Jaeger → *Search* (tag `error=true`) | traces com falha: exceção e mensagem no span |
+| Grafana → *Explore* → *Traces* | o mesmo trace; em cada span, **Logs for this span** abre os logs no Loki |
+| Grafana → *Explore* → *Logs* | um log do agente com `trace_id` mostra **Abrir trace** |
+
+**O que cada span registra:** Binance (método, caminho sem query, status, peso usado), SQL (comando com `$1`, `$2`..., nunca os valores), LLM (modelo, finalidade, tokens, custo e motivo de parada, nunca o conteúdo), Telegram (método e comando, nunca o token nem o texto), decisão (perfil, avaliados, entradas, saídas e recusas), risco (patrimônio, gatilhos e mudanças de estado). O heartbeat e a espera por mensagens do Telegram não geram traces.
+
+O Jaeger fica fixado na 2.20: a 2.21 removeu a API v1 que o datasource do Grafana usa (há um teste que falha se a versão mudar). Com o Jaeger fora do ar, o agente segue normalmente e descarta os spans. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
 
 ## 2. Incidentes
 
 ### 2.1 Agente fora do ar (alerta "Agente sem telemetria" ou Healthchecks.io)
 
 1. As posições seguem protegidas pelos OCO na Binance. Não há urgência para vender.
-2. `docker compose ... ps` e `logs --tail 200 agent`. Procure `runtime.task_failed`, `AlreadyRunningError` e erros de banco. Se o contêiner foi removido, os logs anteriores à queda continuam no dashboard *Logs*.
+2. `docker compose ... ps` e `logs --tail 200 agent`. Procure `runtime.task_failed`, `AlreadyRunningError` e erros de banco. Se o contêiner foi removido, os logs anteriores à queda continuam no dashboard *Logs*. No Jaeger, a busca com `error=true` mostra em que passo a tarefa falhou.
 3. Reinicie com `docker compose ... restart agent`. A partida aplica as migrações, sincroniza o relógio e **reconcilia** tudo: intenções pendentes, posições e órfãs.
 4. Confira `/status` e o painel *Posições*.
 

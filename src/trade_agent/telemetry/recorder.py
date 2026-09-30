@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import structlog
 from sqlalchemy import select
 
+from trade_agent import tracing
 from trade_agent.exchange.rest import BinanceRestClient
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.models import TelemetrySnapshotRecord
@@ -40,6 +41,7 @@ class TelemetryRecorder:
         self._recorded_at: datetime | None = None
         self.latest: RiskSnapshot | None = None
 
+    @tracing.traced("telemetry", "telemetry.observe")
     async def observe(self, snapshot: RiskSnapshot) -> bool:
         """Recebe o snapshot da verificação de risco; persiste se a foto estiver vencida."""
         self.latest = snapshot

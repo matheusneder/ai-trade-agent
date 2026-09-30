@@ -1,0 +1,20 @@
+# Traces do agente (Jaeger). Cada span abre os logs do mesmo trace no Loki ("Logs for this
+# span"): o agente grava trace_id em cada log. `$$` escapa o `$` da interpolação de variáveis
+# de ambiente do provisionamento.
+apiVersion: 1
+
+datasources:
+  - name: Traces
+    uid: trade-agent-jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    jsonData:
+      nodeGraph:
+        enabled: true
+      tracesToLogsV2:
+        datasourceUid: trade-agent-loki
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        customQuery: true
+        query: '{service="agent"} | trace_id="$${__trace.traceId}"'

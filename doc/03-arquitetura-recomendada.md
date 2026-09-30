@@ -474,6 +474,8 @@ flowchart TD
 
 Os logs de todos os contêineres ficam centralizados no **Loki** por 30 dias. A coleta é do **Grafana Alloy**, que lê a API do Docker por um proxy somente leitura numa rede interna exclusiva. Os rótulos são `service` e `level`, e o `event` do structlog vai como metadado estruturado.
 
+Os **traces** usam OpenTelemetry com exportação OTLP/HTTP ao **Jaeger** (7 dias em disco). Cada componente do agente é um serviço no namespace `trade-agent`: runtime, risco, decisão, pesquisa, LLM, execução, exchange, reconciliação, banco, Telegram e telemetria. Assim, o grafo *System Architecture* do Jaeger mostra as dependências entre eles. Cada tarefa de fundo é a raiz de um trace. Os spans nunca levam segredos nem conteúdo: só caminhos, métodos, contagens, identificadores, tokens e custos. O `trace_id` vai em cada log, e o Grafana liga logs e traces nos dois sentidos.
+
 ### 12.2 Alertas
 
 | Severidade | Exemplos | Canal |

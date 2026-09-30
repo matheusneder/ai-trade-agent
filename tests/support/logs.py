@@ -106,7 +106,8 @@ def query(url: str, expr: str, *, instant: bool = False, window_s: int = 3600) -
 
 def label_values(url: str, label: str) -> list[str]:
     body = httpx.get(f"{url}/loki/api/v1/label/{label}/values", timeout=10).json()
-    return list(body["data"])
+    assert body["status"] == "success", body
+    return list(body.get("data") or [])  # rótulo inexistente: sem "data"
 
 
 def counts(url: str, expr: str) -> dict[tuple[tuple[str, str], ...], int]:

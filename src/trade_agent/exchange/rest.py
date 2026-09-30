@@ -21,7 +21,9 @@ from urllib.parse import quote
 
 import httpx
 import structlog
+from opentelemetry.trace import Span, SpanKind
 
+from trade_agent import tracing
 from trade_agent.exchange.errors import (
     INVALID_TIMESTAMP_CODE,
     UNKNOWN_STATUS_CODES,
@@ -223,17 +225,34 @@ class BinanceRestClient:
         return await self._send(method, url, headers={API_KEY_HEADER: self._api_key})
 
     async def _send(self, method: HttpMethod, url: str, headers: dict[str, str]) -> Any:
-        # só o caminho vai para logs e mensagens de erro: a query tem a assinatura
+        # só o caminho vai para logs, spans e mensagens de erro: a query tem a assinatura
         path = url.split("?", 1)[0]
+        attributes: dict[str, tracing.AttributeValue] = {
+            "http.request.method": method,
+            "url.path": path,
+            "server.address": self._http.base_url.host,
+            "peer.service": "binance",
+            "trade_agent.signed": API_KEY_HEADER in headers,
+        }
+        with tracing.span(
+            "exchange", f"{method} {path}", kind=SpanKind.CLIENT, attributes=attributes
+        ) as span:
+            return await self._request(method, url, path, headers, span)
+
+    async def _request(
+        self, method: HttpMethod, url: str, path: str, headers: dict[str, str], span: Span
+    ) -> Any:
         started = time.monotonic()
         try:
             response = await self._http.request(method, url, headers=headers)
         except _NOT_SENT_ERRORS as exc:
             self.health.record(ok=False)
+            span.set_attribute("error.type", type(exc).__name__)
             log.debug("rest.request_failed", method=method, path=path, error=type(exc).__name__)
             raise BinanceConnectionError(f"falha de conexão em {method} {path}: {exc!r}") from exc
         except httpx.TransportError as exc:
             self.health.record(ok=False)
+            span.set_attribute("error.type", type(exc).__name__)
             log.debug("rest.request_failed", method=method, path=path, error=type(exc).__name__)
             raise BinanceUnknownStatusError(
                 f"resultado desconhecido em {method} {path}: {exc!r}"
@@ -242,6 +261,9 @@ class BinanceRestClient:
         status = response.status_code
         self.health.record(ok=status < 500 and status not in {418, 429})
         self.usage.update(response.headers)
+        span.set_attribute("http.response.status_code", status)
+        if self.usage.used_weight_1m is not None:
+            span.set_attribute("trade_agent.used_weight_1m", self.usage.used_weight_1m)
         log.debug(
             "rest.request",
             method=method,

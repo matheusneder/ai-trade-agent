@@ -49,6 +49,8 @@ from trade_agent.runtime import Action, AgentRuntime, Service
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 from trade_agent.telemetry.heartbeat import Heartbeat
 from trade_agent.telemetry.recorder import TelemetryRecorder
+from trade_agent.tracing import configure_tracing
+from trade_agent.tracing import install as install_tracing
 
 RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
@@ -143,6 +145,7 @@ def assemble(
         async def action() -> object:
             return await engine.run_profile(name)
 
+        action.__qualname__ = f"decide_{name}"  # nome da tarefa nos logs e traces
         return action
 
     commands: CommandCenter | None = None
@@ -204,6 +207,7 @@ def assemble(
         heartbeat=heartbeat is not None,
         llm=llm is not None,
         llm_budget_usd=str(research_config.budget.daily_usd),
+        tracing=settings.otlp_endpoint is not None,
     )
     return AgentParts(
         guard=guard,
@@ -310,7 +314,13 @@ async def run_agent(
 ) -> None:
     stop = stop or asyncio.Event()
     install_signal_handlers(stop)
-    async with build_runtime(
-        settings, http_client=http_client, aux_http=aux_http, llm=llm, user_stream=user_stream
-    ) as runtime:
-        await runtime.run(stop)
+    traces = configure_tracing(settings.otlp_endpoint, environment=settings.binance_env.value)
+    try:
+        async with build_runtime(
+            settings, http_client=http_client, aux_http=aux_http, llm=llm, user_stream=user_stream
+        ) as runtime:
+            await runtime.run(stop)
+    finally:
+        if traces is not None:
+            traces.shutdown()  # envia os spans que ainda estão na fila
+        install_tracing(None)

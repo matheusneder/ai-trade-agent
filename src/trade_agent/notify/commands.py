@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.notify.telegram import TelegramBot, TelegramError, Update
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.risk.guard import RiskGuard
@@ -112,8 +113,11 @@ class CommandCenter:
             f"Confirme em 2 min com: /flatten {scope} {code}"
         )
 
+    @tracing.traced("telegram", "telegram.command")
     async def process(self, update: Update) -> None:
         command = update.text.split(maxsplit=1)[0] if update.text.strip() else ""
+        # só a palavra do comando: o texto pode ter o código de confirmação do /flatten
+        tracing.annotate(command=command, authorized=update.chat_id == self._chat_id)
         log.debug(
             "telegram.update",
             update_id=update.update_id,

@@ -20,8 +20,11 @@ from typing import Any, Protocol
 import anthropic
 import structlog
 from anthropic.types import Message, Usage
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 from pydantic import BaseModel, ValidationError
 
+from trade_agent import tracing
 from trade_agent.research.config import ModelPrice, PricingConfig, ResearchConfig
 
 log = structlog.get_logger(__name__)
@@ -162,6 +165,13 @@ class ClaudeClient:
             at=self._clock(),
         )
         await self._ledger.record(record)
+        current = trace.get_current_span()
+        current.set_attribute("gen_ai.response.finish_reasons", [str(response.stop_reason)])
+        current.set_attribute("gen_ai.usage.input_tokens", record.input_tokens)
+        current.set_attribute("gen_ai.usage.output_tokens", record.output_tokens)
+        current.set_attribute("trade_agent.cache_read_input_tokens", record.cache_read_input_tokens)
+        current.set_attribute("trade_agent.web_searches", record.web_search_requests)
+        current.set_attribute("trade_agent.cost_usd", str(record.cost_usd))
         log.debug(
             "llm.response",
             purpose=purpose,
@@ -178,23 +188,33 @@ class ClaudeClient:
         return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 
     async def _create(self, purpose: str, **params: Any) -> Message:
-        await self._check_budget()
-        log.debug(
-            "llm.request",
-            purpose=purpose,
-            model=params["model"],
-            max_tokens=params.get("max_tokens"),
-            tools=[t["type"] for t in params.get("tools", [])],
-            turns=len(params.get("messages", [])),
-        )
-        try:
-            response: Message = await self._client.messages.create(
-                timeout=self._config.models.timeout_s, **params
+        model = params["model"]
+        attributes: dict[str, tracing.AttributeValue] = {
+            "gen_ai.provider.name": "anthropic",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": model,
+            "gen_ai.request.max_tokens": params.get("max_tokens") or 0,
+            "peer.service": "anthropic",
+            "trade_agent.purpose": purpose,
+        }
+        with tracing.span("llm", f"chat {model}", kind=SpanKind.CLIENT, attributes=attributes):
+            await self._check_budget()
+            log.debug(
+                "llm.request",
+                purpose=purpose,
+                model=model,
+                max_tokens=params.get("max_tokens"),
+                tools=[t["type"] for t in params.get("tools", [])],
+                turns=len(params.get("messages", [])),
             )
-        except anthropic.APIError as exc:
-            raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
-        await self._record(purpose, params["model"], response)
-        return response
+            try:
+                response: Message = await self._client.messages.create(
+                    timeout=self._config.models.timeout_s, **params
+                )
+            except anthropic.APIError as exc:
+                raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
+            await self._record(purpose, model, response)
+            return response
 
     async def structured[T: BaseModel](
         self,

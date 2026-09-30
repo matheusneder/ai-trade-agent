@@ -4,6 +4,24 @@ from collections.abc import Iterator
 import pytest
 import structlog
 
+from tests.support.tracing import Recorded, recording
+from trade_agent import tracing
+
+
+@pytest.fixture
+def spans() -> Iterator[Recorded]:
+    """Spans de todos os componentes, gravados em memória durante o teste."""
+    with recording() as recorded:
+        yield recorded
+
+
+@pytest.fixture(autouse=True)
+def _no_tracing_leak() -> Iterator[None]:
+    """Nenhum teste herda (nem deixa) um rastreamento instalado."""
+    tracing.install(None)
+    yield
+    tracing.install(None)
+
 
 @pytest.fixture(autouse=True)
 def _isolate_environment(monkeypatch: pytest.MonkeyPatch) -> None:
