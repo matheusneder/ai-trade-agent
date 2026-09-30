@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.exchange.api import BinanceSpotApi, OrderListKind
 from trade_agent.exchange.errors import (
     BinanceConnectionError,
@@ -73,6 +74,7 @@ class ExecutionGateway:
         self._sleep = sleep
 
     # ------------------------------------------------------------------ envio idempotente
+    @tracing.traced("execution", "order_list.submit")
     async def submit_order_list(
         self, kind: OrderListKind, params: Mapping[str, ParamValue]
     ) -> OrderList:
@@ -84,6 +86,7 @@ class ExecutionGateway:
             lambda: self.api.find_order_list(list_id),
         )
 
+    @tracing.traced("execution", "order.submit")
     async def submit_order(self, params: Mapping[str, ParamValue]) -> Order:
         symbol, client_id = str(params["symbol"]), str(params["newClientOrderId"])
         log.debug(
@@ -145,6 +148,7 @@ class ExecutionGateway:
         raise OrderOutcomeUnknownError(client_id)
 
     # ------------------------------------------------------------------ cancelamento
+    @tracing.traced("execution", "order_list.cancel")
     async def cancel_order_list(self, symbol: str, list_client_order_id: str) -> OrderList | None:
         """Cancela a lista; ``None`` se ela já não estava ativa (executada/expirada)."""
         log.debug("order_list.cancel", symbol=symbol, list_id=list_client_order_id)
@@ -159,6 +163,7 @@ class ExecutionGateway:
             raise
 
     # ------------------------------------------------------------------ proteção e saída
+    @tracing.traced("execution", "protection.replace")
     async def replace_protection(
         self,
         symbol: str,
@@ -193,6 +198,7 @@ class ExecutionGateway:
             return ProtectionReplacement(protection=None, fallback_exit=exit_order)
         return ProtectionReplacement(protection=protection)
 
+    @tracing.traced("execution", "position.close_submit")
     async def close_position(
         self,
         symbol: str,

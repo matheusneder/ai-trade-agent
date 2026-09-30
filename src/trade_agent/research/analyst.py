@@ -7,6 +7,7 @@ from datetime import datetime
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.research import digest
 from trade_agent.research.config import ResearchConfig
 from trade_agent.research.llm import (
@@ -45,6 +46,7 @@ class MarketAnalyst:
         self._llm = llm
         self._config = config
 
+    @tracing.traced("research", "analyst.triage")
     async def triage(
         self, news: Sequence[StoredNews], known_assets: Iterable[str]
     ) -> dict[int, Triage]:
@@ -73,6 +75,7 @@ class MarketAnalyst:
             if item.id in ids
         }
 
+    @tracing.traced("research", "analyst.analyze")
     async def analyze(
         self,
         *,

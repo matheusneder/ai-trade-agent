@@ -13,6 +13,7 @@ from decimal import Decimal
 import anthropic
 import structlog
 
+from trade_agent import tracing
 from trade_agent.persistence.research_store import ReportEntry, ResearchStore
 from trade_agent.research.analyst import Analysis, MarketAnalyst
 from trade_agent.research.collector import NewsCollector
@@ -71,6 +72,7 @@ class ResearchService:
         self.metrics = MarketMetrics()
         """Métricas da última coleta (usadas no próximo ciclo de pesquisa)."""
 
+    @tracing.traced("research", "research.ingest")
     async def ingest(
         self, *, derivative_symbols: Sequence[str] = (), btc_change_24h: float | None = None
     ) -> IngestReport:
@@ -107,6 +109,7 @@ class ResearchService:
             return news
         return await self._store.recent_news(since)
 
+    @tracing.traced("research", "research.cycle")
     async def run_cycle(
         self, *, trigger: str, candidates: Sequence[CandidateContext], web: bool = True
     ) -> CycleResult:

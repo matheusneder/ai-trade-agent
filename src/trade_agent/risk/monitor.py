@@ -13,6 +13,7 @@ from decimal import Decimal
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.models import BookTicker
 from trade_agent.exchange.rest import CallHealth
@@ -120,6 +121,7 @@ class RiskMonitor:
         )
         return day_start, peak
 
+    @tracing.traced("risk", "risk.snapshot")
     async def snapshot(self) -> RiskSnapshot:
         now = self._clock()
         active = await self._store.active_positions()
@@ -177,6 +179,13 @@ class RiskMonitor:
             unrealized_pnl=unrealized,
             exposure=exposure,
             active_positions=len(active),
+        )
+        tracing.annotate(
+            equity=equity,
+            day_start=day_start,
+            peak=peak,
+            positions=len(active),
+            api_error_rate=snapshot.api_error_rate,
         )
         log.debug(
             "risk.snapshot",

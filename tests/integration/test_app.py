@@ -7,9 +7,13 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from tests.support.fake_binance import FakeBinance
-from trade_agent import cli
+from tests.support.tracing import Recorded
+from trade_agent import app, cli, tracing
 from trade_agent.app import build_runtime, install_signal_handlers, run_agent
 from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.errors import BinanceConfigurationError
@@ -98,6 +102,65 @@ async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Databa
     assert "runtime.task_failed" not in kinds  # risco e coleta rodaram já na partida, sem falha
     assert fake.calls("GET", "/api/v3/time")
     assert "www.coindesk.com" in offline  # nenhum acesso real à internet nos testes
+
+
+async def test_run_agent_traces_the_components(
+    postgres_url: str, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exporter = InMemorySpanExporter()
+    configured: list[tuple[str | None, str]] = []
+
+    def in_memory(endpoint: str | None, *, environment: str) -> tracing.Tracing:
+        configured.append((endpoint, environment))
+        traces = tracing.Tracing(SimpleSpanProcessor(exporter), environment=environment)
+        tracing.install(traces)
+        return traces
+
+    monkeypatch.setattr(app, "configure_tracing", in_memory)
+    fake = FakeBinance()
+    fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
+    stop = asyncio.Event()
+    async with (
+        httpx.AsyncClient(base_url="https://fake.binance", transport=fake.transport) as http,
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as aux,
+    ):
+        task = asyncio.create_task(
+            run_agent(
+                _settings(postgres_url, otlp_endpoint="http://jaeger:4318"),
+                stop=stop,
+                http_client=http,
+                aux_http=aux,
+                user_stream=False,
+            )
+        )
+        recorded = Recorded(exporter)
+        for _ in range(200):
+            names = {s.name for s in recorded.spans}
+            if {"job check_risk", "job ingest"} <= names:
+                break
+            await asyncio.sleep(0.05)
+        stop.set()
+        await asyncio.wait_for(task, timeout=10)
+    assert configured == [("http://jaeger:4318", "testnet")]
+    assert tracing._active is None  # desinstalado ao encerrar
+    names = {s.name for s in recorded.spans}
+    assert {"agent.start", "reconcile.all", "risk.snapshot", "risk.apply"} <= names
+    assert {"telemetry.observe", "research.ingest", "research.collect"} <= names
+    assert {
+        ("runtime", "reconcile"),
+        ("reconcile", "exchange"),
+        ("runtime", "risk"),
+        ("risk", "exchange"),
+        ("risk", "db"),
+        ("runtime", "telemetry"),
+        ("telemetry", "db"),
+        ("runtime", "research"),
+        ("runtime", "db"),  # migrações e eventos da partida
+    } <= recorded.edges()
+    offline = [s for s in recorded.spans if s.name.startswith("source ")]
+    assert offline and all(s.status.status_code is StatusCode.ERROR for s in offline)
+    text_ = recorded.attribute_text()
+    assert "fake-secret" not in text_ and "fake-key" not in text_ and "signature" not in text_
 
 
 async def test_install_signal_handlers_is_safe() -> None:

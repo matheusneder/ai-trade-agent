@@ -1,7 +1,7 @@
 // Coleta os logs dos contêineres do projeto trade-agent e os envia ao Loki.
 // A API do Docker é lida pelo proxy somente leitura (serviço docker-proxy), nunca pelo socket.
-// Rótulos no Loki: service (serviço do compose) e level. No agente, o campo `event` do
-// structlog vai como metadado estruturado: {service="agent"} | event="risk.snapshot".
+// Rótulos no Loki: service (serviço do compose) e level. No agente, os campos `event` e
+// `trace_id` do structlog vão como metadado estruturado: {service="agent"} | event="risk.snapshot".
 
 logging {
 	level  = "warn"
@@ -50,15 +50,29 @@ loki.process "trade_agent" {
 		}
 
 		stage.json {
-			expressions = {level = "", event = ""}
+			expressions = {level = "", event = "", trace_id = ""}
 		}
 
 		stage.labels {
 			values = {level = ""}
 		}
 
+		// trace_id liga o log ao trace no Jaeger: {service="agent"} | trace_id="..."
 		stage.structured_metadata {
-			values = {event = ""}
+			values = {event = "", trace_id = ""}
+		}
+	}
+
+	// Jaeger (OpenTelemetry Collector): JSON com "level".
+	stage.match {
+		selector = "{service=\"jaeger\"}"
+
+		stage.json {
+			expressions = {level = ""}
+		}
+
+		stage.labels {
+			values = {level = ""}
 		}
 	}
 

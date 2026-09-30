@@ -39,6 +39,7 @@ services:
     environment:
       TA_DATABASE_URL: postgresql+asyncpg://trade_agent:${TA_POSTGRES_PASSWORD:-trade_agent_dev}@postgres:5432/trade_agent
       TA_LOG_FORMAT: json
+      TA_OTLP_ENDPOINT: http://jaeger:4318   # traces (OpenTelemetry) para o Jaeger
     volumes:
       - ../secrets:/app/secrets:ro
       - ../config:/app/config:ro   # perfis, disjuntores e analista: edite e reinicie o agente
@@ -77,6 +78,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *logging
+
+  # Traces do agente (OpenTelemetry → OTLP): um serviço por componente, 7 dias no Badger.
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0   # 2.21 removeu a API v1 que o Grafana usa
+    restart: unless-stopped
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    ports:
+      - "127.0.0.1:16686:16686"   # interface: System Architecture e busca de traces
+      - "127.0.0.1:4318:4318"     # OTLP/HTTP para o agente rodando fora do compose (uv run)
+    volumes:
+      - ./jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+      - jaeger:/tmp   # Badger em /tmp/jaeger (permissão: ver deploy/jaeger/config.yaml)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13133/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     logging: *logging
 
   # Logs dos contêineres: Alloy coleta → Loki guarda → Grafana consulta (dashboard "Logs").
@@ -130,3 +149,4 @@ volumes:
   grafana: {}
   loki: {}
   alloy: {}
+  jaeger: {}

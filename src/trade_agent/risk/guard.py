@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.exchange.models import OrderSide, OrderType
 from trade_agent.exchange.rules import SymbolRules
 from trade_agent.persistence.store import Severity, Store
@@ -210,6 +211,7 @@ class RiskGuard:
         return combined(await self.state(GLOBAL), await self.state(profile))
 
     async def _set(self, scope: str, new: ScopeState, *, source: str) -> None:
+        tracing.annotate(scope=scope, state=new.state, source=source, reason=new.reason)
         await self._states.put(scope, new)
         severity = Severity.INFO if new.state is OpState.RUNNING else Severity.CRITICAL
         payload = {"scope": scope, "source": source, **new.to_json()}
@@ -220,10 +222,12 @@ class RiskGuard:
         )
         log.warning("risk.state_changed", **payload)
 
+    @tracing.traced("risk", "risk.apply")
     async def apply(self, hits: Iterable[Hit]) -> list[Hit]:
         """Aplica as ações dos gatilhos; retorna os que mudaram algum estado."""
         applied: list[Hit] = []
         hits = list(hits)
+        tracing.annotate(hits=[h.reason for h in hits])
         log.debug("risk.evaluated", hits=[h.reason for h in hits])
         for hit in hits:
             now = self._clock()
@@ -260,12 +264,15 @@ class RiskGuard:
         return closed
 
     # ------------------------------------------------------------------ comandos manuais
+    @tracing.traced("risk", "risk.pause")
     async def pause(self, scope: str, reason: str = "manual") -> None:
         await self._set(scope, ScopeState(OpState.PAUSED, reason, self._clock()), source="manual")
 
+    @tracing.traced("risk", "risk.halt")
     async def halt(self, scope: str, reason: str = "manual") -> None:
         await self._set(scope, ScopeState(OpState.HALTED, reason, self._clock()), source="manual")
 
+    @tracing.traced("risk", "risk.resume")
     async def resume(self, scope: str) -> bool:
         """Volta a ``RUNNING``; recusa durante um flatten em andamento."""
         if (await self.state(scope)).state is OpState.FLATTENING:
@@ -273,6 +280,7 @@ class RiskGuard:
         await self._set(scope, ScopeState(reason="retomado pelo operador"), source="manual")
         return True
 
+    @tracing.traced("risk", "risk.flatten")
     async def flatten(self, scope: str, reason: str = "manual") -> int:
         now = self._clock()
         await self._set(scope, ScopeState(OpState.FLATTENING, reason, now), source="manual")

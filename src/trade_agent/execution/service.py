@@ -19,6 +19,7 @@ from typing import Any
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.errors import (
     BinanceAPIError,
@@ -111,6 +112,7 @@ class PositionService:
         self._now = now
 
     # ================================================================== abrir
+    @tracing.traced("execution", "position.open")
     async def open_position(
         self,
         *,
@@ -120,6 +122,7 @@ class PositionService:
         decision_id: str | None = None,
     ) -> Position:
         """Grava a intenção, envia o OPOCO e sincroniza o estado resultante."""
+        tracing.annotate(symbol=entry.symbol, profile=profile)
         rules = await self.rules.get(entry.symbol)
         decision = decision_id or new_decision_id()
         ids = order_ids(profile, decision)
@@ -158,8 +161,10 @@ class PositionService:
         return await self.sync(await self.store.get_position(position.id))
 
     # ================================================================== sincronizar
+    @tracing.traced("execution", "position.sync")
     async def sync(self, position: Position) -> Position:
         """Deriva o estado da posição a partir da exchange e age se necessário."""
+        tracing.annotate(symbol=position.symbol, position=position.id, state=position.state)
         if position.state.is_terminal:
             return position
         if position.state is S.EXITING:
@@ -362,8 +367,10 @@ class PositionService:
             take_profit = LimitTakeProfit(max(take_profit.price, floor))
         return Protection(take_profit, protection.stop)
 
+    @tracing.traced("execution", "position.reprotect")
     async def reprotect(self, position: Position, held_qty: Decimal | None) -> Position:
         """Cria um novo OCO para o saldo sem proteção (ou vende, se o stop já foi atravessado)."""
+        tracing.annotate(symbol=position.symbol, position=position.id)
         rules = await self.rules.get(position.symbol)
         free = (await self.api.account()).balance(position.base_asset).free
         qty = rules.round_qty(min(held_qty, free) if held_qty is not None else free)
@@ -450,10 +457,12 @@ class PositionService:
         return await self._finalize_exit(position, order, reason)
 
     # ================================================================== encerrar
+    @tracing.traced("execution", "position.close")
     async def close_position(
         self, position: Position, reason: ExitReason = ExitReason.DECISION
     ) -> Position:
         """Cancela a proteção e vende a mercado."""
+        tracing.annotate(symbol=position.symbol, position=position.id, reason=reason)
         rules = await self.rules.get(position.symbol)
         bid = (await self.api.book_ticker(position.symbol)).bid_price
         free = (await self.api.account()).balance(position.base_asset).total
@@ -496,8 +505,10 @@ class PositionService:
         return await self._on_unprotected(position, verdict)
 
     # ================================================================== ajustar
+    @tracing.traced("execution", "position.adjust_protection")
     async def adjust_protection(self, position: Position, protection: Protection) -> Position:
         """Troca o OCO da posição (ex.: stop no *break-even*)."""
+        tracing.annotate(symbol=position.symbol, position=position.id)
         if position.state is not S.PROTECTED or position.protected_qty is None:
             raise ValueError(f"posição {position.id} não está protegida ({position.state})")
         rules = await self.rules.get(position.symbol)

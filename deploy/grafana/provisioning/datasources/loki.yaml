@@ -1,4 +1,6 @@
 # Logs dos contêineres (Loki, alimentado pelo Alloy). Rótulos: service e level.
+# Um log do agente com trace_id ganha o link "Abrir trace" para o Jaeger. `$$` escapa o `$`
+# da interpolação de variáveis de ambiente do provisionamento.
 apiVersion: 1
 
 datasources:
@@ -9,3 +11,9 @@ datasources:
     url: http://loki:3100
     jsonData:
       maxLines: 1000
+      derivedFields:
+        - name: trace_id
+          matcherRegex: '"trace_id": "([0-9a-f]{32})"'
+          datasourceUid: trade-agent-jaeger
+          url: "$${__value.raw}"
+          urlDisplayLabel: Abrir trace

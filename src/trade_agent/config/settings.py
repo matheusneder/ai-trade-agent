@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     """Único chat autorizado a receber alertas e enviar comandos."""
     healthcheck_url: SecretStr | None = None
     """URL de ping do heartbeat externo (ex.: Healthchecks.io); contém um segredo."""
+    otlp_endpoint: str | None = None
+    """Destino OTLP/HTTP dos traces (ex.: ``http://jaeger:4318``); vazio desliga o rastreamento."""
 
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
@@ -81,6 +83,7 @@ class Settings(BaseSettings):
         "telegram_bot_token",
         "telegram_chat_id",
         "healthcheck_url",
+        "otlp_endpoint",
         mode="before",
     )
     @classmethod

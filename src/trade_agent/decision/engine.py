@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService
@@ -66,6 +67,7 @@ class UniverseCache:
         self._clock = clock
         self._cached: tuple[float, Universe] | None = None
 
+    @tracing.traced("decision", "universe.get")
     async def get(self) -> Universe:
         if self._cached is None or self._clock() - self._cached[0] >= self._ttl_s:
             self._cached = (self._clock(), await build_universe(self._api, self._config))
@@ -208,6 +210,7 @@ class DecisionEngine:
         return market_reading(view, profile.llm, now=now, max_age=self._view_max_age), status
 
     # ------------------------------------------------------------------ ciclo
+    @tracing.traced("decision", "decision.cycle")
     async def run_profile(self, name: str) -> CycleReport:
         profile = self._strategy.profiles[name]
         state = await self._guard.effective(name)
@@ -264,6 +267,16 @@ class DecisionEngine:
             rejected=tuple(rejected),
         )
         await self._store.record_event("decision.cycle", Severity.INFO, report.summary())
+        tracing.annotate(
+            profile=name,
+            state=state,
+            dry_run=self._dry_run,
+            evaluated=len(signals),
+            research=research_status,
+            opened=opened,
+            exits=len(exits),
+            rejected=len(rejected),
+        )
         log.info("decision.cycle", **report.summary())
         if (opened or exits) and self._notify is not None:
             prefix = "[simulação] " if self._dry_run else ""
@@ -404,6 +417,7 @@ class DecisionEngine:
         return opened, rejected
 
     # ------------------------------------------------------------------ flatten
+    @tracing.traced("decision", "decision.flatten")
     async def flatten(self, scope: str) -> int:
         """Encerra as posições do escopo: vende as que têm execução e cancela as entradas
         pendentes. Retorna quantas foram tratadas."""
