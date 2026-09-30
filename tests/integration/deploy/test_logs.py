@@ -30,12 +30,14 @@ from tests.support.logs import (
     query,
 )
 
+TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
 SAMPLES = {
     "agent": (
         "agent.log",
         [
             '{"positions": 0, "event": "agent.started", "level": "info"}',
-            '{"equity": "1000", "event": "risk.snapshot", "level": "debug"}',
+            f'{{"equity": "1000", "event": "risk.snapshot", "level": "debug", '
+            f'"trace_id": "{TRACE_ID}", "span_id": "b7ad6b7169203331"}}',
             "Traceback (most recent call last):",
             '  File "/app/src/trade_agent/runtime.py", line 142, in run',
             '    await self.store.record_event("agent.stopped", Severity.INFO)',
@@ -66,6 +68,10 @@ SAMPLES = {
         "docker-proxy.log",
         ["[WARNING]  (1) : Server dockerbackend/dockersocket is UP"],
     ),
+    "jaeger": (
+        "jaeger.log",
+        ['{"level":"warn","ts":"2026-09-30T18:10:12.207Z","msg":"aviso do coletor"}'],
+    ),
 }
 EXPECTED = {
     ("agent", "info"): 1,
@@ -78,6 +84,7 @@ EXPECTED = {
     ("grafana", "error"): 1,
     ("grafana", "info"): 1,
     ("docker-proxy", None): 1,  # sem nível: aparece com o filtro de nível "All" (.*)
+    ("jaeger", "warn"): 1,
 }
 VARIABLES = {"$service": ".+", "$level": ".*", "$busca": "", "$__auto": "1m", "$__range": "1h"}
 
@@ -124,6 +131,14 @@ def test_pipeline_labels_every_service_by_level(loki: str) -> None:
     }
 
 
+def test_trace_id_is_queryable_metadata(loki: str) -> None:
+    (stream,) = query(loki, f'{{service="agent"}} | trace_id="{TRACE_ID}"')
+    ((_, line),) = stream["values"]
+    assert '"event": "risk.snapshot"' in line
+    assert stream["stream"]["trace_id"] == TRACE_ID
+    assert label_values(loki, "trace_id") == []  # metadado, não rótulo: sem cardinalidade alta
+
+
 def test_python_traceback_becomes_one_error_entry(loki: str) -> None:
     (stream,) = query(loki, '{service="agent"} |~ "^Traceback"')
     assert stream["stream"]["level"] == "error"
@@ -152,7 +167,7 @@ def test_dashboard_variables_list_loki_labels(loki: str) -> None:
         assert variables[name]["datasource"] == LOKI
         assert variables[name]["query"] == f"label_values({name})"
     assert set(label_values(loki, "service")) == set(SAMPLES)
-    assert set(label_values(loki, "level")) == {"debug", "info", "warning", "error"}
+    assert set(label_values(loki, "level")) == {"debug", "info", "warning", "warn", "error"}
     assert all(p["datasource"] == LOKI for p in board["panels"])
 
 
@@ -231,5 +246,5 @@ def test_alloy_config_is_canonically_formatted() -> None:
 
 
 def test_versions_are_pinned() -> None:
-    for name in ("loki", "alloy", "docker-proxy", "grafana"):
+    for name in ("loki", "alloy", "docker-proxy", "grafana", "jaeger"):
         assert re.fullmatch(r"[\w./-]+:v?\d+\.\d+\.\d+", image(name)), name

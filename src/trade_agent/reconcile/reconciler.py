@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from trade_agent import tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.errors import BinanceError
 from trade_agent.execution.ids import is_agent_id
@@ -57,6 +58,7 @@ class Reconciler:
         self.store = store
         self._now = now
 
+    @tracing.traced("reconcile", "reconcile.all")
     async def reconcile_all(self) -> ReconcileReport:
         """Reconciliação completa (na partida, periódica e após reconexão do stream)."""
         report = ReconcileReport(started_at=self._now())
@@ -70,6 +72,12 @@ class Reconciler:
         await self.store.set_checkpoint(CHECKPOINT_KEY, report.as_dict())
         if report.transitions or report.orphans or report.errors:
             log.info("reconcile.report", **report.as_dict())
+        tracing.annotate(
+            positions=report.positions,
+            transitions=len(report.transitions),
+            orphans=len(report.orphans),
+            errors=len(report.errors),
+        )
         log.debug(
             "reconcile.done",
             positions=report.positions,
@@ -82,8 +90,10 @@ class Reconciler:
         )
         return report
 
+    @tracing.traced("reconcile", "reconcile.decision")
     async def reconcile_decision(self, decision_id: str) -> Position | None:
         """Sincroniza apenas a posição de uma decisão (eventos do User Data Stream)."""
+        tracing.annotate(decision=decision_id)
         position = await self.store.find_position_by_decision(decision_id)
         if position is None or position.state.is_terminal:
             return position

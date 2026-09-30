@@ -3,14 +3,16 @@ as outras (o erro fica registrado no resultado)."""
 
 import asyncio
 import dataclasses
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence, Sized
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import structlog
+from opentelemetry.trace import SpanKind
 
+from trade_agent import tracing
 from trade_agent.research.config import SourcesConfig
 from trade_agent.research.models import DerivativesSnapshot, FearGreed, MarketMetrics, NewsItem
 from trade_agent.research.sources import (
@@ -22,6 +24,15 @@ from trade_agent.research.sources import (
 from trade_agent.research.tagging import AssetTagger
 
 log = structlog.get_logger(__name__)
+
+
+async def _source[T](name: str, job: Awaitable[T]) -> T:
+    """Uma fonte por span (as fontes rodam em paralelo, sob o span da coleta)."""
+    with tracing.span("research", f"source {name}", kind=SpanKind.CLIENT) as span:
+        result = await job
+        if isinstance(result, Sized):
+            span.set_attribute("trade_agent.items", len(result))
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +55,7 @@ class NewsCollector:
         self._tagger = tagger
         self._clock = clock
 
+    @tracing.traced("research", "research.collect")
     async def collect(
         self, *, derivative_symbols: Sequence[str] = (), btc_change_24h: float | None = None
     ) -> Collection:
@@ -60,7 +72,9 @@ class NewsCollector:
         if config.derivatives and symbols:
             jobs["derivatives"] = fetch_derivatives(self._http, symbols)
 
-        results = await asyncio.gather(*jobs.values(), return_exceptions=True)
+        results = await asyncio.gather(
+            *(_source(name, job) for name, job in jobs.items()), return_exceptions=True
+        )
         errors: dict[str, str] = {}
         items: dict[str, NewsItem] = {}
         fear_greed: FearGreed | None = None
@@ -81,6 +95,7 @@ class NewsCollector:
                     )
                     items.setdefault(tagged.dedupe_key, tagged)
         metrics = MarketMetrics(fear_greed, derivatives, btc_change_24h)
+        tracing.annotate(items=len(items), sources=len(jobs), failed=sorted(errors))
         log.debug(
             "research.collected",
             items=len(items),

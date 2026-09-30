@@ -13,7 +13,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from opentelemetry.trace import INVALID_SPAN
 
+from trade_agent import tracing
 from trade_agent.decision.schedule import run_on_candle_close
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.user_stream import (
@@ -33,6 +35,12 @@ log = structlog.get_logger(__name__)
 type EventSource = Callable[[], AsyncIterator[UserEvent]]
 type Action = Callable[[], Awaitable[object]]
 type Service = Callable[[asyncio.Event], Awaitable[None]]
+
+
+def job_name(action: Action) -> str:
+    """Nome curto da tarefa (``check_risk``, ``reconcile``, ``decide_conservador``)."""
+    qualname = getattr(action, "__qualname__", type(action).__name__)
+    return str(qualname).rsplit(".", 1)[-1].lstrip("_")
 
 
 def affected_decision(event: UserEvent) -> str | None:
@@ -86,26 +94,30 @@ class AgentRuntime:
     async def run(self, stop: asyncio.Event) -> None:
         """Executa até ``stop``; levanta ``AlreadyRunningError`` se houver outra instância."""
         async with self.db.exclusive_lock():
-            await upgrade_to_head(self.db.engine)
-            offset = await self.api.rest.sync_time()
-            report = await self._reconcile()
-            await self.store.record_event(
-                "agent.started",
-                Severity.INFO,
-                {"clock_offset_ms": offset, "reconcile": report.as_dict()},
-            )
-            log.info("agent.started", positions=report.positions, clock_offset_ms=offset)
+            with tracing.span("runtime", "agent.start"):
+                await upgrade_to_head(self.db.engine)
+                offset = await self.api.rest.sync_time()
+                report = await self._reconcile()
+                await self.store.record_event(
+                    "agent.started",
+                    Severity.INFO,
+                    {"clock_offset_ms": offset, "reconcile": report.as_dict()},
+                )
+                tracing.annotate(clock_offset_ms=offset, positions=report.positions)
+                log.info("agent.started", positions=report.positions, clock_offset_ms=offset)
             # a reconciliação acabou de rodar; as demais tarefas rodam já na partida
             # (sem esperar um intervalo inteiro sem risco, telemetria ou notícias)
-            jobs: list[tuple[float, Action, bool]] = [
-                (self._reconcile_interval_s, self._reconcile, False)
+            jobs: list[tuple[float, Action, bool, bool]] = [
+                (self._reconcile_interval_s, self._reconcile, False, True)
             ]
-            if self._heartbeat is not None:
-                jobs.append((self._heartbeat_interval_s, self._heartbeat, True))
-            jobs += [(interval, action, True) for interval, action in self._periodic]
+            if self._heartbeat is not None:  # um ping por minuto: sem trace
+                jobs.append((self._heartbeat_interval_s, self._heartbeat, True, False))
+            jobs += [(interval, action, True, True) for interval, action in self._periodic]
             periodic = [
-                asyncio.create_task(self._every(interval, stop, action, immediate=immediate))
-                for interval, action, immediate in jobs
+                asyncio.create_task(
+                    self._every(interval, stop, action, immediate=immediate, trace=trace)
+                )
+                for interval, action, immediate, trace in jobs
             ]
             periodic += [
                 asyncio.create_task(
@@ -125,7 +137,7 @@ class AgentRuntime:
             consumer = asyncio.create_task(self._consume(self._events)) if self._events else None
             log.debug(
                 "runtime.tasks_started",
-                periodic=[(interval, getattr(a, "__qualname__", "?")) for interval, a, _ in jobs],
+                periodic=[(interval, job_name(action)) for interval, action, _, _ in jobs],
                 candle_jobs=[timeframe for timeframe, _ in self._candle_jobs],
                 services=len(self._services),
                 user_stream=consumer is not None,
@@ -170,30 +182,44 @@ class AgentRuntime:
                     await asyncio.wait_for(stop.wait(), timeout=self._service_backoff_s)
 
     async def _every(
-        self, interval_s: float, stop: asyncio.Event, action: Action, *, immediate: bool = False
+        self,
+        interval_s: float,
+        stop: asyncio.Event,
+        action: Action,
+        *,
+        immediate: bool = False,
+        trace: bool = True,
     ) -> None:
         if immediate:
-            await self._guarded(action)
+            await self._guarded(action, trace=trace)
         while not stop.is_set():
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval_s)
             except TimeoutError:
-                await self._guarded(action)
+                await self._guarded(action, trace=trace)
 
-    async def _guarded(self, action: Action) -> None:
-        name = getattr(action, "__qualname__", type(action).__name__)
+    async def _guarded(self, action: Action, *, trace: bool = True) -> None:
+        """Executa uma tarefa de fundo (a raiz de um trace) sem deixar a falha propagar."""
+        name = job_name(action)
         started = time.monotonic()
-        try:
-            await action()
-            log.debug(
-                "runtime.job", job=name, elapsed_ms=round((time.monotonic() - started) * 1000)
-            )
-        except Exception as exc:  # as tarefas de fundo nunca podem morrer
-            log.error("runtime.task_failed", job=name, error=repr(exc))
-            with contextlib.suppress(Exception):
-                await self.store.record_event(
-                    "runtime.task_failed", Severity.HIGH, {"job": name, "error": repr(exc)}
+        scope = (
+            tracing.span("runtime", f"job {name}")
+            if trace
+            else contextlib.nullcontext(INVALID_SPAN)
+        )
+        with scope as span:
+            try:
+                await action()
+                log.debug(
+                    "runtime.job", job=name, elapsed_ms=round((time.monotonic() - started) * 1000)
                 )
+            except Exception as exc:  # as tarefas de fundo nunca podem morrer
+                tracing.fail(span, exc)
+                log.error("runtime.task_failed", job=name, error=repr(exc))
+                with contextlib.suppress(Exception):
+                    await self.store.record_event(
+                        "runtime.task_failed", Severity.HIGH, {"job": name, "error": repr(exc)}
+                    )
 
     async def _consume(self, events: EventSource) -> None:
         async for event in events():
@@ -206,7 +232,7 @@ class AgentRuntime:
                 await self._guarded(self._reconcile_decision_action(decision))
 
     def _reconcile_decision_action(self, decision: str) -> Action:
-        async def action() -> object:
+        async def reconcile_decision() -> object:
             return await self.reconciler.reconcile_decision(decision)
 
-        return action
+        return reconcile_decision

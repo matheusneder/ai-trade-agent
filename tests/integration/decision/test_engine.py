@@ -15,6 +15,7 @@ from tests.support.candles import HOUR_MS, ohlcv, raw_klines, uptrend_with_pullb
 from tests.support.claude import FakeClaude, research_config
 from tests.support.fake_binance import FakeBinance
 from tests.support.risk import CONDITIONS, POLICY
+from tests.support.tracing import Recorded
 from trade_agent.decision.engine import DecisionEngine, UniverseCache
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.orders import EntryMode, EntryOrder
@@ -151,6 +152,31 @@ async def test_live_cycle_opens_protected_position_once(
     second = await engine.run_profile("conservador")
     assert second.opened == () and ("SOLUSDT", "ativo já em carteira") in second.rejected
     assert len(fake.calls("POST", "/api/v3/orderList/opoco")) == 1
+
+
+async def test_live_cycle_traces_decision_through_execution(
+    spans: Recorded, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    engine, _ = _engine(api, service, store)
+    await engine.run_profile("conservador")
+    cycle = spans.one("decision.cycle")
+    attributes = cycle.attributes or {}
+    assert attributes["trade_agent.profile"] == "conservador"
+    assert tuple(attributes["trade_agent.opened"]) == ("SOLUSDT",)
+    assert attributes["trade_agent.dry_run"] is False
+    opened = spans.one("position.open")
+    assert (opened.attributes or {})["trade_agent.symbol"] == "SOLUSDT"
+    submit = spans.one("order_list.submit")
+    assert spans.parent(submit) == opened
+    assert spans.parent(spans.one("POST /api/v3/orderList/opoco")) == submit
+    assert {
+        ("decision", "exchange"),
+        ("decision", "execution"),
+        ("decision", "db"),
+        ("execution", "exchange"),
+        ("execution", "db"),
+    } <= spans.edges()
 
 
 async def test_pause_blocks_entries_and_pre_trade_rejects(

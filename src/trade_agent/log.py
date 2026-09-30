@@ -8,6 +8,9 @@ tarefas de fundo.
 
 Segredos nunca devem chegar aos logs; ``redact_secrets`` é a última barreira: mascara
 campos com nomes sensíveis e padrões conhecidos de token em qualquer texto.
+
+Dentro de um span (OpenTelemetry), cada log leva ``trace_id`` e ``span_id``: no Grafana, o
+log abre o trace no Jaeger e o trace lista os seus logs.
 """
 
 import logging
@@ -18,6 +21,7 @@ from typing import Any
 import structlog
 
 from trade_agent.config.settings import LogFormat, LogLevel
+from trade_agent.tracing import add_trace_ids
 
 REDACTED = "***"
 # nome exato do campo (ou sufixo após "_"): "bot_token" é mascarado, "input_tokens" não
@@ -32,6 +36,8 @@ SECRET_PATTERNS = (
 )
 # Bibliotecas que registram URLs completas (podem conter tokens): nunca abaixo de WARNING.
 QUIET_LIBRARIES = ("httpx", "httpcore", "httpx2", "httpcore2", "websockets", "anthropic")
+# O exportador de traces avisa a cada nova tentativa com o Jaeger fora do ar: só erros finais.
+TRACE_EXPORTER_LOGGER = "opentelemetry"
 
 
 def _scrub(text: str) -> str:
@@ -56,6 +62,7 @@ def configure_logging(level: LogLevel = "INFO", fmt: LogFormat = LogFormat.CONSO
     """Configura o structlog para saída em console (dev) ou JSON (produção)."""
     processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
+        add_trace_ids,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
@@ -72,3 +79,4 @@ def configure_logging(level: LogLevel = "INFO", fmt: LogFormat = LogFormat.CONSO
     )
     for name in QUIET_LIBRARIES:
         logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger(TRACE_EXPORTER_LOGGER).setLevel(logging.ERROR)

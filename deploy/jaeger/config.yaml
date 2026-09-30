@@ -1,0 +1,60 @@
+# Jaeger v2 (sobre o OpenTelemetry Collector): recebe OTLP do agente e guarda os traces no
+# Badger por 7 dias. Interface e API em 127.0.0.1:16686; o Grafana consulta por jaeger:16686.
+# O volume `jaeger` é montado em /tmp: o Docker copia para ele a permissão do /tmp da imagem,
+# gravável pelo usuário do Jaeger (10001); um diretório novo nasceria só para o root.
+# Versão fixada em 2.20: a 2.21 removeu a API HTTP v1 (/api/services, /api/traces), que o
+# datasource Jaeger do Grafana (12.2 e 12.4) ainda usa.
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    metrics:
+      level: none
+    logs:
+      level: warn
+      encoding: json
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+
+  jaeger_query:
+    storage:
+      traces: badger_store
+    enable_tracing: false   # sem traces do próprio Jaeger (serviço "jaeger") misturados aos do agente
+    http:
+      endpoint: 0.0.0.0:16686
+    grpc:
+      endpoint: 0.0.0.0:16685
+
+  jaeger_storage:
+    backends:
+      badger_store:
+        badger:
+          directories:
+            keys: /tmp/jaeger/keys
+            values: /tmp/jaeger/values
+          ephemeral: false
+          ttl:
+            spans: 168h   # 7 dias
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: badger_store
