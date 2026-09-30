@@ -24,7 +24,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from pydantic import BaseModel, ValidationError
 
-from trade_agent import tracing
+from trade_agent import metrics, tracing
 from trade_agent.research.config import ModelPrice, PricingConfig, ResearchConfig
 
 log = structlog.get_logger(__name__)
@@ -165,11 +165,24 @@ class ClaudeClient:
             at=self._clock(),
         )
         await self._ledger.record(record)
+        metrics.record_llm(
+            model=model,
+            purpose=purpose,
+            cost_usd=record.cost_usd,
+            input_tokens=record.input_tokens,
+            output_tokens=record.output_tokens,
+        )
         current = trace.get_current_span()
         current.set_attribute("gen_ai.response.finish_reasons", [str(response.stop_reason)])
         current.set_attribute("gen_ai.usage.input_tokens", record.input_tokens)
         current.set_attribute("gen_ai.usage.output_tokens", record.output_tokens)
-        current.set_attribute("trade_agent.cache_read_input_tokens", record.cache_read_input_tokens)
+        # nomes das convenções GenAI: o SigNoz calcula o custo por modelo com eles
+        current.set_attribute(
+            "gen_ai.usage.cache_read.input_tokens", record.cache_read_input_tokens
+        )
+        current.set_attribute(
+            "gen_ai.usage.cache_creation.input_tokens", record.cache_creation_input_tokens
+        )
         current.set_attribute("trade_agent.web_searches", record.web_search_requests)
         current.set_attribute("trade_agent.cost_usd", str(record.cost_usd))
         log.debug(

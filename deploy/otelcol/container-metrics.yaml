@@ -1,0 +1,43 @@
+# CPU, memória, rede e disco de cada contêiner do projeto (docker_stats) → SigNoz.
+# Lê a API do Docker pelo proxy somente leitura (docker-proxy), como o Alloy. O aviso de
+# "conexão TCP sem TLS com o Docker" na partida se refere a esse proxy, numa rede interna.
+receivers:
+  docker_stats:
+    endpoint: tcp://docker-proxy:2375
+    collection_interval: 30s
+    timeout: 10s
+    container_labels_to_metric_labels:
+      com.docker.compose.project: compose.project
+      com.docker.compose.service: compose.service
+
+processors:
+  # só os contêineres deste projeto (a VM também roda o Kubernetes local)
+  filter/project:
+    error_mode: ignore
+    metrics:
+      metric:
+        - resource.attributes["compose.project"] != "trade-agent"
+  resource:
+    attributes:
+      - key: service.namespace
+        value: trade-agent
+        action: upsert
+  batch:
+    timeout: 10s
+
+exporters:
+  otlp_http:
+    endpoint: http://signoz-ingester:4318
+
+service:
+  pipelines:
+    metrics:
+      receivers: [docker_stats]
+      processors: [filter/project, resource, batch]
+      exporters: [otlp_http]
+  telemetry:
+    logs:
+      level: warn
+      encoding: json
+    metrics:
+      level: none

@@ -49,10 +49,10 @@ def service_name(component: str) -> str:
 
 
 class Tracing:
-    """Provedores por componente com um processador compartilhado."""
+    """Provedores por componente; cada processador (um por destino) é compartilhado por todos."""
 
-    def __init__(self, processor: SpanProcessor, *, environment: str) -> None:
-        self._processor = processor
+    def __init__(self, *processors: SpanProcessor, environment: str) -> None:
+        self._processors = processors
         self._providers: dict[str, TracerProvider] = {}
         for component in COMPONENTS:
             resource = Resource.create(
@@ -60,19 +60,23 @@ class Tracing:
                     "service.name": service_name(component),
                     "service.namespace": NAMESPACE,
                     "service.version": version("trade-agent"),
+                    # o nome atual e o antigo (o SigNoz agrupa as métricas pelo antigo)
                     "deployment.environment.name": environment,
+                    "deployment.environment": environment,
                 }
             )
             provider = TracerProvider(resource=resource, shutdown_on_exit=False)
-            provider.add_span_processor(processor)
+            for processor in processors:
+                provider.add_span_processor(processor)
             self._providers[component] = provider
 
     def tracer(self, component: str) -> trace.Tracer:
         return self._providers[component].get_tracer("trade_agent")
 
     def shutdown(self) -> None:
-        """Envia o que falta na fila e encerra (uma vez: o processador é compartilhado)."""
-        self._processor.shutdown()
+        """Envia o que falta nas filas e encerra (uma vez: os processadores são compartilhados)."""
+        for processor in self._processors:
+            processor.shutdown()
 
 
 _active: Tracing | None = None
@@ -83,13 +87,25 @@ def install(tracing: Tracing | None) -> None:
     _active = tracing
 
 
+def endpoints(value: str | None) -> list[str]:
+    """``"http://jaeger:4318, http://signoz-ingester:4318"`` → lista sem vazios nem ``/`` final."""
+    return [e.strip().rstrip("/") for e in (value or "").split(",") if e.strip()]
+
+
 def configure_tracing(endpoint: str | None, *, environment: str) -> Tracing | None:
-    """Liga a exportação OTLP/HTTP para ``endpoint`` (ex.: ``http://jaeger:4318``)."""
-    if endpoint is None:
+    """Liga a exportação OTLP/HTTP para cada destino (ex.: ``http://jaeger:4318``).
+
+    Cada destino tem a sua fila: um fora do ar não atrasa nem derruba o outro.
+    """
+    targets = endpoints(endpoint)
+    if not targets:
         install(None)
         return None
-    exporter = OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces", timeout=5)
-    tracing = Tracing(BatchSpanProcessor(exporter), environment=environment)
+    processors = [
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{target}/v1/traces", timeout=5))
+        for target in targets
+    ]
+    tracing = Tracing(*processors, environment=environment)
     install(tracing)
     return tracing
 

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import structlog
 from sqlalchemy import select
 
-from trade_agent import tracing
+from trade_agent import metrics, tracing
 from trade_agent.exchange.rest import BinanceRestClient
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.models import TelemetrySnapshotRecord
@@ -45,6 +45,22 @@ class TelemetryRecorder:
     async def observe(self, snapshot: RiskSnapshot) -> bool:
         """Recebe o snapshot da verificação de risco; persiste se a foto estiver vencida."""
         self.latest = snapshot
+        if metrics.enabled():  # métricas a cada leitura; a foto no banco, a cada ``interval``
+            metrics.observe(
+                metrics.Reading(
+                    equity=snapshot.equity,
+                    day_start_equity=snapshot.day_start_equity,
+                    peak_equity=snapshot.peak_equity,
+                    realized_pnl=snapshot.realized_pnl,
+                    unrealized_pnl=snapshot.unrealized_pnl,
+                    exposure=snapshot.exposure,
+                    active_positions=snapshot.active_positions,
+                    api_error_rate=snapshot.api_error_rate,
+                    clock_offset_ms=self._rest.time_offset_ms,
+                    used_weight_1m=self._rest.usage.used_weight_1m,
+                    states=await self._states(),
+                )
+            )
         if self._recorded_at is not None and snapshot.now - self._recorded_at < self._interval:
             return False
         await self.record()
@@ -56,7 +72,7 @@ class TelemetryRecorder:
         s = self.latest
         if s is None:
             return False
-        states = {scope: (await self._guard.state(scope)).state.value for scope in self._scopes}
+        states = await self._states()
         profiles = {
             name: {
                 "daily_pnl": str(s.profile_daily_pnl.get(name, 0)),
@@ -88,6 +104,9 @@ class TelemetryRecorder:
             )
         log.debug("telemetry.recorded", at=s.now.isoformat(), equity=str(s.equity), states=states)
         return True
+
+    async def _states(self) -> dict[str, str]:
+        return {scope: (await self._guard.state(scope)).state.value for scope in self._scopes}
 
     async def last_recorded(self) -> TelemetrySnapshotRecord | None:
         async with self._db.session() as session:

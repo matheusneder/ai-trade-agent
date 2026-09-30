@@ -68,7 +68,9 @@ class Settings(BaseSettings):
     healthcheck_url: SecretStr | None = None
     """URL de ping do heartbeat externo (ex.: Healthchecks.io); contém um segredo."""
     otlp_endpoint: str | None = None
-    """Destino OTLP/HTTP dos traces (ex.: ``http://jaeger:4318``); vazio desliga o rastreamento."""
+    """Destinos OTLP/HTTP dos traces, separados por vírgula (Jaeger, SigNoz); vazio desliga."""
+    otlp_metrics_endpoint: str | None = None
+    """Destino OTLP/HTTP das métricas do agente (ex.: ``http://signoz-ingester:4318``)."""
 
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
@@ -84,6 +86,7 @@ class Settings(BaseSettings):
         "telegram_chat_id",
         "healthcheck_url",
         "otlp_endpoint",
+        "otlp_metrics_endpoint",
         mode="before",
     )
     @classmethod

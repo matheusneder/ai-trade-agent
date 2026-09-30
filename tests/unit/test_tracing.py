@@ -54,25 +54,34 @@ def test_without_configuration_spans_are_free() -> None:
 def test_configure_tracing_exports_every_component(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tracing, "OTLPSpanExporter", FakeExporter)
     FakeExporter.instances.clear()
-    traces = tracing.configure_tracing("http://jaeger:4318/", environment="demo")
+    traces = tracing.configure_tracing(
+        "http://jaeger:4318/, http://signoz-ingester:4318", environment="demo"
+    )
     assert traces is not None
     with tracing.span("runtime", "job check_risk"), tracing.span("risk", "risk.snapshot"):
         pass
-    traces.shutdown()  # uma vez: envia a fila e fecha o exportador compartilhado
+    traces.shutdown()  # uma vez: envia as filas e fecha os exportadores compartilhados
     tracing.install(None)
-    (exporter,) = FakeExporter.instances
-    assert (exporter.endpoint, exporter.timeout, exporter.closed) == (
-        "http://jaeger:4318/v1/traces",
-        5,
-        True,
-    )
-    risk, runtime = exporter.exported
+    jaeger, signoz = FakeExporter.instances  # uma fila por destino, com todos os spans
+    assert [(e.endpoint, e.timeout, e.closed) for e in (jaeger, signoz)] == [
+        ("http://jaeger:4318/v1/traces", 5, True),
+        ("http://signoz-ingester:4318/v1/traces", 5, True),
+    ]
+    assert [s.name for s in signoz.exported] == [s.name for s in jaeger.exported]
+    risk, runtime = jaeger.exported
     assert (risk.name, runtime.name) == ("risk.snapshot", "job check_risk")
     assert risk.resource.attributes["service.name"] == "trade-agent.risk"
     assert runtime.resource.attributes["service.name"] == "trade-agent.runtime"
     assert risk.resource.attributes["service.namespace"] == "trade-agent"
     assert risk.resource.attributes["deployment.environment.name"] == "demo"
+    assert risk.resource.attributes["deployment.environment"] == "demo"  # nome usado pelo SigNoz
     assert risk.parent is not None and risk.parent.span_id == runtime.context.span_id
+
+
+def test_endpoints_are_a_comma_separated_list() -> None:
+    assert tracing.endpoints(None) == tracing.endpoints(" , ") == []
+    assert tracing.endpoints("http://a:4318/,http://b:4318") == ["http://a:4318", "http://b:4318"]
+    assert tracing.configure_tracing(" ", environment="demo") is None
 
 
 def test_components_link_like_jaeger(spans: Recorded) -> None:

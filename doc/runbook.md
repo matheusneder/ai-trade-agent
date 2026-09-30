@@ -5,7 +5,7 @@
 ## 1. Subir e verificar
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml up -d     # postgres, agente e grafana
+docker compose --env-file .env -f deploy/docker-compose.yml up -d     # toda a pilha (agente e observabilidade)
 docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
 ```
 
@@ -17,6 +17,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
 | Heartbeat | painel do Healthchecks.io | ping a cada minuto |
 | Logs | Grafana → *Logs* | linhas chegando de todos os serviços, sem tracebacks |
 | Traces | Jaeger → *System Architecture* | os componentes do agente ligados entre si |
+| SigNoz | `http://127.0.0.1:8080` → *Services* e *Logs* | componentes do agente, logs de todos os serviços e métricas `trade_agent.*` |
 
 **Ambiente:** o **Spot Testnet** serve para validar ordens (spike e `pytest -m live`), mas não para o ciclo de decisão. Ele é reiniciado periodicamente e tem só ~20 dias de histórico (os sinais precisam de 201 candles e o universo, de 30 dias), além de volumes artificiais. O universo fica vazio e o log mostra `decision.empty_universe`. Para o *paper trading*, use o **Demo Mode** (`TA_BINANCE_ENV=demo`, com chaves criadas em demo.binance.com), que usa dados reais de mercado.
 
@@ -54,7 +55,7 @@ Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são masc
 sum by (event) (count_over_time({service="agent"} | event!="" [1h]))  # eventos mais frequentes
 ```
 
-Um traceback do Python chega como uma entrada só, com `level="error"`.
+Um traceback do Python chega como uma entrada só, com `level="error"`. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
 
 ### 1.2 Traces (OpenTelemetry e Jaeger)
 
@@ -71,7 +72,28 @@ Cada tarefa do agente vira um trace no Jaeger (`http://127.0.0.1:16686`, 7 dias 
 
 O Jaeger fica fixado na 2.20: a 2.21 removeu a API v1 que o datasource do Grafana usa (há um teste que falha se a versão mudar). Com o Jaeger fora do ar, o agente segue normalmente e descarta os spans.
 
-**`http://127.0.0.1:16686` não abre, mas o Jaeger está `healthy`?** No Windows com Rancher Desktop, o repasse de portas pode ficar preso numa porta depois que a rede do Rancher Desktop reinicia. A conexão abre, mas a resposta nunca chega. Nesse caso, `down`/`up` e recriar o contêiner não resolvem; reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo). Os contêineres voltam sozinhos (`restart: unless-stopped`). Enquanto isso, os traces continuam no Grafana, em *Explore* → *Traces*, que acessa o Jaeger pela rede interna. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
+**`http://127.0.0.1:16686` não abre, mas o Jaeger está `healthy`?** No Windows com Rancher Desktop, o repasse de portas pode ficar preso numa porta depois que a rede do Rancher Desktop reinicia. A conexão abre, mas a resposta nunca chega. Nesse caso, `down`/`up` e recriar o contêiner não resolvem; reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo). Os contêineres voltam sozinhos (`restart: unless-stopped`). Enquanto isso, os traces continuam no Grafana, em *Explore* → *Traces*, que acessa o Jaeger pela rede interna.
+
+### 1.3 SigNoz (traces, logs e métricas num lugar só)
+
+O SigNoz roda em paralelo ao Jaeger e ao Loki, para comparar (`http://127.0.0.1:8080`). No primeiro acesso, ele pede para criar a conta de administrador. Ele recebe:
+
+| Sinal | De onde | O que dá para ver |
+|-------|---------|-------------------|
+| Traces | o agente, com os mesmos spans do Jaeger | *Services*: latência, vazão e erros por componente e operação, calculados a partir dos spans; *Service Map*; custo do LLM por modelo (a partir dos tokens nos spans) |
+| Logs | o Alloy, com uma cópia OTLP de tudo que vai para o Loki | busca por serviço, nível e qualquer campo do JSON do agente (`event`, `profile`, `symbol`...); cada log com `trace_id` abre o trace |
+| Métricas do agente | o agente, a cada minuto | `trade_agent.equity`, `.drawdown`, `.pnl.*`, `.exposure`, `.positions.active`, `.binance.error_rate`, `.binance.weight_used_1m`, `.clock.offset`, `.risk.state` (0 operando, 1 pausado, 2 parado, 3 vendendo tudo); contadores `.llm.cost`, `.llm.tokens`, `.decision.cycles`, `.decision.entries`, `.decision.exits`, `.risk.state_changes` |
+| Métricas dos contêineres | `container-metrics` (OpenTelemetry Collector, `docker_stats` pelo proxy somente leitura) | CPU, memória, rede e disco de cada contêiner do projeto |
+
+Os logs internos do SigNoz (ClickHouse, keeper, migrações) não entram no Loki nem no SigNoz: veja com `docker compose ... logs <serviço>`. O agente envia traces aos dois destinos com filas separadas: um fora do ar não afeta o outro.
+
+**Implantação:** os manifestos saem do Foundry, a ferramenta oficial do SigNoz, a partir de `deploy/signoz/casting.yaml` (versões fixadas). Para atualizar a versão, edite o casting e regenere; um teste falha se `pours/` ficar desatualizado:
+
+```bash
+docker run --rm -v "$PWD/deploy/signoz:/work" -w /work signoz/foundryctl:v0.3.0 forge --no-ledger --no-updater
+```
+
+Os ajustes locais (portas só em `127.0.0.1`, OTLP na 14318 para não colidir com o Jaeger, rotação de logs) ficam em `deploy/signoz/compose.override.yaml`. Na partida, um contêiner auxiliar baixa o `histogram-quantile` das releases oficiais do SigNoz no GitHub (função do ClickHouse), como na implantação oficial. O SigNoz usa mais memória que o resto da pilha (ClickHouse): numa VPS, reserve pelo menos 4 GB para ele.
 
 ## 2. Incidentes
 

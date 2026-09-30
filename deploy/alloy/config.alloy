@@ -19,6 +19,19 @@ discovery.docker "trade_agent" {
 	}
 }
 
+// Os bastidores do SigNoz (ClickHouse, keeper, migrações...) registram cada consulta: ficam
+// fora (veja com `docker compose logs <serviço>`). O descarte é na lista de alvos: um "drop"
+// em relabel_rules não tira o contêiner da coleta, só apaga os rótulos dos logs dele.
+discovery.relabel "collected" {
+	targets = discovery.docker.trade_agent.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "ingester|signoz-.+"
+		action        = "drop"
+	}
+}
+
 discovery.relabel "trade_agent" {
 	targets = []
 
@@ -30,13 +43,13 @@ discovery.relabel "trade_agent" {
 
 loki.source.docker "trade_agent" {
 	host          = "tcp://docker-proxy:2375"
-	targets       = discovery.docker.trade_agent.targets
+	targets       = discovery.relabel.collected.output
 	relabel_rules = discovery.relabel.trade_agent.rules
 	forward_to    = [loki.process.trade_agent.receiver]
 }
 
 loki.process "trade_agent" {
-	forward_to = [loki.write.loki.receiver]
+	forward_to = [loki.write.loki.receiver, otelcol.receiver.loki.signoz.receiver]
 
 	// Agente: um JSON do structlog por linha. Um traceback do Python (texto, várias linhas)
 	// vira um único registro, que começa em "Traceback".
@@ -63,9 +76,9 @@ loki.process "trade_agent" {
 		}
 	}
 
-	// Jaeger (OpenTelemetry Collector): JSON com "level".
+	// Jaeger e container-metrics (OpenTelemetry Collector): JSON com "level".
 	stage.match {
-		selector = "{service=\"jaeger\"}"
+		selector = "{service=~\"jaeger|container-metrics\"}"
 
 		stage.json {
 			expressions = {level = ""}
@@ -126,5 +139,49 @@ loki.process "trade_agent" {
 loki.write "loki" {
 	endpoint {
 		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
+
+// Cópia dos mesmos logs para o SigNoz (OTLP), em paralelo ao Loki. Cada entrada do Loki vira
+// um registro com recurso próprio; os rótulos (service, level) e os metadados (event,
+// trace_id) chegam como atributos.
+otelcol.receiver.loki "signoz" {
+	output {
+		logs = [otelcol.processor.transform.signoz.input]
+	}
+}
+
+otelcol.processor.transform "signoz" {
+	error_mode = "ignore"
+
+	log_statements {
+		context    = "log"
+		statements = [
+			`set(resource.attributes["service.name"], attributes["service"]) where attributes["service"] != nil`,
+			`set(resource.attributes["service.namespace"], "trade-agent")`,
+			`delete_key(attributes, "loki.attribute.labels")`,
+			`set(severity_text, attributes["level"]) where attributes["level"] != nil`,
+			`set(severity_number, SEVERITY_NUMBER_DEBUG) where severity_text == "debug"`,
+			`set(severity_number, SEVERITY_NUMBER_INFO) where severity_text == "info"`,
+			`set(severity_number, SEVERITY_NUMBER_WARN) where severity_text == "warn" or severity_text == "warning"`,
+			`set(severity_number, SEVERITY_NUMBER_ERROR) where severity_text == "error"`,
+			`set(severity_number, SEVERITY_NUMBER_FATAL) where severity_text == "critical" or severity_text == "fatal"`,
+			// JSON (agente, Jaeger): cada campo vira atributo pesquisável; trace_id liga ao trace
+			`merge_maps(cache, ParseJSON(body), "upsert") where IsMatch(body, "^\\{")`,
+			`flatten(cache)`,
+			`merge_maps(attributes, cache, "insert")`,
+			`set(trace_id.string, cache["trace_id"]) where cache["trace_id"] != nil`,
+			`set(span_id.string, cache["span_id"]) where cache["span_id"] != nil`,
+		]
+	}
+
+	output {
+		logs = [otelcol.exporter.otlphttp.signoz.input]
+	}
+}
+
+otelcol.exporter.otlphttp "signoz" {
+	client {
+		endpoint = "http://signoz-ingester:4318"
 	}
 }

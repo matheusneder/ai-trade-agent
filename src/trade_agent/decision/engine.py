@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
-from trade_agent import tracing
+from trade_agent import metrics, tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService
@@ -276,6 +276,13 @@ class DecisionEngine:
             opened=opened,
             exits=len(exits),
             rejected=len(rejected),
+        )
+        metrics.record_cycle(
+            profile=name,
+            state=state.value,
+            dry_run=self._dry_run,
+            opened=len(opened),
+            exits=len(exits),
         )
         log.info("decision.cycle", **report.summary())
         if (opened or exits) and self._notify is not None:

@@ -8,6 +8,13 @@ x-logging: &logging
   driver: json-file
   options: { max-size: "20m", max-file: "5" }
 
+# SigNoz (traces, logs e métricas em paralelo ao Jaeger e ao Loki): manifestos gerados pelo
+# Foundry em deploy/signoz/pours, com os ajustes locais de deploy/signoz/compose.override.yaml.
+include:
+  - path:
+      - signoz/pours/deployment/compose.yaml
+      - signoz/compose.override.yaml
+
 services:
   postgres:
     image: postgres:18
@@ -39,10 +46,13 @@ services:
     environment:
       TA_DATABASE_URL: postgresql+asyncpg://trade_agent:${TA_POSTGRES_PASSWORD:-trade_agent_dev}@postgres:5432/trade_agent
       TA_LOG_FORMAT: json
-      TA_OTLP_ENDPOINT: http://jaeger:4318   # traces (OpenTelemetry) para o Jaeger
+      # traces (OpenTelemetry) para o Jaeger e o SigNoz; métricas do agente para o SigNoz
+      TA_OTLP_ENDPOINT: http://jaeger:4318,http://signoz-ingester:4318
+      TA_OTLP_METRICS_ENDPOINT: http://signoz-ingester:4318
     volumes:
       - ../secrets:/app/secrets:ro
       - ../config:/app/config:ro   # perfis, disjuntores e analista: edite e reinicie o agente
+    networks: [default, signoz-network]
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,9 +118,10 @@ services:
       - loki:/loki
     logging: *logging
 
-  # API do Docker só para leitura (listar contêineres e ler logs), numa rede interna que só
-  # o Alloy alcança: o socket equivale a root no host, e a inspeção de um contêiner mostra
-  # as variáveis de ambiente (chaves do .env). POST, EXEC e o resto ficam desligados.
+  # API do Docker só para leitura (listar contêineres, ler logs e estatísticas), numa rede
+  # interna que só os coletores (Alloy e container-metrics) alcançam: o socket equivale a root
+  # no host, e a inspeção de um contêiner mostra as variáveis de ambiente (chaves do .env).
+  # POST, EXEC e o resto ficam desligados.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     restart: unless-stopped
@@ -136,8 +147,19 @@ services:
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy:/var/lib/alloy/data   # posição de leitura de cada contêiner
-    networks: [default, docker-api]
+    networks: [default, docker-api, signoz-network]   # logs para o Loki e para o SigNoz
     depends_on: [docker-proxy, loki]
+    logging: *logging
+
+  # CPU, memória, rede e disco de cada contêiner do projeto → SigNoz (docker_stats).
+  container-metrics:
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otelcol/container-metrics.yaml:/etc/otelcol/config.yaml:ro
+    networks: [docker-api, signoz-network]
+    depends_on: [docker-proxy]
     logging: *logging
 
 networks:

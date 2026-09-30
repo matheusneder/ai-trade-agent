@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import structlog
 
-from trade_agent import tracing
+from trade_agent import metrics, tracing
 from trade_agent.exchange.models import OrderSide, OrderType
 from trade_agent.exchange.rules import SymbolRules
 from trade_agent.persistence.store import Severity, Store
@@ -212,6 +212,7 @@ class RiskGuard:
 
     async def _set(self, scope: str, new: ScopeState, *, source: str) -> None:
         tracing.annotate(scope=scope, state=new.state, source=source, reason=new.reason)
+        metrics.record_state_change(scope=scope, state=new.state.value, source=source)
         await self._states.put(scope, new)
         severity = Severity.INFO if new.state is OpState.RUNNING else Severity.CRITICAL
         payload = {"scope": scope, "source": source, **new.to_json()}

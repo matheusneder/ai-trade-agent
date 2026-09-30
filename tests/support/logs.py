@@ -20,7 +20,9 @@ DEPLOY = Path(__file__).parents[2] / "deploy"
 COMPOSE: dict[str, Any] = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text("utf-8"))
 LOKI_CONFIG = DEPLOY / "loki" / "loki.yaml"
 ALLOY_CONFIG = DEPLOY / "alloy" / "config.alloy"
-TOP_LEVEL_BLOCK = re.compile(r'^(?P<name>[a-z_.]+)(?: "[^"]+")? \{\n.*?^\}$', re.M | re.S)
+TOP_LEVEL_BLOCK = re.compile(
+    r'^(?P<name>[a-z_.]+)(?: "(?P<label>[^"]+)")? \{\n.*?^\}$', re.M | re.S
+)
 
 
 def image(service: str) -> str:
@@ -28,12 +30,20 @@ def image(service: str) -> str:
 
 
 def alloy_blocks() -> dict[str, str]:
-    """Blocos de primeiro nível do ``config.alloy`` pelo nome do componente."""
+    """Blocos de primeiro nível do ``config.alloy`` pelo identificador (``loki.write.loki``)."""
     text = ALLOY_CONFIG.read_text(encoding="utf-8")
-    return {m["name"]: m.group(0) for m in TOP_LEVEL_BLOCK.finditer(text)}
+    return {
+        ".".join(filter(None, (m["name"], m["label"]))): m.group(0)
+        for m in TOP_LEVEL_BLOCK.finditer(text)
+    }
 
 
-def file_pipeline(files: Mapping[str, str]) -> str:
+SIGNOZ_OTLP = "http://signoz-ingester:4318"
+LOKI_OTLP = "http://loki:3100/otlp"
+"""No teste, a cópia OTLP (a do SigNoz) vai para a entrada OTLP do próprio Loki."""
+
+
+def file_pipeline(files: Mapping[str, str], *, otlp_endpoint: str = LOKI_OTLP) -> str:
     """Config do Alloy de teste: amostras por serviço → processamento e envio de produção."""
     blocks = alloy_blocks()
     targets = ",\n".join(
@@ -46,7 +56,20 @@ def file_pipeline(files: Mapping[str, str]) -> str:
         "\tforward_to = [loki.process.trade_agent.receiver]\n"
         "}"
     )
-    return "\n\n".join([blocks["loki.process"], blocks["loki.write"], source]) + "\n"
+    exporter = blocks["otelcol.exporter.otlphttp.signoz"]
+    assert f'endpoint = "{SIGNOZ_OTLP}"' in exporter
+    names = [
+        "loki.process.trade_agent",
+        "loki.write.loki",
+        "otelcol.receiver.loki.signoz",
+        "otelcol.processor.transform.signoz",
+    ]
+    return (
+        "\n\n".join(
+            [*(blocks[n] for n in names), exporter.replace(SIGNOZ_OTLP, otlp_endpoint), source]
+        )
+        + "\n"
+    )
 
 
 def wait_ready(url: str, timeout_s: float = 90) -> None:
