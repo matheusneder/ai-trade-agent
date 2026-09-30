@@ -69,7 +69,9 @@ Cada tarefa do agente vira um trace no Jaeger (`http://127.0.0.1:16686`, 7 dias 
 
 **O que cada span registra:** Binance (método, caminho sem query, status, peso usado), SQL (comando com `$1`, `$2`..., nunca os valores), LLM (modelo, finalidade, tokens, custo e motivo de parada, nunca o conteúdo), Telegram (método e comando, nunca o token nem o texto), decisão (perfil, avaliados, entradas, saídas e recusas), risco (patrimônio, gatilhos e mudanças de estado). O heartbeat e a espera por mensagens do Telegram não geram traces.
 
-O Jaeger fica fixado na 2.20: a 2.21 removeu a API v1 que o datasource do Grafana usa (há um teste que falha se a versão mudar). Com o Jaeger fora do ar, o agente segue normalmente e descarta os spans. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
+O Jaeger fica fixado na 2.20: a 2.21 removeu a API v1 que o datasource do Grafana usa (há um teste que falha se a versão mudar). Com o Jaeger fora do ar, o agente segue normalmente e descarta os spans.
+
+**`http://127.0.0.1:16686` não abre, mas o Jaeger está `healthy`?** No Windows com Rancher Desktop, o repasse de portas pode ficar preso numa porta depois que a rede do Rancher Desktop reinicia. A conexão abre, mas a resposta nunca chega. Nesse caso, `down`/`up` e recriar o contêiner não resolvem; reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo). Os contêineres voltam sozinhos (`restart: unless-stopped`). Enquanto isso, os traces continuam no Grafana, em *Explore* → *Traces*, que acessa o Jaeger pela rede interna. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
 
 ## 2. Incidentes
 

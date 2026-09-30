@@ -14,6 +14,8 @@ service:
   telemetry:
     metrics:
       level: none
+    traces:
+      level: none   # sem spans internos (ex.: Badger.Compaction) como serviço "jaeger"
     logs:
       level: warn
       encoding: json

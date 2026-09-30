@@ -107,7 +107,9 @@ def test_jaeger_keeps_7_days_on_the_volume_and_listens_on_localhost() -> None:
     badger = config["extensions"]["jaeger_storage"]["backends"]["badger_store"]["badger"]
     assert badger["ttl"]["spans"] == "168h" and badger["ephemeral"] is False
     assert all(d.startswith("/tmp/jaeger/") for d in badger["directories"].values())  # noqa: S108
+    # sem traces do próprio Jaeger (consulta e armazenamento) misturados aos do agente
     assert config["extensions"]["jaeger_query"]["enable_tracing"] is False
+    assert config["service"]["telemetry"]["traces"]["level"] == "none"
     service = COMPOSE["services"]["jaeger"]
     assert "jaeger:/tmp" in service["volumes"]
     assert all(p.startswith("127.0.0.1:") for p in service["ports"])
