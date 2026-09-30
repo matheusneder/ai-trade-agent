@@ -470,6 +470,9 @@ flowchart TD
 3. **Performance:** curva de capital contra BTC *buy & hold*, taxa de acerto, R médio, *profit factor*, taxas pagas, *slippage* (esperado × executado), por perfil e por ativo.
 4. **Decisões e pesquisa:** scores TA/LLM por ciclo, vetos, último `MarketView` com fontes, custo diário do LLM, A/B TA × TA+LLM.
 5. **Saúde técnica:** latência e erros da API, peso usado, conexão do WebSocket, divergências de reconciliação, duração dos ciclos.
+6. **Logs:** volume por nível e por serviço, eventos mais frequentes do agente, avisos, erros e tracebacks, com busca por texto.
+
+Os logs de todos os contêineres ficam centralizados no **Loki** por 30 dias. A coleta é do **Grafana Alloy**, que lê a API do Docker por um proxy somente leitura numa rede interna exclusiva. Os rótulos são `service` e `level`, e o `event` do structlog vai como metadado estruturado.
 
 ### 12.2 Alertas
 

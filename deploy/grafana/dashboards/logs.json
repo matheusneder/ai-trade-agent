@@ -1,0 +1,340 @@
+{
+  "uid": "ta-logs",
+  "title": "Trade Agent — Logs",
+  "tags": [
+    "trade-agent"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Erros (24h)",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({service=~\"$service\", level=~\"error|critical|fatal\"}[24h]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Avisos (24h)",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 4,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({service=~\"$service\", level=~\"warning|warn\"}[24h]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Tracebacks do agente (24h)",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 4,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({service=\"agent\"} |~ \"^Traceback\" [24h]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "timeseries",
+      "title": "Linhas por nível",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (level) (count_over_time({service=~\"$service\", level=~\"$level\"} |~ \"(?i)$busca\" [$__auto]))",
+          "queryType": "range",
+          "legendFormat": "{{level}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
+    },
+    {
+      "type": "timeseries",
+      "title": "Avisos e erros por serviço",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (service) (count_over_time({service=~\"$service\", level=~\"warning|warn|error|critical|fatal\"} [$__auto]))",
+          "queryType": "range",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 5
+    },
+    {
+      "type": "table",
+      "title": "Eventos do agente (período)",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 12,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(15, sum by (event) (count_over_time({service=\"agent\", level=~\"$level\"} | event != \"\" [$__range])))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 6
+    },
+    {
+      "type": "logs",
+      "title": "Avisos, erros e tracebacks",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 16,
+        "h": 12,
+        "x": 8,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=~\"$service\", level=~\"warning|warn|error|critical|fatal\"}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "id": 7
+    },
+    {
+      "type": "logs",
+      "title": "Logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "trade-agent-loki"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 18,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "trade-agent-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=~\"$service\", level=~\"$level\"} |~ \"(?i)$busca\"",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "id": 8
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Serviço",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "trade-agent-loki"
+        },
+        "query": "label_values(service)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "level",
+        "label": "Nível",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "trade-agent-loki"
+        },
+        "query": "label_values(level)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "busca",
+        "label": "Busca (regex)",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  }
+}

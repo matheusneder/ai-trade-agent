@@ -2,7 +2,7 @@
 
 Dashboards como código: edite aqui e rode ``uv run python -m scripts.grafana_dashboards``.
 Um teste garante que os JSON versionados estão em dia com este gerador e que todas as
-consultas executam no schema do banco.
+consultas executam: SQL no schema do banco e LogQL num Loki com a configuração de produção.
 """
 
 import json
@@ -11,8 +11,11 @@ from typing import Any
 
 OUTPUT = Path(__file__).resolve().parents[1] / "deploy" / "grafana" / "dashboards"
 DATASOURCE = {"type": "grafana-postgresql-datasource", "uid": "trade-agent-pg"}
+LOKI = {"type": "loki", "uid": "trade-agent-loki"}
 CLOSED = "state = 'closed' AND realized_pnl IS NOT NULL"
 LATEST = "id = (SELECT max(id) FROM telemetry_snapshots)"
+PROBLEMS = 'level=~"warning|warn|error|critical|fatal"'
+FILTERED = '{service=~"$service", level=~"$level"} |~ "(?i)$busca"'
 
 
 def panel(
@@ -54,7 +57,70 @@ def table(title: str, sql: str, w: int = 24, h: int = 9) -> dict[str, Any]:
     return panel(title, sql, kind="table", fmt="table", w=w, h=h)
 
 
-def dashboard(uid: str, title: str, panels: list[dict[str, Any]]) -> dict[str, Any]:
+def logql(
+    title: str,
+    expr: str,
+    *,
+    kind: str = "timeseries",
+    instant: bool = False,
+    legend: str | None = None,
+    w: int = 12,
+    h: int = 8,
+) -> dict[str, Any]:
+    """Painel sobre o Loki: série temporal, ``stat``/``table`` (consulta instantânea) ou ``logs``."""
+    target: dict[str, Any] = {
+        "refId": "A",
+        "datasource": LOKI,
+        "editorMode": "code",
+        "expr": expr,
+        "queryType": "instant" if instant else "range",
+    }
+    if legend:
+        target["legendFormat"] = legend
+    options: dict[str, Any] = {}
+    if kind == "logs":
+        options = {
+            "showTime": True,
+            "wrapLogMessage": True,
+            "enableLogDetails": True,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none",
+        }
+    return {
+        "type": kind,
+        "title": title,
+        "datasource": LOKI,
+        "gridPos": {"w": w, "h": h},
+        "targets": [target],
+        "fieldConfig": {"defaults": {}, "overrides": []},
+        "options": options,
+    }
+
+
+def label_variable(name: str, label: str, all_value: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "label": label,
+        "type": "query",
+        "datasource": LOKI,
+        "query": f"label_values({name})",
+        "refresh": 2,  # ao mudar o período
+        "multi": True,
+        "includeAll": True,
+        "allValue": all_value,
+        "current": {"text": "All", "value": "$__all"},
+        "sort": 1,
+    }
+
+
+def dashboard(
+    uid: str,
+    title: str,
+    panels: list[dict[str, Any]],
+    *,
+    since: str = "now-7d",
+    variables: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     x = y = row_h = 0
     for index, p in enumerate(panels, start=1):
         grid = p["gridPos"]
@@ -64,7 +130,7 @@ def dashboard(uid: str, title: str, panels: list[dict[str, Any]]) -> dict[str, A
         x += grid["w"]
         row_h = max(row_h, grid["h"])
         p["id"] = index
-    return {
+    board: dict[str, Any] = {
         "uid": uid,
         "title": f"Trade Agent — {title}",
         "tags": ["trade-agent"],
@@ -73,9 +139,12 @@ def dashboard(uid: str, title: str, panels: list[dict[str, Any]]) -> dict[str, A
         "refresh": "1m",
         "schemaVersion": 41,
         "version": 1,
-        "time": {"from": "now-7d", "to": "now"},
+        "time": {"from": since, "to": "now"},
         "panels": panels,
     }
+    if variables:
+        board["templating"] = {"list": variables}
+    return board
 
 
 def build() -> dict[str, dict[str, Any]]:
@@ -123,12 +192,28 @@ def build() -> dict[str, dict[str, Any]]:
         panel("Offset de relógio (ms)", "SELECT at AS time, clock_offset_ms AS offset_ms FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="ms", w=8),
         table("Eventos altos e críticos", "SELECT created_at AS time, kind AS evento, severity AS severidade, position_id AS posicao, payload::text AS detalhes FROM events WHERE severity IN ('high', 'critical') AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 100"),
     ])  # fmt: skip
+    search = {"name": "busca", "label": "Busca (regex)", "type": "textbox", "query": "", "current": {"text": "", "value": ""}}  # fmt: skip
+    logs = dashboard("ta-logs", "Logs", [
+        logql("Erros (24h)", 'sum(count_over_time({service=~"$service", level=~"error|critical|fatal"}[24h]))', kind="stat", instant=True, w=8, h=4),
+        logql("Avisos (24h)", 'sum(count_over_time({service=~"$service", level=~"warning|warn"}[24h]))', kind="stat", instant=True, w=8, h=4),
+        logql("Tracebacks do agente (24h)", 'sum(count_over_time({service="agent"} |~ "^Traceback" [24h]))', kind="stat", instant=True, w=8, h=4),
+        logql("Linhas por nível", f"sum by (level) (count_over_time({FILTERED} [$__auto]))", legend="{{level}}"),
+        logql("Avisos e erros por serviço", f'sum by (service) (count_over_time({{service=~"$service", {PROBLEMS}}} [$__auto]))', legend="{{service}}"),
+        logql("Eventos do agente (período)", 'topk(15, sum by (event) (count_over_time({service="agent", level=~"$level"} | event != "" [$__range])))', kind="table", instant=True, w=8, h=12),
+        logql("Avisos, erros e tracebacks", f'{{service=~"$service", {PROBLEMS}}}', kind="logs", w=16, h=12),
+        logql("Logs", FILTERED, kind="logs", w=24, h=18),
+    ], since="now-6h", variables=[
+        label_variable("service", "Serviço", ".+"),
+        label_variable("level", "Nível", ".*"),  # ".*" inclui linhas sem nível
+        search,
+    ])  # fmt: skip
     return {
         "overview.json": overview,
         "positions.json": positions,
         "performance.json": performance,
         "research.json": research,
         "health.json": health,
+        "logs.json": logs,
     }
 
 

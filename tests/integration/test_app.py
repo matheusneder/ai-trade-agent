@@ -16,6 +16,8 @@ from trade_agent.exchange.errors import BinanceConfigurationError
 from trade_agent.persistence.db import AlreadyRunningError, Database
 from trade_agent.persistence.store import Store
 
+PROFILES = Path(__file__).parents[1] / "fixtures" / "profiles.yaml"
+
 
 def _settings(postgres_url: str | None, **overrides: object) -> Settings:
     values: dict[str, object] = {
@@ -23,6 +25,7 @@ def _settings(postgres_url: str | None, **overrides: object) -> Settings:
         "binance_key_type": "hmac",
         "binance_api_secret": "fake-secret",
         "database_url": postgres_url,
+        "strategy_config": PROFILES,  # independente do config/ que o operador edita
     }
     values.update(overrides)
     return load_settings(env_file=None, **values)
@@ -54,7 +57,7 @@ async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -
         httpx.AsyncClient() as aux,
         build_runtime(settings, aux_http=aux, user_stream=False) as runtime,
     ):
-        assert [tf for tf, _ in runtime._candle_jobs] == ["4h"]  # só o conservador
+        assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h"]  # agressivo desligado
         assert len(runtime._periodic) == 2  # risco (com telemetria) e notícias
         assert runtime._heartbeat is None  # sem TA_HEALTHCHECK_URL
 

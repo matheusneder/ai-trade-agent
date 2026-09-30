@@ -3,6 +3,11 @@
 # Portas publicadas só em 127.0.0.1: acesse o Grafana por túnel SSH em uma VPS.
 name: trade-agent
 
+# Rotação dos logs no host (o Alloy lê daqui e envia ao Loki, que guarda 30 dias).
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }
+
 services:
   postgres:
     image: postgres:18
@@ -22,6 +27,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *logging
 
   agent:
     build:
@@ -39,9 +45,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    logging:
-      driver: json-file
-      options: { max-size: "20m", max-file: "5" }
+    logging: *logging
 
   grafana:
     image: grafana/grafana:12.2.0
@@ -73,7 +77,56 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *logging
+
+  # Logs dos contêineres: Alloy coleta → Loki guarda → Grafana consulta (dashboard "Logs").
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki:/loki
+    logging: *logging
+
+  # API do Docker só para leitura (listar contêineres e ler logs), numa rede interna que só
+  # o Alloy alcança: o socket equivale a root no host, e a inspeção de um contêiner mostra
+  # as variáveis de ambiente (chaves do .env). POST, EXEC e o resto ficam desligados.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      NETWORKS: "1"   # a descoberta de contêineres do Alloy também lista as redes
+      LOG_LEVEL: warning   # sem o log de acesso de cada leitura do Alloy (voltaria ao Loki)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker-api]
+    logging: *logging
+
+  alloy:
+    image: grafana/alloy:v1.20.1
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:12345:12345"   # interface do Alloy: alvos descobertos e saúde do pipeline
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy:/var/lib/alloy/data   # posição de leitura de cada contêiner
+    networks: [default, docker-api]
+    depends_on: [docker-proxy, loki]
+    logging: *logging
+
+networks:
+  docker-api:
+    internal: true
 
 volumes:
   pgdata: {}
   grafana: {}
+  loki: {}
+  alloy: {}
