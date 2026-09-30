@@ -4,8 +4,9 @@ from collections.abc import Iterator
 import pytest
 import structlog
 
+from tests.support.metrics import Measured, measuring
 from tests.support.tracing import Recorded, recording
-from trade_agent import tracing
+from trade_agent import metrics, tracing
 
 
 @pytest.fixture
@@ -15,12 +16,21 @@ def spans() -> Iterator[Recorded]:
         yield recorded
 
 
+@pytest.fixture
+def measured() -> Iterator[Measured]:
+    """Métricas do agente, lidas em memória durante o teste."""
+    with measuring() as found:
+        yield found
+
+
 @pytest.fixture(autouse=True)
 def _no_tracing_leak() -> Iterator[None]:
-    """Nenhum teste herda (nem deixa) um rastreamento instalado."""
+    """Nenhum teste herda (nem deixa) rastreamento ou métricas instalados."""
     tracing.install(None)
+    metrics.install(None)
     yield
     tracing.install(None)
+    metrics.install(None)
 
 
 @pytest.fixture(autouse=True)

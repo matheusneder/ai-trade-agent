@@ -21,6 +21,7 @@ from tests.support.logs import (
     COMPOSE,
     DEPLOY,
     LOKI_CONFIG,
+    SIGNOZ_OTLP,
     alloy_blocks,
     counts,
     file_pipeline,
@@ -139,6 +140,28 @@ def test_trace_id_is_queryable_metadata(loki: str) -> None:
     assert label_values(loki, "trace_id") == []  # metadado, não rótulo: sem cardinalidade alta
 
 
+def test_otlp_copy_for_signoz_keeps_service_severity_and_trace(loki: str) -> None:
+    """A cópia OTLP (em produção, para o SigNoz; no teste, na entrada OTLP do Loki)."""
+    copies = '{service_namespace="trade-agent"}'
+    expr = f"sum by (service_name, severity_text) (count_over_time({copies}[1h]))"
+    deadline = time.monotonic() + 30
+    while (rows := counts(loki, expr)) and sum(rows.values()) < sum(EXPECTED.values()):
+        assert time.monotonic() < deadline
+        time.sleep(1)
+    by_severity = {
+        (dict(k)["service_name"], dict(k).get("severity_text")): v for k, v in rows.items()
+    }
+    assert by_severity == EXPECTED  # mesmo serviço e nível da cópia do Loki
+    (stream,) = query(loki, f'{copies} | trace_id="{TRACE_ID}"')
+    metadata = stream["stream"]
+    assert (metadata["service_name"], metadata["span_id"]) == ("agent", "b7ad6b7169203331")
+    assert (metadata["severity_number"], metadata["event"]) == ("5", "risk.snapshot")
+    assert metadata["equity"] == "1000"  # campos do JSON viram atributos pesquisáveis
+    assert "loki_attribute_labels" not in metadata
+    (traceback,) = query(loki, f'{copies} |~ "^Traceback"')
+    assert traceback["stream"]["severity_number"] == "17"  # ERROR
+
+
 def test_python_traceback_becomes_one_error_entry(loki: str) -> None:
     (stream,) = query(loki, '{service="agent"} |~ "^Traceback"')
     assert stream["stream"]["level"] == "error"
@@ -184,7 +207,7 @@ def test_loki_keeps_30_days_and_is_not_published() -> None:
     assert any(v.endswith(":/loki") for v in loki["volumes"])
 
 
-def test_docker_api_is_read_only_and_reachable_only_by_alloy() -> None:
+def test_docker_api_is_read_only_and_reachable_only_by_the_collectors() -> None:
     services = COMPOSE["services"]
     proxy = services["docker-proxy"]
     assert proxy["networks"] == ["docker-api"]
@@ -192,6 +215,7 @@ def test_docker_api_is_read_only_and_reachable_only_by_alloy() -> None:
     assert [n for n, s in services.items() if "docker-api" in s.get("networks", [])] == [
         "docker-proxy",
         "alloy",
+        "container-metrics",
     ]
     assert proxy["volumes"] == ["/var/run/docker.sock:/var/run/docker.sock:ro"]
     enabled = {k for k, v in proxy["environment"].items() if v == "1"}
@@ -211,7 +235,26 @@ def test_alloy_config_matches_compose_and_loki() -> None:
     assert "unix:///var/run/docker.sock" not in text
     assert f"com.docker.compose.project={COMPOSE['name']}" in text
     port = yaml.safe_load(LOKI_CONFIG.read_text(encoding="utf-8"))["server"]["http_listen_port"]
-    assert f'url = "http://loki:{port}/loki/api/v1/push"' in alloy_blocks()["loki.write"]
+    blocks = alloy_blocks()
+    assert f'url = "http://loki:{port}/loki/api/v1/push"' in blocks["loki.write.loki"]
+    assert f'endpoint = "{SIGNOZ_OTLP}"' in blocks["otelcol.exporter.otlphttp.signoz"]
+    # os logs vão para o Loki e para o SigNoz; os bastidores do SigNoz ficam de fora
+    assert "loki.write.loki.receiver, otelcol.receiver.loki.signoz.receiver" in text
+    # o descarte precisa ser na lista de alvos: em relabel_rules, o contêiner continuaria sendo
+    # lido, com os logs sem rótulo (recusados pelo Loki, aceitos pela cópia OTLP do SigNoz)
+    collected = blocks["discovery.relabel.collected"]
+    assert "targets = discovery.docker.trade_agent.targets" in collected
+    assert (
+        "targets       = discovery.relabel.collected.output"
+        in blocks["loki.source.docker.trade_agent"]
+    )
+    assert '"drop"' not in blocks["discovery.relabel.trade_agent"]
+    drop = re.search(r'regex\s+=\s+"([^"]+)"\s+action\s+=\s+"drop"', collected)
+    assert drop is not None
+    for service in ("ingester", "signoz-telemetrystore-clickhouse-0-0", "signoz-signoz-0"):
+        assert re.fullmatch(drop.group(1), service)
+    for service in COMPOSE["services"]:
+        assert not re.fullmatch(drop.group(1), service), service
     assert "loki.source.file" in file_pipeline({"agent": "agent.log"})
     for published in COMPOSE["services"]["alloy"]["ports"]:
         assert published.startswith("127.0.0.1:")
@@ -246,5 +289,5 @@ def test_alloy_config_is_canonically_formatted() -> None:
 
 
 def test_versions_are_pinned() -> None:
-    for name in ("loki", "alloy", "docker-proxy", "grafana", "jaeger"):
+    for name in ("loki", "alloy", "docker-proxy", "grafana", "jaeger", "container-metrics"):
         assert re.fullmatch(r"[\w./-]+:v?\d+\.\d+\.\d+", image(name)), name
