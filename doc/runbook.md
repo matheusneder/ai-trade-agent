@@ -108,6 +108,7 @@ Escopo: `global` (padrão) ou o nome do perfil. Só o `TA_TELEGRAM_CHAT_ID` conf
 
 - **Dashboards:** edite `scripts/grafana_dashboards.py` e rode `uv run python -m scripts.grafana_dashboards`. Um teste falha se os JSON versionados ficarem desatualizados.
 - **Configuração:** `config/` é montado no contêiner do agente. Edite os YAML e rode `docker compose ... restart agent` (sem rebuild).
+- **`.env`:** é lido só quando o contêiner é criado, e o `restart` não o relê. Depois de editar, rode `docker compose ... up -d` (recria o agente e o Grafana). Para o Telegram, `TA_TELEGRAM_CHAT_ID` é o id do seu usuário (chat privado com o bot), e é preciso enviar `/start` ao bot uma vez antes de ele conseguir escrever para você.
 - **Mudança do `managed_capital`:** não conta como ganho nem perda. A abertura do dia e o pico acompanham a diferença de capital (log `risk.equity_rebased`), e só o resultado das operações pesa na perda diária e no drawdown. Os percentuais passam a ser calculados sobre o novo capital.
 - **Mudança de parâmetros:** sempre via laboratório (`lab/walk_forward.py`) e *paper trading* no Demo antes de produção.
 - **Backup:** `docker compose ... exec postgres pg_dump -U trade_agent trade_agent | gzip > backup.sql.gz`, guardado fora da VPS.
