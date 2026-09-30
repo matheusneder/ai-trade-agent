@@ -2,6 +2,7 @@
 
 A verificação num Grafana 12.2 de verdade (provisionamento, 34 consultas pela API e
 avaliação das regras) foi feita manualmente; aqui ficam as garantias contra regressões.
+O dashboard de logs (Loki) é testado em ``test_logs.py``.
 """
 
 import json
@@ -11,7 +12,7 @@ from typing import Any
 
 import pytest
 import yaml
-from scripts.grafana_dashboards import DATASOURCE, OUTPUT, build, render
+from scripts.grafana_dashboards import DATASOURCE, LOKI, OUTPUT, build, render
 from sqlalchemy import text
 
 from trade_agent.persistence.db import Database
@@ -32,6 +33,7 @@ def _dashboard_queries() -> list[tuple[str, str]]:
         for board in build().values()
         for panel in board["panels"]
         for target in panel["targets"]
+        if target["datasource"] == DATASOURCE  # as consultas LogQL rodam em test_logs.py
     ]
 
 
@@ -48,9 +50,11 @@ def test_versioned_dashboards_match_the_generator() -> None:
         ids = [p["id"] for p in board["panels"]]
         assert ids == list(range(1, len(ids) + 1))
         assert all(p["gridPos"]["x"] + p["gridPos"]["w"] <= 24 for p in board["panels"])
-        assert all(t["datasource"] == DATASOURCE for p in board["panels"] for t in p["targets"])
-    assert len(boards) == 5
-    assert len({b["uid"] for b in boards.values()}) == 5
+        expected = LOKI if name == "logs.json" else DATASOURCE
+        assert all(t["datasource"] == expected for p in board["panels"] for t in p["targets"])
+        assert all(p["datasource"] == expected for p in board["panels"])
+    assert len(boards) == 6
+    assert len({b["uid"] for b in boards.values()}) == 6
 
 
 @pytest.mark.parametrize(("name", "sql"), _dashboard_queries())
