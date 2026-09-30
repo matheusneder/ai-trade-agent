@@ -1,0 +1,116 @@
+// Coleta os logs dos contêineres do projeto trade-agent e os envia ao Loki.
+// A API do Docker é lida pelo proxy somente leitura (serviço docker-proxy), nunca pelo socket.
+// Rótulos no Loki: service (serviço do compose) e level. No agente, o campo `event` do
+// structlog vai como metadado estruturado: {service="agent"} | event="risk.snapshot".
+
+logging {
+	level  = "warn"
+	format = "logfmt"
+}
+
+discovery.docker "trade_agent" {
+	host             = "tcp://docker-proxy:2375"
+	refresh_interval = "15s"
+
+	// só os contêineres deste projeto (o filtro roda na própria API do Docker)
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=trade-agent"]
+	}
+}
+
+discovery.relabel "trade_agent" {
+	targets = []
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+}
+
+loki.source.docker "trade_agent" {
+	host          = "tcp://docker-proxy:2375"
+	targets       = discovery.docker.trade_agent.targets
+	relabel_rules = discovery.relabel.trade_agent.rules
+	forward_to    = [loki.process.trade_agent.receiver]
+}
+
+loki.process "trade_agent" {
+	forward_to = [loki.write.loki.receiver]
+
+	// Agente: um JSON do structlog por linha. Um traceback do Python (texto, várias linhas)
+	// vira um único registro, que começa em "Traceback".
+	stage.match {
+		selector = "{service=\"agent\"}"
+
+		stage.multiline {
+			firstline     = "^(\\{|Traceback)"
+			max_wait_time = "3s"
+			max_lines     = 1000
+		}
+
+		stage.json {
+			expressions = {level = "", event = ""}
+		}
+
+		stage.labels {
+			values = {level = ""}
+		}
+
+		stage.structured_metadata {
+			values = {event = ""}
+		}
+	}
+
+	stage.match {
+		selector = "{service=\"agent\"} |~ \"^Traceback\""
+
+		stage.static_labels {
+			values = {level = "error"}
+		}
+	}
+
+	// Grafana, Loki e Alloy registram em logfmt (level=info ...).
+	stage.match {
+		selector = "{service=~\"grafana|loki|alloy\"}"
+
+		stage.logfmt {
+			mapping = {level = ""}
+		}
+
+		stage.labels {
+			values = {level = ""}
+		}
+	}
+
+	// PostgreSQL: "... [pid] LOG:  ...", "... ERROR:  ...", "... FATAL:  ...".
+	stage.match {
+		selector = "{service=\"postgres\"}"
+
+		stage.static_labels {
+			values = {level = "info"}
+		}
+	}
+
+	stage.match {
+		selector = "{service=\"postgres\"} |~ \"\\\\b(ERROR|FATAL|PANIC):\""
+
+		stage.static_labels {
+			values = {level = "error"}
+		}
+	}
+
+	stage.match {
+		selector = "{service=\"postgres\"} |~ \"\\\\bWARNING:\""
+
+		stage.static_labels {
+			values = {level = "warning"}
+		}
+	}
+}
+
+loki.write "loki" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}

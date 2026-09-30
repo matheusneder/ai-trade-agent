@@ -15,6 +15,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
 | Modo | `/status` (1ª linha) | "SIMULAÇÃO" enquanto `TA_TRADING_ENABLED=false` |
 | Telemetria | Grafana → *Saúde técnica* → "Segundos desde a última foto" | abaixo de 360 s |
 | Heartbeat | painel do Healthchecks.io | ping a cada minuto |
+| Logs | Grafana → *Logs* | linhas chegando de todos os serviços, sem tracebacks |
 
 **Ambiente:** o **Spot Testnet** serve para validar ordens (spike e `pytest -m live`), mas não para o ciclo de decisão. Ele é reiniciado periodicamente e tem só ~20 dias de histórico (os sinais precisam de 201 candles e o universo, de 30 dias), além de volumes artificiais. O universo fica vazio e o log mostra `decision.empty_universe`. Para o *paper trading*, use o **Demo Mode** (`TA_BINANCE_ENV=demo`, com chaves criadas em demo.binance.com), que usa dados reais de mercado.
 
@@ -43,12 +44,23 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent | grep
 
 Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são mascarados (`***`) e as bibliotecas HTTP (que registram URLs com tokens) ficam em `WARNING`.
 
+**No Grafana (Loki):** o Alloy envia ao Loki os logs de todos os contêineres do projeto, que ficam guardados por 30 dias, inclusive depois de um `docker compose down`. O dashboard *Logs* filtra por serviço, nível e texto. Em *Explore* (fonte *Logs*), os rótulos são `service` e `level`, e o `event` do agente pode ser filtrado sem ler o JSON:
+
+```logql
+{service="agent", level=~"error|critical"}                          # erros e tracebacks do agente
+{service="agent"} | event="risk.state_changed"                       # mudanças de estado de risco
+{service="agent"} | json | event="decision.cycle" | profile="agressivo"
+sum by (event) (count_over_time({service="agent"} | event!="" [1h]))  # eventos mais frequentes
+```
+
+Um traceback do Python chega como uma entrada só, com `level="error"`. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
+
 ## 2. Incidentes
 
 ### 2.1 Agente fora do ar (alerta "Agente sem telemetria" ou Healthchecks.io)
 
 1. As posições seguem protegidas pelos OCO na Binance. Não há urgência para vender.
-2. `docker compose ... ps` e `logs --tail 200 agent`. Procure `runtime.task_failed`, `AlreadyRunningError` e erros de banco.
+2. `docker compose ... ps` e `logs --tail 200 agent`. Procure `runtime.task_failed`, `AlreadyRunningError` e erros de banco. Se o contêiner foi removido, os logs anteriores à queda continuam no dashboard *Logs*.
 3. Reinicie com `docker compose ... restart agent`. A partida aplica as migrações, sincroniza o relógio e **reconcilia** tudo: intenções pendentes, posições e órfãs.
 4. Confira `/status` e o painel *Posições*.
 
@@ -107,6 +119,7 @@ Escopo: `global` (padrão) ou o nome do perfil. Só o `TA_TELEGRAM_CHAT_ID` conf
   ```
 
 - **Dashboards:** edite `scripts/grafana_dashboards.py` e rode `uv run python -m scripts.grafana_dashboards`. Um teste falha se os JSON versionados ficarem desatualizados.
+- **Logs (Loki e Alloy):** a retenção fica em `deploy/loki/loki.yaml` (`retention_period`), e o processamento (rótulos, níveis, tracebacks) em `deploy/alloy/config.alloy`. Os testes rodam esse pipeline de verdade em contêineres. O Alloy lê a API do Docker por um proxy somente leitura (`docker-proxy`), numa rede interna que só ele alcança, porque a inspeção de um contêiner mostra as variáveis de ambiente (chaves do `.env`). Não dê ao Alloy, nem a nenhum outro serviço, acesso direto ao `docker.sock`.
 - **Configuração:** `config/` é montado no contêiner do agente. Edite os YAML e rode `docker compose ... restart agent` (sem rebuild).
 - **`.env`:** é lido só quando o contêiner é criado, e o `restart` não o relê. Depois de editar, rode `docker compose ... up -d` (recria o agente e o Grafana). Para o Telegram, `TA_TELEGRAM_CHAT_ID` é o id do seu usuário (chat privado com o bot), e é preciso enviar `/start` ao bot uma vez antes de ele conseguir escrever para você.
 - **Mudança do `managed_capital`:** não conta como ganho nem perda. A abertura do dia e o pico acompanham a diferença de capital (log `risk.equity_rebased`), e só o resultado das operações pesa na perda diária e no drawdown. Os percentuais passam a ser calculados sobre o novo capital.
