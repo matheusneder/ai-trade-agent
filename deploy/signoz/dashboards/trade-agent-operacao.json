@@ -1,0 +1,1374 @@
+{
+  "schemaVersion": "v6",
+  "image": "",
+  "name": "trade-agent-operacao",
+  "generateName": false,
+  "tags": [
+    {
+      "key": "projeto",
+      "value": "trade-agent"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Trade Agent · Operação",
+      "description": "Patrimônio, resultado, risco e decisões do agente (métricas a cada minuto)."
+    },
+    "variables": [],
+    "panels": {
+      "equity-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Patrimônio (USDT)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.equity",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "pnl-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Resultado do dia (USDT)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.pnl.daily",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "drawdown-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Drawdown",
+            "description": "Queda desde o pico do patrimônio."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "percent",
+                "decimalPrecision": "2"
+              },
+              "thresholds": [
+                {
+                  "value": 5,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                },
+                {
+                  "value": 10,
+                  "operator": "above_or_equal",
+                  "color": "#F24769",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.drawdown",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "exposure-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Exposição (USDT)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.exposure",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "positions-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Posições ativas",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.positions.active",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "risk-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Pior estado do risco",
+            "description": "0 operando · 1 pausado · 2 parado · 3 vendendo tudo."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": [
+                {
+                  "value": 1,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                },
+                {
+                  "value": 2,
+                  "operator": "above_or_equal",
+                  "color": "#F24769",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.risk.state",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "max",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "equity": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Patrimônio, abertura do dia e pico (USDT)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "patrimônio",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.equity",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "avg"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "abertura do dia",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.equity.day_start",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "avg"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "C",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "pico",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.equity.peak",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "avg"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "pnl": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Resultado (USDT)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "do dia",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.pnl.daily",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "avg"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "realizado",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.pnl.realized",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "avg"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "C",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "aberto",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.pnl.unrealized",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "avg"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "drawdown": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Drawdown",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "percent",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.drawdown",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "exposure": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Exposição (USDT)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.exposure",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "positions": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Posições ativas",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "step_after"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.positions.active",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "risk-state": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Estado do risco por escopo",
+            "description": "0 operando · 1 pausado · 2 parado · 3 vendendo tudo."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "step_after"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "scope",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{scope}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.risk.state",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "max"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "state-changes": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Mudanças de estado",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "scope",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "state",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{scope}} → {{state}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.risk.state_changes",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "cycles": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ciclos de decisão por perfil",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "profile",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{profile}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.decision.cycles",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "entries-exits": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Entradas e saídas por perfil",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [
+                            {
+                              "name": "profile",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "entradas {{profile}}",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.decision.entries",
+                              "temporality": "",
+                              "timeAggregation": "increase",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [
+                            {
+                              "name": "profile",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "saídas {{profile}}",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.decision.exits",
+                              "temporality": "",
+                              "timeAggregation": "increase",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "last-cycles": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Últimos ciclos de decisão",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/ListPanel",
+            "spec": {
+              "selectFields": [
+                {
+                  "name": "profile",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "state",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "evaluated",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "research",
+                  "fieldContext": "attribute"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "raw",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'agent' AND event = 'decision.cycle'"
+                    },
+                    "groupBy": [],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "timestamp"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "limit": 50
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Agora",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/equity-now"
+              }
+            },
+            {
+              "x": 2,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/pnl-now"
+              }
+            },
+            {
+              "x": 4,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/drawdown-now"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/exposure-now"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/positions-now"
+              }
+            },
+            {
+              "x": 10,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/risk-now"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Patrimônio e resultado",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/equity"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/pnl"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/drawdown"
+              }
+            },
+            {
+              "x": 4,
+              "y": 6,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/exposure"
+              }
+            },
+            {
+              "x": 8,
+              "y": 6,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/positions"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Risco e decisões",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/risk-state"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/state-changes"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cycles"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/entries-exits"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 7,
+              "content": {
+                "$ref": "#/spec/panels/last-cycles"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "duration": "6h",
+    "refreshInterval": "1m"
+  }
+}
