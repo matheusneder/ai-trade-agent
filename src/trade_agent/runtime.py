@@ -1,7 +1,8 @@
 """Ciclo de vida do agente.
 
-*Lock* exclusivo, migrações, recuperação na partida, reconciliação periódica, *heartbeat*,
-reação aos eventos do User Data Stream e as tarefas de fundo montadas pela aplicação:
+*Lock* exclusivo, migrações, recuperação na partida, reconciliação periódica, nova medição
+periódica do relógio, *heartbeat*, reação aos eventos do User Data Stream e as tarefas de
+fundo montadas pela aplicação:
 periódicas (risco, coleta de notícias), no fechamento do candle (ciclo de decisão por
 perfil) e serviços de longa duração (comandos do Telegram), supervisionados.
 """
@@ -65,6 +66,7 @@ class AgentRuntime:
         reconciler: Reconciler,
         events: EventSource | None = None,
         reconcile_interval_s: float = 300.0,
+        clock_sync_interval_s: float = 600.0,
         heartbeat: Action | None = None,
         heartbeat_interval_s: float = 60.0,
         periodic: Sequence[tuple[float, Action]] = (),
@@ -81,6 +83,7 @@ class AgentRuntime:
         self.reconciler = reconciler
         self._events = events
         self._reconcile_interval_s = reconcile_interval_s
+        self._clock_sync_interval_s = clock_sync_interval_s
         self._heartbeat = heartbeat
         self._heartbeat_interval_s = heartbeat_interval_s
         self._periodic = list(periodic)
@@ -108,7 +111,10 @@ class AgentRuntime:
             # a reconciliação acabou de rodar; as demais tarefas rodam já na partida
             # (sem esperar um intervalo inteiro sem risco, telemetria ou notícias)
             jobs: list[tuple[float, Action, bool, bool]] = [
-                (self._reconcile_interval_s, self._reconcile, False, True)
+                (self._reconcile_interval_s, self._reconcile, False, True),
+                # o relógio local pode pular com o agente rodando (NTP religado, VM que
+                # acordou): sem nova medição, as requisições assinadas esperariam um -1021
+                (self._clock_sync_interval_s, self.api.rest.sync_time, False, True),
             ]
             if self._heartbeat is not None:  # um ping por minuto: sem trace
                 jobs.append((self._heartbeat_interval_s, self._heartbeat, True, False))

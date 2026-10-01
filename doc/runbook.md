@@ -136,7 +136,12 @@ Cada perfil segue o seu `llm.on_failure` (`ta_only`, `ta_only_reduced` ou `pause
 
 ### 2.6 Relógio fora de sincronia (`-1021 Timestamp outside recvWindow`)
 
-O agente sincroniza o relógio na partida. Um *offset* persistente no painel "Offset de relógio (ms)" indica problema no host. Ative o NTP (Windows: *Definir hora automaticamente*; Linux: `timedatectl set-ntp true`) e reinicie o agente.
+O agente mede o desvio entre o relógio local e o da Binance na partida e a cada 10 minutos, e o compensa nas requisições assinadas. Se uma delas ainda for recusada com `-1021`, ele mede de novo e repete uma vez. Isso é seguro mesmo para ordens, porque a Binance recusa antes de executar. Por isso, um relógio que pula com o agente rodando (NTP religado, VM que acordou) não exige mais reiniciar o agente. Nos logs:
+
+- `rest.clock_jumped`: o desvio mudou mais de 1 s entre duas medições;
+- `rest.timestamp_rejected`: uma requisição foi recusada e repetida.
+
+Um *offset* grande e persistente no painel "Offset de relógio (ms)" (métrica `trade_agent.clock.offset`) indica que o relógio do host não está sincronizado. Ative o NTP (Windows: *Definir hora automaticamente*, com o serviço *Horário do Windows* em execução; Linux: `timedatectl set-ntp true`). No Windows com Rancher Desktop, a VM segue o relógio do Windows.
 
 ## 3. Comandos do Telegram
 
