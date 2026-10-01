@@ -92,6 +92,24 @@ O SigNoz roda em paralelo ao Jaeger e ao Loki, para comparar (`http://127.0.0.1:
 
 Os logs internos do SigNoz (ClickHouse, keeper, migrações) não entram no Loki nem no SigNoz: veja com `docker compose ... logs <serviço>`. O agente envia traces aos dois destinos com filas separadas: um fora do ar não afeta o outro.
 
+**Dashboards** (em *Dashboards*, com a etiqueta `projeto: trade-agent`):
+
+| Dashboard | Para quê |
+|-----------|----------|
+| Trade Agent · Operação | patrimônio, resultado do dia, drawdown, exposição, posições e pior estado do risco agora; histórico de patrimônio (com abertura do dia e pico) e resultado; estado do risco por escopo; ciclos, entradas e saídas por perfil; os últimos ciclos de decisão |
+| Trade Agent · Saúde técnica | falhas e peso da Binance, desvio do relógio, erros nos logs e tarefas com falha; latência p95 por endpoint da Binance, por tarefa e por operação do banco; respostas de erro por status; spans por componente; avisos e erros por serviço e os últimos do agente |
+| Trade Agent · LLM | custo, tokens, chamadas e latência no período; custo por modelo e finalidade, tokens por direção, latência p50/p95 e as últimas chamadas |
+| Trade Agent · Contêineres | CPU, memória, rede e disco por serviço do compose; memória em relação ao limite; linhas de log por serviço |
+
+Os dashboards são código: o gerador `scripts/signoz_dashboards.py` grava os JSON em `deploy/signoz/dashboards/` e os aplica pela API. Um teste falha se os JSON ficarem desatualizados. Edite o gerador, não o dashboard na interface: aplicar de novo sobrescreve, pelo `name`, o que foi mudado à mão. A aplicação exige a chave de uma conta de serviço com papel *Editor* (*Settings → Service Accounts*) em `TA_SIGNOZ_API_KEY` no `.env`:
+
+```bash
+uv run python -m scripts.signoz_dashboards --apply   # cria ou atualiza os quatro dashboards
+uv run python -m scripts.signoz_dashboards --check   # roda cada consulta nas últimas 24 h
+```
+
+No `--check`, um painel vazio pode ser só falta de eventos (nenhuma mudança de estado, nenhuma falha); um `ERRO` indica consulta inválida.
+
 **Implantação:** os manifestos saem do Foundry, a ferramenta oficial do SigNoz, a partir de `deploy/signoz/casting.yaml` (versões fixadas). Para atualizar a versão, edite o casting e regenere; um teste falha se `pours/` ficar desatualizado:
 
 ```bash

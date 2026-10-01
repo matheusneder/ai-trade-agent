@@ -1,0 +1,718 @@
+{
+  "schemaVersion": "v6",
+  "image": "",
+  "name": "trade-agent-llm",
+  "generateName": false,
+  "tags": [
+    {
+      "key": "projeto",
+      "value": "trade-agent"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Trade Agent · LLM",
+      "description": "Custo, tokens e latência do analista de mercado. O orçamento diário fica em config/research.yaml (budget.daily_usd)."
+    },
+    "variables": [],
+    "panels": {
+      "cost-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Custo no período (US$)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "4"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.llm.cost",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "tokens-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tokens no período",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.llm.tokens",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "calls-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Chamadas no período",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.llm'"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "latency-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Latência p95 das chamadas",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.llm'"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "expression": "p95(duration_nano)"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "cost": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Custo por modelo e finalidade (US$)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "4"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "model",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "purpose",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{model}} · {{purpose}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.llm.cost",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "tokens": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tokens por direção",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "direction",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{direction}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.llm.tokens",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "calls": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Chamadas por modelo e finalidade",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.llm'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "gen_ai.request.model",
+                        "fieldContext": "attribute"
+                      },
+                      {
+                        "name": "trade_agent.purpose",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{gen_ai.request.model}} · {{trade_agent.purpose}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Latência das chamadas",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "traces",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": "service.name = 'trade-agent.llm'"
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "p50",
+                          "aggregations": [
+                            {
+                              "expression": "p50(duration_nano)"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "traces",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": "service.name = 'trade-agent.llm'"
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "p95",
+                          "aggregations": [
+                            {
+                              "expression": "p95(duration_nano)"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "llm-calls": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Últimas chamadas ao LLM",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/ListPanel",
+            "spec": {
+              "selectFields": [
+                {
+                  "name": "name",
+                  "fieldContext": "span"
+                },
+                {
+                  "name": "duration_nano",
+                  "fieldContext": "span"
+                },
+                {
+                  "name": "trade_agent.purpose",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "gen_ai.usage.input_tokens",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "gen_ai.usage.output_tokens",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "trade_agent.cost_usd",
+                  "fieldContext": "attribute"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "raw",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.llm'"
+                    },
+                    "groupBy": [],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "timestamp"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "limit": 30
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Período",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 3,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/cost-now"
+              }
+            },
+            {
+              "x": 3,
+              "y": 0,
+              "width": 3,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/tokens-now"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 3,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/calls-now"
+              }
+            },
+            {
+              "x": 9,
+              "y": 0,
+              "width": 3,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/latency-now"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Custo e uso",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/cost"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/tokens"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/calls"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/latency"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 7,
+              "content": {
+                "$ref": "#/spec/panels/llm-calls"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "duration": "6h",
+    "refreshInterval": "1m"
+  }
+}

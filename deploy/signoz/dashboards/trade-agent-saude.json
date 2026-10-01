@@ -1,0 +1,1306 @@
+{
+  "schemaVersion": "v6",
+  "image": "",
+  "name": "trade-agent-saude",
+  "generateName": false,
+  "tags": [
+    {
+      "key": "projeto",
+      "value": "trade-agent"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Trade Agent · Saúde técnica",
+      "description": "Binance, relógio, tarefas de fundo, banco e logs de erro."
+    },
+    "variables": [],
+    "panels": {
+      "errors-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Falhas na Binance (5 min)",
+            "description": "Sem conexão, resultado desconhecido, 5xx, 418 e 429."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "percentunit",
+                "decimalPrecision": "2"
+              },
+              "thresholds": [
+                {
+                  "value": 0.05,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                },
+                {
+                  "value": 0.2,
+                  "operator": "above_or_equal",
+                  "color": "#F24769",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.binance.error_rate",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "weight-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Peso usado (1 min)",
+            "description": "Limite da Binance: 6000 por minuto."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": [
+                {
+                  "value": 3000,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                },
+                {
+                  "value": 5000,
+                  "operator": "above_or_equal",
+                  "color": "#F24769",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.binance.weight_used_1m",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "clock-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Desvio do relógio",
+            "description": "Horário da Binance menos o relógio local."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ms",
+                "decimalPrecision": "0"
+              },
+              "thresholds": [
+                {
+                  "value": 500,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                },
+                {
+                  "value": 1000,
+                  "operator": "above_or_equal",
+                  "color": "#F24769",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.clock.offset",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "log-errors-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Erros nos logs (período)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": [
+                {
+                  "value": 1,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "severity_text IN ('error', 'critical', 'fatal')"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "job-failures-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Tarefas com falha (período)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": [
+                {
+                  "value": 1,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.runtime' AND name LIKE 'job %' AND has_error = true"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "requests-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Requisições à Binance (período)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.exchange'"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Falhas na Binance (janela de 5 min)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "percentunit",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.binance.error_rate",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "weight": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Peso usado por minuto",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.binance.weight_used_1m",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "clock": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Desvio do relógio",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ms",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.clock.offset",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "endpoint-latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Latência p95 por endpoint da Binance",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.exchange'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "name",
+                        "fieldContext": "span"
+                      }
+                    ],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "p95(duration_nano)"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{name}}",
+                    "aggregations": [
+                      {
+                        "expression": "p95(duration_nano)"
+                      }
+                    ],
+                    "limit": 10
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "http-errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Respostas de erro da Binance por status",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.exchange' AND http.response.status_code >= 400"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "http.response.status_code",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "HTTP {{http.response.status_code}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "job-latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Duração p95 das tarefas",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.runtime' AND name LIKE 'job %'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "name",
+                        "fieldContext": "span"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{name}}",
+                    "aggregations": [
+                      {
+                        "expression": "p95(duration_nano)"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "job-failures": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Falhas por tarefa",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.runtime' AND name LIKE 'job %' AND has_error = true"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "name",
+                        "fieldContext": "span"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{name}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "db-latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Latência p95 do banco por operação",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.db'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "name",
+                        "fieldContext": "span"
+                      }
+                    ],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "p95(duration_nano)"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{name}}",
+                    "aggregations": [
+                      {
+                        "expression": "p95(duration_nano)"
+                      }
+                    ],
+                    "limit": 10
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "spans": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Spans por componente",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name LIKE 'trade-agent.%'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "service.name",
+                        "fieldContext": "resource"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{service.name}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "problems": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Avisos e erros por serviço",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "severity_text IN ('warn', 'warning', 'error', 'critical', 'fatal')"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "service.name",
+                        "fieldContext": "resource"
+                      },
+                      {
+                        "name": "severity_text",
+                        "fieldContext": "log"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{service.name}} {{severity_text}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "agent-problems": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Últimos avisos e erros do agente",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/ListPanel",
+            "spec": {
+              "selectFields": [
+                {
+                  "name": "event",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "error",
+                  "fieldContext": "attribute"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "raw",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'agent' AND severity_text IN ('warn', 'warning', 'error', 'critical', 'fatal')"
+                    },
+                    "groupBy": [],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "timestamp"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "limit": 50
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Agora",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/errors-now"
+              }
+            },
+            {
+              "x": 2,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/weight-now"
+              }
+            },
+            {
+              "x": 4,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/clock-now"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/log-errors-now"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/job-failures-now"
+              }
+            },
+            {
+              "x": 10,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/requests-now"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Binance e relógio",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/errors"
+              }
+            },
+            {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/weight"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/clock"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/endpoint-latency"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/http-errors"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Tarefas e banco",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/job-latency"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/job-failures"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/db-latency"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/spans"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Logs",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/problems"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 7,
+              "content": {
+                "$ref": "#/spec/panels/agent-problems"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "duration": "6h",
+    "refreshInterval": "1m"
+  }
+}
