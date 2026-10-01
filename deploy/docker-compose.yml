@@ -131,6 +131,8 @@ services:
       LOG_LEVEL: warning   # sem o log de acesso de cada leitura do Alloy (voltaria ao Loki)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # o da imagem mais um backend sem o corte de 10 min para docker logs --follow
+      - ./docker-proxy/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro
     networks: [docker-api]
     logging: *logging
 
