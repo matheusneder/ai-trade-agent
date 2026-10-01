@@ -55,7 +55,7 @@ Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são masc
 sum by (event) (count_over_time({service="agent"} | event!="" [1h]))  # eventos mais frequentes
 ```
 
-Um traceback do Python chega como uma entrada só, com `level="error"`. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline.
+Um traceback do Python chega como uma entrada só, com `level="error"`. No PostgreSQL, `FATAL: terminating connection due to administrator command` num reinício é esperado. A interface do Alloy (`http://127.0.0.1:12345`) mostra os contêineres descobertos e a saúde do pipeline. No Windows com Rancher Desktop, ela não abre (veja a nota sobre portas na §1.2).
 
 ### 1.2 Traces (OpenTelemetry e Jaeger)
 
@@ -72,7 +72,12 @@ Cada tarefa do agente vira um trace no Jaeger (`http://127.0.0.1:16686`, 7 dias 
 
 O Jaeger fica fixado na 2.20: a 2.21 removeu a API v1 que o datasource do Grafana usa (há um teste que falha se a versão mudar). Com o Jaeger fora do ar, o agente segue normalmente e descarta os spans.
 
-**`http://127.0.0.1:16686` não abre, mas o Jaeger está `healthy`?** No Windows com Rancher Desktop, o repasse de portas pode ficar preso numa porta depois que a rede do Rancher Desktop reinicia (já aconteceu com a 16686 e a 12345 do Alloy, com as outras portas funcionando). A conexão abre, mas a resposta nunca chega. Para confirmar, teste dentro da VM: `rdctl shell -- wget -qO- http://127.0.0.1:16686/` responde. Nesse caso, `down`/`up` e recriar o contêiner não resolvem; reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo). Os contêineres voltam sozinhos (`restart: unless-stopped`). Enquanto isso, os traces continuam no Grafana, em *Explore* → *Traces*, que acessa o Jaeger pela rede interna.
+**Uma porta não abre no Windows, mas o serviço está de pé?** Com Rancher Desktop, a conexão abre e a resposta nunca chega. Para confirmar, teste dentro da VM: `rdctl shell -- wget -qO- http://127.0.0.1:16686/` responde. O Rancher Desktop leva o tráfego do Windows até o contêiner com regras de NAT próprias (uma por IP do contêiner, na tabela `nat`, cadeia `DOCKER`), e há dois casos em que elas falham:
+
+- **Regra antiga na frente:** quando um contêiner para, o Rancher Desktop não consegue apagar a regra dele, porque já não sabe o IP. No `rancher-desktop-guestagent.log` aparece `--delete DOCKER ... --to-destination :16686` com `Bad rule`. Se o contêiner volta com outro IP, a regra antiga vem primeiro e a porta para de responder. Foi o que aconteceu com a 16686 do Jaeger. Recriar o contêiner não resolve. Reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo), que limpa as regras. Os contêineres voltam sozinhos (`restart: unless-stopped`).
+- **Contêiner em várias redes (o Alloy, porta 12345):** o Rancher Desktop cria uma regra para cada rede, e vale a primeira. O Docker só aceita a porta publicada pela rede que escolheu para isso, e o tráfego que entra pelas outras é descartado. Reiniciar não resolve. A interface do Alloy fica inacessível no Windows, mas funciona num Linux com Docker comum, como a VPS. Para checar o Alloy no Windows, use `rdctl shell -- wget -qO- http://127.0.0.1:12345/-/ready` (dentro da VM) ou os logs `{service="alloy"}` no Grafana.
+
+Enquanto a 16686 não abre, os traces continuam no Grafana, em *Explore* → *Traces*, que acessa o Jaeger pela rede interna.
 
 ### 1.3 SigNoz (traces, logs e métricas num lugar só)
 
