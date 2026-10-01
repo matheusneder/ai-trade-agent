@@ -77,6 +77,17 @@ SAMPLES = {
         "jaeger.log",
         ['{"level":"warn","ts":"2026-09-30T18:10:12.207Z","msg":"aviso do coletor"}'],
     ),
+    "container-metrics": (
+        "container-metrics.log",
+        [
+            # um contêiner que sumiu (docker run --rm, recriação): inofensivo, fica de fora
+            '{"level":"error","ts":"2026-10-01T17:05:41.120Z","caller":"docker@v0.161.0/'
+            'docker.go:417","msg":"Could not inspect updated container","error":"Error '
+            'response from daemon: No such container: 5f10dc58071"}',
+            '{"level":"error","ts":"2026-10-01T17:06:02.300Z","msg":"Exporting failed. '
+            'Dropping data.","error":"connection refused"}',
+        ],
+    ),
     "alloy": (
         "alloy.log",
         [
@@ -100,6 +111,7 @@ EXPECTED = {
     ("grafana", "info"): 1,
     ("docker-proxy", None): 1,  # sem nível: aparece com o filtro de nível "All" (.*)
     ("jaeger", "warn"): 1,
+    ("container-metrics", "error"): 1,  # só o erro real; o do contêiner que sumiu é descartado
     ("alloy", "warn"): 1,
     ("alloy", "error"): 1,
 }
@@ -182,6 +194,15 @@ def test_otlp_copy_for_signoz_keeps_service_severity_and_trace(loki: str) -> Non
     assert "loki_attribute_labels" not in metadata
     (traceback,) = query(loki, f'{copies} |~ "^Traceback"')
     assert traceback["stream"]["severity_number"] == "17"  # ERROR
+
+
+def test_vanished_container_noise_is_dropped(loki: str) -> None:
+    """O ``docker_stats`` registra como erro cada contêiner que some antes de ser inspecionado
+    (o laboratório cria e remove dezenas por hora): ruído, fora do Loki e da cópia do SigNoz."""
+    assert query(loki, '{service="container-metrics"} |= "No such container"') == []
+    assert query(loki, '{service_name="container-metrics"} |= "No such container"') == []
+    (kept,) = query(loki, '{service="container-metrics"}')
+    assert "connection refused" in kept["values"][0][1]  # os erros reais continuam
 
 
 def test_python_traceback_becomes_one_error_entry(loki: str) -> None:
