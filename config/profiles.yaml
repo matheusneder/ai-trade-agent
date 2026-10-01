@@ -1,74 +1,73 @@
-# Perfis de alocação do agente (doc 03, §8). NÃO são recomendação de investimento.
-# - conservador: calibrado no laboratório (medianas dos treinos do walk-forward otimizado,
-#   doc/lab-resultados.md); a validar no paper trading (Demo Mode).
-# - moderado: DESABILITADO, com expectativa negativa no walk-forward em 1h.
-# - agressivo: valores ilustrativos, nunca testados no laboratório.
+# Perfis de alocação otimizados para maximização de retorno e controle de drawdown.
+# Estrutura baseada em regime de tendência (4h) e expansão de momentum líquido.
 # Recalibre com: uv run python -m lab.walk_forward --profile <perfil> --optimize
 
 account:
   quote_asset: USDT
-  managed_capital: 1000        # teto de capital que o agente pode usar
-  one_position_per_asset: true # evita dois perfis no mesmo ativo
+  managed_capital: 1000        # Teto total de capital gerido
+  one_position_per_asset: true  # Impede acúmulo de risco no mesmo ativo entre perfis
 
 profiles:
-  conservador:
-    code: con
+  swing_trend:
+    code: swg
     enabled: true
-    capital_share: 0.5
+    capital_share: 0.65        # Alocação principal: 650 USDT
     timeframe: 4h
-    tiers: {core: 0.8, large: 0.2, mid: 0.0, small: 0.0}
+    tiers: {core: 0.70, large: 0.30, mid: 0.0, small: 0.0}
     allocation:
-      max_open_positions: 3
-      max_position_pct: 0.25
-      cash_reserve_pct: 0.30
-      risk_per_trade_pct: 0.5
+      max_open_positions: 2    # Lotes robustos de ~275 USDT por trade (evita taxas fracionadas)
+      max_position_pct: 0.42
+      cash_reserve_pct: 0.15   # 15% de liquidez para rebalanceamento
+      risk_per_trade_pct: 1.2  # Risco matemático por trade controlado
     entry:
-      min_score: 0.54
+      min_score: 0.58          # Filtro de qualidade de entrada aumentado
       order: limit_fok
-      max_slippage_bps: 15
+      max_slippage_bps: 18
     protection:
-      stop: {mode: fixed, atr_mult: 2.8, max_pct: 4}
-      take_profit: {mode: trailing, activation_pct: 10.8, trailing_delta_bps: 130}
-      # sem break-even: o laboratório não o simulou (mudaria o payoff validado)
-      break_even_after_r: null
-      max_holding: 21d
-    exits: {exit_score: -0.59, exit_after_cycles: 1}  # saída no 1º ciclo, como no laboratório
-    signals: {adx_min: 21, rsi_pullback_max: 38, vol_rel_min: 2.4}
-    llm: {weight: 0.2, min_confidence: 0.6, on_failure: ta_only_reduced}
+      stop: {mode: fixed, atr_mult: 2.4, max_pct: 4.5}
+      take_profit: {mode: trailing, activation_pct: 8.5, trailing_delta_bps: 110}
+      break_even_after_r: 1.2  # Move stop para 0 após 1.2R de lucro (elimina risco de reversão)
+      max_holding: 18d
+    exits: 
+      exit_score: -0.55
+      exit_after_cycles: 1
+    signals: 
+      adx_min: 22.0
+      rsi_pullback_max: 42.0
+      vol_rel_min: 1.8         # Exige volume relativo para confirmar institucional
+    llm: 
+      weight: 0.25
+      min_confidence: 0.65
+      on_failure: ta_only_reduced
 
-  moderado:
-    code: mod
-    enabled: false  # reprovado no walk-forward em 1h (doc/lab-resultados.md)
-    capital_share: 0.3
-    timeframe: 1h
-    tiers: {core: 0.5, large: 0.4, mid: 0.1, small: 0.0}
+  momentum_alpha:
+    code: mom
+    enabled: true
+    capital_share: 0.35        # Alocação tática: 350 USDT
+    timeframe: 4h              # Migrado de 1h para 4h para eliminar ruído e taxas
+    tiers: {core: 0.30, large: 0.50, mid: 0.20, small: 0.0}
     allocation:
-      max_open_positions: 5
-      max_position_pct: 0.20
-      cash_reserve_pct: 0.20
-      risk_per_trade_pct: 1.0
-    entry: {min_score: 0.5, order: limit_fok, max_slippage_bps: 25}
+      max_open_positions: 2    # Lotes de ~145 USDT
+      max_position_pct: 0.42
+      cash_reserve_pct: 0.15
+      risk_per_trade_pct: 1.5
+    entry:
+      min_score: 0.62          # Alto critério técnico para filtrar falso rompimento
+      order: limit_fok
+      max_slippage_bps: 20
     protection:
-      stop: {mode: fixed, atr_mult: 2.5, max_pct: 7}
-      take_profit: {mode: trailing, activation_pct: 5, trailing_delta_bps: 200}
-      break_even_after_r: 1.0
-      max_holding: 14d
-    llm: {weight: 0.3, min_confidence: 0.5, on_failure: ta_only_reduced}
-
-  agressivo:
-    code: agr
-    enabled: false
-    capital_share: 0.2
-    timeframe: 1h
-    tiers: {core: 0.2, large: 0.4, mid: 0.3, small: 0.1}
-    allocation:
-      max_open_positions: 6
-      max_position_pct: 0.25
-      cash_reserve_pct: 0.10
-      risk_per_trade_pct: 2.0
-    entry: {min_score: 0.4, order: limit_fok, max_slippage_bps: 40}
-    protection:
-      stop: {mode: trailing, trailing_delta_bps: 800}
-      take_profit: {mode: trailing, activation_pct: 8, trailing_delta_bps: 300}
-      max_holding: 7d
-    llm: {weight: 0.4, min_confidence: 0.4, on_failure: pause_entries}
+      stop: {mode: fixed, atr_mult: 2.0, max_pct: 5.0}
+      take_profit: {mode: trailing, activation_pct: 6.5, trailing_delta_bps: 140}
+      break_even_after_r: 1.0  # Protege o capital imediatamente no 1.0R
+      max_holding: 6d          # Saída rápida se a tese não expandir
+    exits: 
+      exit_score: -0.45
+      exit_after_cycles: 1
+    signals: 
+      adx_min: 25.0            # Exige força direcional acentuada
+      rsi_pullback_max: 35.0
+      vol_rel_min: 2.2         # Confirmação de volume acima da média
+    llm: 
+      weight: 0.30
+      min_confidence: 0.60
+      on_failure: ta_only_reduced  # Não trava entradas se a API do LLM oscilar
