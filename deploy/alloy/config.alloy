@@ -84,6 +84,15 @@ loki.process "trade_agent" {
 		}
 	}
 
+	// container-metrics: o docker_stats tenta inspecionar cada contêiner que muda de estado e,
+	// se ele já sumiu (docker run --rm do laboratório, recriação pelo compose), registra
+	// "No such container" como erro: dezenas por hora, inofensivos. Ficam de fora.
+	stage.match {
+		selector            = "{service=\"container-metrics\"} |= \"Could not inspect updated container\" |= \"No such container\""
+		action              = "drop"
+		drop_counter_reason = "container_gone"
+	}
+
 	// Jaeger e container-metrics (OpenTelemetry Collector): JSON com "level".
 	stage.match {
 		selector = "{service=~\"jaeger|container-metrics\"}"
