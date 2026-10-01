@@ -30,6 +30,14 @@ discovery.relabel "collected" {
 		regex         = "ingester|signoz-.+"
 		action        = "drop"
 	}
+
+	// A posição de leitura de cada contêiner é guardada pelos rótulos do alvo. Rede, IP e porta
+	// mudam quando o Docker reinicia: com eles, o Alloy não achava a posição e relia o log
+	// inteiro. Só ficam os rótulos estáveis enquanto o contêiner existe.
+	rule {
+		regex  = "__meta_docker_container_(id|name|label_com_docker_compose_service)"
+		action = "labelkeep"
+	}
 }
 
 discovery.relabel "trade_agent" {
@@ -49,7 +57,7 @@ loki.source.docker "trade_agent" {
 }
 
 loki.process "trade_agent" {
-	forward_to = [loki.write.loki.receiver, otelcol.receiver.loki.signoz.receiver]
+	forward_to = [loki.write.loki.receiver, loki.process.signoz.receiver]
 
 	// Agente: um JSON do structlog por linha. Um traceback do Python (texto, várias linhas)
 	// vira um único registro, que começa em "Traceback".
@@ -145,6 +153,20 @@ loki.write "loki" {
 // Cópia dos mesmos logs para o SigNoz (OTLP), em paralelo ao Loki. Cada entrada do Loki vira
 // um registro com recurso próprio; os rótulos (service, level) e os metadados (event,
 // trace_id) chegam como atributos.
+//
+// Os avisos do próprio Alloy sobre esse envio (fila cheia, SigNoz fora do ar) ficam só no Loki:
+// cada linha dessas seria mais um envio para a fila cheia, que assim não esvaziaria nunca (o
+// Alloy chegou a registrar milhões de linhas por hora ao subir antes do SigNoz).
+loki.process "signoz" {
+	forward_to = [otelcol.receiver.loki.signoz.receiver]
+
+	stage.match {
+		selector            = "{service=\"alloy\"} |= \"component_id=otelcol.\""
+		action              = "drop"
+		drop_counter_reason = "signoz_self"
+	}
+}
+
 otelcol.receiver.loki "signoz" {
 	output {
 		logs = [otelcol.processor.transform.signoz.input]
@@ -175,6 +197,13 @@ otelcol.processor.transform "signoz" {
 		]
 	}
 
+	output {
+		logs = [otelcol.processor.batch.signoz.input]
+	}
+}
+
+// Em lotes: sem isso, cada linha de log era um envio (e um lugar na fila).
+otelcol.processor.batch "signoz" {
 	output {
 		logs = [otelcol.exporter.otlphttp.signoz.input]
 	}
