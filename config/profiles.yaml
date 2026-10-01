@@ -9,10 +9,10 @@ account:
 
 profiles:
   swing_trend:
-    # Calibrado em 01/10/2026: mediana dos 14 treinos do walk-forward otimizado
-    # (var/lab/walk-forward-swing_trend-otimizado-20261001-170542.md; a janela 2023-01
-    # ficou de fora, sem dados de treino suficientes). Risco, break-even e prazo máximo
-    # não são otimizados pelo laboratório e seguem como estavam.
+    # Recalibrado em 01/10/2026: mediana dos 15 treinos do walk-forward otimizado
+    # (var/lab/walk-forward-swing_trend-otimizado-20261001-190610.md, candles de 4h
+    # desde 2021-10). Risco, break-even e prazo máximo não são otimizados pelo
+    # laboratório e seguem como estavam.
     code: swg
     enabled: true
     capital_share: 0.65        # Alocação principal: 650 USDT
@@ -24,21 +24,21 @@ profiles:
       cash_reserve_pct: 0.15   # 15% de liquidez para rebalanceamento
       risk_per_trade_pct: 1.2  # Risco matemático por trade controlado
     entry:
-      min_score: 0.65          # walk-forward: mediana 0.645 (era 0.58)
+      min_score: 0.67          # walk-forward (era 0.65)
       order: limit_fok
       max_slippage_bps: 18
     protection:
-      stop: {mode: fixed, atr_mult: 2.9, max_pct: 4.5}   # walk-forward: atr_mult 2.9 (era 2.4)
-      take_profit: {mode: trailing, activation_pct: 9.9, trailing_delta_bps: 80}   # era 8.5 / 110
+      stop: {mode: fixed, atr_mult: 3.1, max_pct: 4.5}   # walk-forward: atr_mult 3.1 (era 2.9)
+      take_profit: {mode: trailing, activation_pct: 9.7, trailing_delta_bps: 100}   # era 9.9 / 80
       break_even_after_r: 1.2  # Move stop para 0 após 1.2R de lucro (elimina risco de reversão)
       max_holding: 18d
     exits:
-      exit_score: -0.53        # walk-forward (era -0.55)
+      exit_score: -0.46        # walk-forward (era -0.53)
       exit_after_cycles: 1
     signals:
-      adx_min: 26.0            # walk-forward (era 22)
-      rsi_pullback_max: 41.0   # walk-forward: mediana 40.5 (era 42)
-      vol_rel_min: 1.6         # walk-forward (era 1.8)
+      adx_min: 24.0            # walk-forward (era 26)
+      rsi_pullback_max: 41.0   # walk-forward: mediana igual à anterior
+      vol_rel_min: 2.3         # walk-forward (era 1.6)
     llm:
       weight: 0.25
       min_confidence: 0.65
