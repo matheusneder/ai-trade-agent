@@ -61,8 +61,10 @@ def file_pipeline(files: Mapping[str, str], *, otlp_endpoint: str = LOKI_OTLP) -
     names = [
         "loki.process.trade_agent",
         "loki.write.loki",
+        "loki.process.signoz",
         "otelcol.receiver.loki.signoz",
         "otelcol.processor.transform.signoz",
+        "otelcol.processor.batch.signoz",
     ]
     return (
         "\n\n".join(
