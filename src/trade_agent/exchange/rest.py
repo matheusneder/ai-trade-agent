@@ -9,7 +9,9 @@ Responsabilidades:
 * impedir envio de ordens quando a trava ``trading_enabled`` estiver desligada.
 
 Não há retentativas automáticas nesta camada: a política de retentativa depende da
-operação (consulta x ordem) e fica com quem chama.
+operação (consulta x ordem) e fica com quem chama. A exceção é o ``-1021`` (``timestamp``
+fora do ``recvWindow``): a Binance recusa a requisição antes de executá-la, então o cliente
+mede o relógio de novo e repete uma vez, inclusive ordens.
 """
 
 import time
@@ -45,6 +47,8 @@ log = structlog.get_logger(__name__)
 type HttpMethod = Literal["GET", "POST", "PUT", "DELETE"]
 
 API_KEY_HEADER = "X-MBX-APIKEY"
+CLOCK_JUMP_WARN_MS = 1000
+"""Variação do deslocamento entre duas medições que indica um salto do relógio local."""
 
 # Falhas em que a requisição comprovadamente não foi enviada ao servidor.
 _NOT_SENT_ERRORS: tuple[type[httpx.TransportError], ...] = (
@@ -142,6 +146,7 @@ class BinanceRestClient:
         self._trading_enabled = trading_enabled
         self._clock = clock
         self._time_offset_ms = 0
+        self._synced = False
         self.usage = RateLimitUsage()
         self.health = CallHealth()
 
@@ -181,10 +186,15 @@ class BinanceRestClient:
         before = self._clock()
         data = await self.public("GET", "/api/v3/time")
         after = self._clock()
-        server_time = int(data["serverTime"])
-        self._time_offset_ms = server_time - (before + after) // 2
-        log.debug("rest.clock_synced", offset_ms=self._time_offset_ms, round_trip_ms=after - before)
-        return self._time_offset_ms
+        offset = int(data["serverTime"]) - (before + after) // 2
+        jump = offset - self._time_offset_ms
+        if self._synced and abs(jump) > CLOCK_JUMP_WARN_MS:
+            # o relógio local foi ajustado (NTP religado, VM que acordou): o desvio anterior
+            # já não valia, e as requisições assinadas seriam recusadas com -1021
+            log.warning("rest.clock_jumped", offset_ms=offset, jump_ms=jump)
+        self._time_offset_ms, self._synced = offset, True
+        log.debug("rest.clock_synced", offset_ms=offset, round_trip_ms=after - before)
+        return offset
 
     # ------------------------------------------------------------------ requisições
     async def public(
@@ -215,14 +225,34 @@ class BinanceRestClient:
             raise TradingDisabledError(f"envio de ordens desabilitado: {method} {path}")
         if not self._api_key or self._signer is None:
             raise BinanceConfigurationError("requisição assinada exige api_key e signer")
+        try:
+            return await self._send_signed(method, path, params, self._api_key, self._signer)
+        except BinanceTimestampError:
+            # recusada antes de executar: mede o relógio de novo e assina outra vez
+            log.warning(
+                "rest.timestamp_rejected",
+                method=method,
+                path=path,
+                offset_ms=self._time_offset_ms,
+            )
+            await self.sync_time()
+            return await self._send_signed(method, path, params, self._api_key, self._signer)
 
+    async def _send_signed(
+        self,
+        method: HttpMethod,
+        path: str,
+        params: Mapping[str, ParamValue] | None,
+        api_key: str,
+        signer: Signer,
+    ) -> Any:
         full_params: dict[str, ParamValue] = dict(params or {})
         full_params["recvWindow"] = self._recv_window_ms
         full_params["timestamp"] = self.now_ms()
         payload = encode_params(full_params)
-        signature = quote(self._signer.sign(payload), safe="")
+        signature = quote(signer.sign(payload), safe="")
         url = f"{path}?{payload}&signature={signature}"
-        return await self._send(method, url, headers={API_KEY_HEADER: self._api_key})
+        return await self._send(method, url, headers={API_KEY_HEADER: api_key})
 
     async def _send(self, method: HttpMethod, url: str, headers: dict[str, str]) -> Any:
         # só o caminho vai para logs, spans e mensagens de erro: a query tem a assinatura

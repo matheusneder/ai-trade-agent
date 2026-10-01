@@ -1,9 +1,11 @@
 from collections.abc import AsyncIterator, Iterator
 from decimal import Decimal
+from urllib.parse import parse_qsl
 
 import httpx
 import pytest
 import respx
+from structlog.testing import capture_logs
 
 from trade_agent.exchange.errors import (
     BinanceAPIError,
@@ -133,6 +135,58 @@ async def test_now_ms_applies_offset(router: respx.MockRouter) -> None:
     async with BinanceRestClient(BASE, clock=lambda: 9_000) as c:
         await c.sync_time()
         assert c.now_ms() == 10_000
+
+
+async def test_sync_time_warns_only_when_the_clock_jumps(router: respx.MockRouter) -> None:
+    server = iter([5_000, 5_500, 21_000])  # +4 s; +0,5 s de deriva; +15,5 s (relógio corrigido)
+    router.get("/api/v3/time").mock(
+        side_effect=lambda _: httpx.Response(200, json={"serverTime": next(server)})
+    )
+    async with BinanceRestClient(BASE, clock=lambda: 1_000) as c:
+        with capture_logs() as logs:
+            for _ in range(3):
+                await c.sync_time()  # a primeira medição não tem com o que comparar
+    jumps = [e for e in logs if e["event"] == "rest.clock_jumped"]
+    assert [(e["offset_ms"], e["jump_ms"], e["log_level"]) for e in jumps] == [
+        (20_000, 15_500, "warning")
+    ]
+
+
+async def test_timestamp_rejection_resyncs_and_retries_once(
+    router: respx.MockRouter, client: BinanceRestClient
+) -> None:
+    """``-1021``: a Binance recusou antes de executar; repetir é seguro, até para uma ordem."""
+    router.get("/api/v3/time").respond(200, json={"serverTime": 1499827319559 + 15_000})
+    ahead = "Timestamp for this request was 1000ms ahead of the server's time."
+    route = router.post("/api/v3/order").mock(
+        side_effect=[
+            httpx.Response(400, json={"code": -1021, "msg": ahead}),
+            httpx.Response(200, json={"orderId": 7}),
+        ]
+    )
+    with capture_logs() as logs:
+        params = {"symbol": "BTCUSDT"}
+        assert await client.signed("POST", "/api/v3/order", params, trading=True) == {"orderId": 7}
+    first, second = (dict(parse_qsl(c.request.url.query.decode())) for c in route.calls)
+    assert int(second["timestamp"]) - int(first["timestamp"]) == 15_000  # assinada de novo
+    assert client.time_offset_ms == 15_000
+    rejected = next(e for e in logs if e["event"] == "rest.timestamp_rejected")
+    assert (rejected["path"], rejected["log_level"]) == ("/api/v3/order", "warning")
+
+
+async def test_timestamp_rejection_after_resync_is_raised(
+    router: respx.MockRouter, client: BinanceRestClient
+) -> None:
+    clock = router.get("/api/v3/time").respond(200, json={"serverTime": 1499827319559})
+    route = router.get("/api/v3/account").mock(
+        side_effect=[
+            httpx.Response(400, json={"code": -1021, "msg": "outside of the recvWindow"}),
+            httpx.Response(400, json={"code": -1021, "msg": "outside of the recvWindow"}),
+        ]
+    )
+    with pytest.raises(BinanceTimestampError):
+        await client.signed("GET", "/api/v3/account")
+    assert (route.call_count, clock.call_count) == (2, 1)  # uma só nova tentativa
 
 
 def test_system_clock_is_milliseconds() -> None:
