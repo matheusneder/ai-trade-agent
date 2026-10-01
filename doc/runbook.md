@@ -136,7 +136,7 @@ Cada perfil segue o seu `llm.on_failure` (`ta_only`, `ta_only_reduced` ou `pause
 
 ### 2.6 Relógio fora de sincronia (`-1021 Timestamp outside recvWindow`)
 
-O agente mede o desvio entre o relógio local e o da Binance na partida e a cada 10 minutos, e o compensa nas requisições assinadas. Se uma delas ainda for recusada com `-1021`, ele mede de novo e repete uma vez. Isso é seguro mesmo para ordens, porque a Binance recusa antes de executar. Por isso, um relógio que pula com o agente rodando (NTP religado, VM que acordou) não exige mais reiniciar o agente. Nos logs:
+O agente mede o desvio entre o relógio local e o da Binance na partida e a cada 10 minutos, e o compensa nas requisições assinadas. Cada medição usa três amostras e fica com a de menor ida e volta, porque abrir a conexão (TLS) desloca a estimativa em centenas de ms. Se uma delas ainda for recusada com `-1021`, ele mede de novo e repete uma vez. Isso é seguro mesmo para ordens, porque a Binance recusa antes de executar. Por isso, um relógio que pula com o agente rodando (NTP religado, VM que acordou) não exige mais reiniciar o agente. Nos logs:
 
 - `rest.clock_jumped`: o desvio mudou mais de 1 s entre duas medições;
 - `rest.timestamp_rejected`: uma requisição foi recusada e repetida.

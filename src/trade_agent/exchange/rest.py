@@ -49,6 +49,8 @@ type HttpMethod = Literal["GET", "POST", "PUT", "DELETE"]
 API_KEY_HEADER = "X-MBX-APIKEY"
 CLOCK_JUMP_WARN_MS = 1000
 """Variação do deslocamento entre duas medições que indica um salto do relógio local."""
+CLOCK_SAMPLES = 3
+"""Amostras por medição do relógio; vale a de menor ida e volta."""
 
 # Falhas em que a requisição comprovadamente não foi enviada ao servidor.
 _NOT_SENT_ERRORS: tuple[type[httpx.TransportError], ...] = (
@@ -182,18 +184,26 @@ class BinanceRestClient:
 
     # ------------------------------------------------------------------ relógio
     async def sync_time(self) -> int:
-        """Mede o deslocamento de relógio usando ``GET /api/v3/time``; retorna o offset."""
-        before = self._clock()
-        data = await self.public("GET", "/api/v3/time")
-        after = self._clock()
-        offset = int(data["serverTime"]) - (before + after) // 2
+        """Mede o deslocamento de relógio usando ``GET /api/v3/time``; retorna o offset.
+
+        O horário do servidor é comparado com o meio da ida e volta, e uma ida e volta longa
+        (abrindo a conexão, com TLS) desloca a estimativa em centenas de ms. Por isso são
+        ``CLOCK_SAMPLES`` amostras seguidas, e vale a mais rápida.
+        """
+        samples: list[tuple[int, int]] = []  # (ida e volta, offset)
+        for _ in range(CLOCK_SAMPLES):
+            before = self._clock()
+            data = await self.public("GET", "/api/v3/time")
+            after = self._clock()
+            samples.append((after - before, int(data["serverTime"]) - (before + after) // 2))
+        round_trip, offset = min(samples)
         jump = offset - self._time_offset_ms
         if self._synced and abs(jump) > CLOCK_JUMP_WARN_MS:
             # o relógio local foi ajustado (NTP religado, VM que acordou): o desvio anterior
             # já não valia, e as requisições assinadas seriam recusadas com -1021
             log.warning("rest.clock_jumped", offset_ms=offset, jump_ms=jump)
         self._time_offset_ms, self._synced = offset, True
-        log.debug("rest.clock_synced", offset_ms=offset, round_trip_ms=after - before)
+        log.debug("rest.clock_synced", offset_ms=offset, round_trip_ms=round_trip)
         return offset
 
     # ------------------------------------------------------------------ requisições
