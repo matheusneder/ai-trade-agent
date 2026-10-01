@@ -45,6 +45,10 @@ profiles:
       on_failure: ta_only_reduced
 
   momentum_alpha:
+    # Calibrado em 01/10/2026: mediana dos 15 treinos do walk-forward otimizado
+    # (var/lab/walk-forward-momentum_alpha-otimizado-20261001-181357.md, candles de 4h
+    # desde 2021-10). Risco, break-even e prazo máximo não são otimizados pelo
+    # laboratório e seguem como estavam.
     code: mom
     enabled: true
     capital_share: 0.35        # Alocação tática: 350 USDT
@@ -56,21 +60,21 @@ profiles:
       cash_reserve_pct: 0.15
       risk_per_trade_pct: 1.5
     entry:
-      min_score: 0.62          # Alto critério técnico para filtrar falso rompimento
+      min_score: 0.67          # walk-forward (era 0.62)
       order: limit_fok
       max_slippage_bps: 20
     protection:
-      stop: {mode: fixed, atr_mult: 2.0, max_pct: 5.0}
-      take_profit: {mode: trailing, activation_pct: 6.5, trailing_delta_bps: 140}
+      stop: {mode: fixed, atr_mult: 3.0, max_pct: 5.0}   # walk-forward: atr_mult 3.0 (era 2.0)
+      take_profit: {mode: trailing, activation_pct: 9.5, trailing_delta_bps: 130}   # era 6.5 / 140
       break_even_after_r: 1.0  # Protege o capital imediatamente no 1.0R
       max_holding: 6d          # Saída rápida se a tese não expandir
     exits: 
-      exit_score: -0.45
+      exit_score: -0.46        # walk-forward (era -0.45)
       exit_after_cycles: 1
-    signals: 
-      adx_min: 25.0            # Exige força direcional acentuada
-      rsi_pullback_max: 35.0
-      vol_rel_min: 2.2         # Confirmação de volume acima da média
+    signals:
+      adx_min: 29.0            # walk-forward (era 25)
+      rsi_pullback_max: 35.0   # walk-forward: mediana igual à anterior
+      vol_rel_min: 2.6         # walk-forward (era 2.2)
     llm: 
       weight: 0.30
       min_confidence: 0.60
