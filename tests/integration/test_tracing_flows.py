@@ -43,10 +43,10 @@ async def test_binance_calls_are_client_spans_without_secrets(
         await api.account()  # assinada: timestamp, recvWindow e signature na query
         with pytest.raises(BinanceRejectedError):
             await api.klines("NAOEXISTE", "1m", limit=5)
-    time_span = spans.one("GET /api/v3/time")
+    *_, time_span = spans.named("GET /api/v3/time")  # uma por amostra do relógio
     account = spans.one("GET /api/v3/account")
     rejected = spans.one("GET /api/v3/klines")
-    for span in (time_span, account, rejected):
+    for span in (*spans.named("GET /api/v3/time"), account, rejected):
         assert component(span) == "exchange" and span.kind is SpanKind.CLIENT
         assert spans.parent(span) == spans.one("risk.snapshot")
     attributes = account.attributes or {}
