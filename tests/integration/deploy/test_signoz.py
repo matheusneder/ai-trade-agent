@@ -32,7 +32,7 @@ def _docker() -> None:
 def merged() -> dict[str, Any]:
     """O modelo final do compose (include + override), como o Docker Compose o monta."""
     _docker()
-    compose = str(DEPLOY / "docker-compose.yml")
+    compose = str(DEPLOY / "stack.yml")  # sem o .env da raiz, que o docker-compose.yml exige
     done = subprocess.run(  # noqa: S603 - comando fixo
         ["docker", "compose", "-f", compose, "config", "--format", "json"],  # noqa: S607
         capture_output=True, check=True,

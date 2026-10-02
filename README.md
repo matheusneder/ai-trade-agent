@@ -123,7 +123,7 @@ uv run trade-agent research eval                       # avaliação com 31 caso
 O agente grava uma foto de telemetria a cada 5 minutos (`telemetry_snapshots`) e envia um heartbeat a cada minuto para a URL de `TA_HEALTHCHECK_URL` (ex.: Healthchecks.io). O Grafana sobe junto no compose, com 6 dashboards (visão geral, posições, performance, decisões e pesquisa, saúde técnica e logs) e alertas no Telegram. Acesse em `http://127.0.0.1:3000` (admin / `GRAFANA_ADMIN_PASSWORD`). Os logs de todos os contêineres vão para o Loki (coletados pelo Grafana Alloy, guardados por 30 dias). Os traces do agente (OpenTelemetry) vão para o Jaeger (`http://127.0.0.1:16686`, 7 dias), com cada componente como serviço e o grafo de dependências entre eles; logs e traces se ligam nos dois sentidos pelo `trace_id`. Em paralelo, o SigNoz (`http://127.0.0.1:8080`) reúne traces, logs e métricas: as do agente (patrimônio, drawdown, estado do risco, custo do LLM...) e as de cada contêiner, com 4 dashboards (operação, saúde técnica, LLM e contêineres) gerados por `scripts/signoz_dashboards.py`. Procedimentos de incidente: [`doc/runbook.md`](doc/runbook.md).
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml up -d postgres grafana
+docker compose -f deploy/docker-compose.yml up -d postgres grafana   # lê o .env da raiz
 uv run python -m scripts.grafana_dashboards   # regenera os dashboards após editar o gerador
 ```
 

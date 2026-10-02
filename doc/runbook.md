@@ -5,8 +5,8 @@
 ## 1. Subir e verificar
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml up -d     # toda a pilha (agente e observabilidade)
-docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
+docker compose -f deploy/docker-compose.yml up -d     # toda a pilha (agente e observabilidade)
+docker compose -f deploy/docker-compose.yml logs -f agent
 ```
 
 | Verificação | Onde | Esperado |
@@ -41,7 +41,7 @@ O Grafana escuta só em `127.0.0.1:3000`. Numa VPS, use um túnel: `ssh -L 3000:
 | `telegram.*` / `alert.sent` / `heartbeat.ok` / `telemetry.recorded` | comandos e chamadas ao Telegram, alertas, heartbeat e telemetria |
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent | grep -E '"event": "(risk|decision)\.'
+docker compose -f deploy/docker-compose.yml logs -f agent | grep -E '"event": "(risk|decision)\.'
 ```
 
 Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são mascarados (`***`) e as bibliotecas HTTP (que registram URLs com tokens) ficam em `WARNING`.
@@ -196,7 +196,7 @@ Escopo: `global` (padrão) ou o nome do perfil. Só o `TA_TELEGRAM_CHAT_ID` conf
   - **Cópia para o SigNoz:** sai em lotes. As falhas do próprio Alloy ao enviar ao SigNoz ficam só no Loki. Se essas falhas fossem copiadas, cada uma viraria mais um envio para a fila cheia: ao subir antes do SigNoz, o Alloy chegou a registrar milhões de linhas de `sending queue is full` por hora. Uma rajada de `Exporting failed` no Loki indica que o SigNoz está fora do ar ou lento.
   - **Ruído descartado:** o `docker_stats` (`container-metrics`) registra como erro `Could not inspect updated container ... No such container` sempre que um contêiner some antes de ser inspecionado. O laboratório cria e remove dezenas por hora (`docker compose run --rm`), e o compose faz o mesmo ao recriar. Essa combinação é descartada no Alloy (contador `loki_process_dropped_lines_total{reason="container_gone"}`); os demais erros do coletor continuam passando.
 - **Configuração:** `config/` é montado no contêiner do agente. Edite os YAML e rode `docker compose ... restart agent` (sem rebuild).
-- **`.env`:** é lido só quando o contêiner é criado, e o `restart` não o relê. Depois de editar, rode `docker compose ... up -d` (recria o agente e o Grafana). Para o Telegram, `TA_TELEGRAM_CHAT_ID` é o id do seu usuário (chat privado com o bot), e é preciso enviar `/start` ao bot uma vez antes de ele conseguir escrever para você.
+- **`.env`:** o `deploy/docker-compose.yml` lê sempre o `.env` da raiz do repositório e não sobe sem ele, com ou sem `--env-file` e de qualquer pasta. Os serviços ficam em `deploy/stack.yml`. Antes, sem `--env-file .env`, o Compose procurava o `.env` em `deploy/` e usava os valores padrão: o Grafana subia com a senha padrão do `grafana_ro` (o banco a recusava: `password authentication failed`) e sem o token do Telegram. O `.env` é lido só quando o contêiner é criado, e o `restart` não o relê. Depois de editar, rode `docker compose ... up -d` (recria o agente e o Grafana). Para o Telegram, `TA_TELEGRAM_CHAT_ID` é o id do seu usuário (chat privado com o bot), e é preciso enviar `/start` ao bot uma vez antes de ele conseguir escrever para você.
 - **Mudança do `managed_capital`:** não conta como ganho nem perda. A abertura do dia e o pico acompanham a diferença de capital (log `risk.equity_rebased`), e só o resultado das operações pesa na perda diária e no drawdown. Os percentuais passam a ser calculados sobre o novo capital.
 - **Mudança de parâmetros:** sempre via laboratório (`lab/walk_forward.py`) e *paper trading* no Demo antes de produção.
 - **Backup:** `docker compose ... exec postgres pg_dump -U trade_agent trade_agent | gzip > backup.sql.gz`, guardado fora da VPS.
