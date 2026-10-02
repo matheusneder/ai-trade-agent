@@ -25,7 +25,7 @@ from trade_agent.risk.guard import (
     evaluate,
     pre_trade_violations,
 )
-from trade_agent.risk.state import GLOBAL, OpState, ScopeState, combined, escalate
+from trade_agent.risk.state import GLOBAL, Fired, OpState, ScopeState, combined, escalate
 from trade_agent.strategy.portfolio import TradeIdea
 from trade_agent.strategy.profiles import load_strategy_config
 
@@ -157,6 +157,24 @@ def test_profile_triggers_and_zero_capital() -> None:
     (hit,) = evaluate(conditions, snapshot)
     assert (hit.scope, hit.action, hit.threshold) == ("conservador", Action.HALT, 3)
     assert Hit(GLOBAL, "x", Action.PAUSE, 1.0, None).reason == "x: 1"
+
+
+def test_a_trigger_acts_again_only_one_limit_worse() -> None:
+    def hit(**overrides: Any) -> Hit:
+        (found,) = evaluate(CONDITIONS, _snapshot(**overrides))
+        return found
+
+    assert hit(consecutive_losses=8).worsened(4) and not hit(consecutive_losses=7).worsened(4)
+    daily = hit(equity=D(940), day_start_equity=D(1000))  # perda de 6% no dia (limite 3%)
+    assert daily.worsened(3.0) and not daily.worsened(3.1)
+    btc = hit(btc_change_1h=-0.125)  # queda: piora para baixo
+    assert btc.worsened(-6.0) and not btc.worsened(-6.6)
+    assert not hit(fear_greed=0).worsened(9)  # abaixo de 10: só ao sair e voltar
+    mismatch = hit(reconcile_anomalies=2)  # sem limite: qualquer piora
+    assert mismatch.worsened(1) and not mismatch.worsened(2)
+    assert Hit(GLOBAL, "x", Action.PAUSE, 0.5, 0, below=True).worsened(1)  # limite zero
+    fired = Fired(4.0, "max_consecutive_losses: 4 (limite 4)", NOW)
+    assert Fired.from_json(fired.to_json()) == fired
 
 
 # ============================================================================ pré-ordem

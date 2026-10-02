@@ -92,9 +92,15 @@ class CommandCenter:
             await self._guard.halt(scope, "comando /halt")
             return f"{scope}: parado (proteções mantidas na Binance). Retome com /resume."
         if command == "/resume":
-            if await self._guard.resume(scope):
+            if not await self._guard.resume(scope):
+                return f"{scope}: flatten em andamento; aguarde o término."
+            active = "; ".join(record.reason for record in await self._guard.fired(scope))
+            if not active:
                 return f"{scope}: retomado."
-            return f"{scope}: flatten em andamento; aguarde o término."
+            return (
+                f"{scope}: retomado. Ainda valendo, só voltam a disparar se piorarem mais um "
+                f"limite: {active}."
+            )
         return await self._flatten(scope, args[1:])
 
     async def _flatten(self, scope: str, args: list[str]) -> str:
