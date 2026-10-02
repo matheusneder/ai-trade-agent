@@ -145,6 +145,8 @@ O agente tenta re-proteger na hora. Se o novo OCO for rejeitado, ele vende a mer
 | `halted` | drawdown do pico, meta atingida ou `/halt` | analisar a causa no painel *Visão geral* e `/resume` quando seguro |
 | `halted` após flatten | *depeg* da moeda de cotação ou `/flatten` | confirmar que as vendas saíram (painel *Posições*) antes do `/resume` |
 
+Cada gatilho alerta e age uma vez por ocorrência (D-026). Enquanto a condição continuar valendo (ex.: as 4 perdas seguidas, que só zeram com uma operação vencedora), o `/resume` e o fim do *cooldown* valem. A resposta do `/resume` lista esses gatilhos. Eles só voltam a agir se a condição passar e voltar, ou se piorar mais um limite inteiro (4 → 8 perdas seguidas; perda diária de 3% → 6%; drawdown de 15% → 30%). Um gatilho que ocorreu durante um estado mais restritivo (ex.: `/pause` sem prazo) age no primeiro `/resume`: repita o `/resume` se quiser seguir mesmo assim.
+
 ### 2.4 IP banido (HTTP 418) ou excesso de requisições (429)
 
 Os erros trazem o `Retry-After` informado pela Binance, e a taxa de falhas de infraestrutura acima de 20% em 5 min pausa as entradas por 30 min. Em caso de 418, pare o agente (`/halt` e `docker compose ... stop agent`) até o fim do banimento. Revise o painel "Peso usado (1 min)" e reduza a frequência de tarefas se necessário.
@@ -170,7 +172,7 @@ Um *offset* grande e persistente no painel "Offset de relógio (ms)" (métrica `
 | `/positions` · `/pnl [dia\|semana\|mes]` · `/report` · `/config` | consultas |
 | `/pause [escopo]` | sem novas entradas; proteções e saídas por regra continuam |
 | `/halt [escopo]` | sem entradas nem saídas por regra; proteções mantidas |
-| `/resume [escopo]` | volta a `running` (recusado durante um flatten) |
+| `/resume [escopo]` | volta a `running` (recusado durante um flatten) e lista os gatilhos que ainda valem (§2.3) |
 | `/flatten [escopo]` | cancela as proteções e vende a mercado; pede um código de confirmação válido por 2 min |
 
 Escopo: `global` (padrão) ou o nome do perfil. Só o `TA_TELEGRAM_CHAT_ID` configurado é atendido; mensagens de outros chats são registradas como `telegram.unauthorized`.
