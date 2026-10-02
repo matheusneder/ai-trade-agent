@@ -1,7 +1,8 @@
 """Risk Guard: avalia as condições de parada, aplica as ações e valida cada ordem.
 
 A avaliação (``evaluate``) é uma função pura sobre um ``RiskSnapshot``; a aplicação
-(``RiskGuard.apply``) persiste o novo estado, registra o evento e alerta o operador.
+(``RiskGuard.apply``) persiste o novo estado, registra o evento e alerta o operador, uma vez
+por ocorrência de cada gatilho.
 ``flatten`` delega o encerramento das posições a quem executa ordens (o motor de decisão).
 """
 
@@ -23,7 +24,15 @@ from trade_agent.risk.conditions import (
     Trigger,
     in_trading_window,
 )
-from trade_agent.risk.state import GLOBAL, OpState, ScopeState, StateStore, combined, escalate
+from trade_agent.risk.state import (
+    GLOBAL,
+    Fired,
+    OpState,
+    ScopeState,
+    StateStore,
+    combined,
+    escalate,
+)
 from trade_agent.strategy.portfolio import TradeIdea
 from trade_agent.strategy.profiles import ProfileConfig
 
@@ -70,11 +79,26 @@ class Hit:
     value: float
     threshold: float | None
     cooldown: timedelta | None = None
+    below: bool = False
+    """Dispara abaixo do limite (ex.: Fear & Greed)."""
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return self.scope, self.condition
 
     @property
     def reason(self) -> str:
         limit = f" (limite {self.threshold:g})" if self.threshold is not None else ""
         return f"{self.condition}: {self.value:.4g}{limit}"
+
+    def worsened(self, previous: float) -> bool:
+        """Piorou mais um limite inteiro desde ``previous`` (4 → 8 perdas seguidas; perda
+        diária de 3% → 6%). Sem limite (ex.: divergências na reconciliação): qualquer piora."""
+        step = abs(self.threshold or 0)
+        down = self.below or (self.threshold or 0) < 0
+        if step == 0:
+            return self.value < previous if down else self.value > previous
+        return self.value <= previous - step if down else self.value >= previous + step
 
 
 def _pct(numerator: Decimal, denominator: Decimal) -> float:
@@ -123,7 +147,7 @@ def evaluate(conditions: StopConditions, s: RiskSnapshot) -> list[Hit]:
              float(s.profile_consecutive_losses.get(name, 0)), False),
         ]  # fmt: skip
     return [
-        Hit(scope, name, trigger.action, value, trigger.value, trigger.cooldown)
+        Hit(scope, name, trigger.action, value, trigger.value, trigger.cooldown, below)
         for scope, name, trigger, value, below in readings
         if trigger is not None and value is not None and _reached(trigger, value, below=below)
     ]
@@ -223,31 +247,57 @@ class RiskGuard:
         )
         log.warning("risk.state_changed", **payload)
 
+    async def fired(self, scope: str) -> list[Fired]:
+        """Gatilhos do escopo que já agiram e cuja condição continua valendo."""
+        fired = await self._states.fired()
+        return [record for (owner, _), record in sorted(fired.items()) if owner == scope]
+
     @tracing.traced("risk", "risk.apply")
     async def apply(self, hits: Iterable[Hit]) -> list[Hit]:
-        """Aplica as ações dos gatilhos; retorna os que mudaram algum estado."""
+        """Aplica as ações dos gatilhos de uma avaliação; retorna os que mudaram algum estado.
+
+        ``hits`` é a avaliação inteira: um gatilho ausente deixou de valer e fica rearmado.
+        Cada gatilho age uma vez por ocorrência: enquanto a condição continua, ele não estende
+        a pausa nem alerta de novo, e o ``/resume`` e o fim do cooldown valem. Ele só volta a
+        agir se piorar mais um limite inteiro (``Hit.worsened``). Um gatilho que não mudou o
+        estado (já havia outro mais restritivo) segue armado: age depois de um ``/resume``.
+        """
         applied: list[Hit] = []
         hits = list(hits)
         tracing.annotate(hits=[h.reason for h in hits])
         log.debug("risk.evaluated", hits=[h.reason for h in hits])
-        for hit in hits:
-            now = self._clock()
-            current = await self.state(hit.scope)
-            if hit.action is Action.PAUSE:
-                until = now + hit.cooldown if hit.cooldown else None
-                proposed = ScopeState(OpState.PAUSED, hit.reason, now, until)
-            elif hit.action is Action.HALT:
-                proposed = ScopeState(OpState.HALTED, hit.reason, now)
-            else:
-                proposed = ScopeState(OpState.FLATTENING, hit.reason, now)
-            new = escalate(current, proposed)
-            if new is None:
-                log.debug("risk.hit_unchanged", scope=hit.scope, state=current.state.value)
-                continue
-            applied.append(hit)
-            await self._set(hit.scope, new, source="gatilho")
-            if new.state is OpState.FLATTENING:
-                await self._run_flatten(hit.scope, hit.reason)
+        saved = await self._states.fired()
+        active = {hit.key for hit in hits}
+        fired = {key: record for key, record in saved.items() if key in active}
+        for scope, condition in saved.keys() - fired.keys():
+            log.info("risk.trigger_rearmed", scope=scope, condition=condition)
+        try:
+            for hit in hits:
+                previous = fired.get(hit.key)
+                if previous is not None and not hit.worsened(previous.value):
+                    log.debug("risk.hit_already_fired", scope=hit.scope, reason=hit.reason)
+                    continue
+                now = self._clock()
+                current = await self.state(hit.scope)
+                if hit.action is Action.PAUSE:
+                    until = now + hit.cooldown if hit.cooldown else None
+                    proposed = ScopeState(OpState.PAUSED, hit.reason, now, until)
+                elif hit.action is Action.HALT:
+                    proposed = ScopeState(OpState.HALTED, hit.reason, now)
+                else:
+                    proposed = ScopeState(OpState.FLATTENING, hit.reason, now)
+                new = escalate(current, proposed)
+                if new is None:
+                    log.debug("risk.hit_unchanged", scope=hit.scope, state=current.state.value)
+                    continue
+                applied.append(hit)
+                fired[hit.key] = Fired(hit.value, hit.reason, now)
+                await self._set(hit.scope, new, source="gatilho")
+                if new.state is OpState.FLATTENING:
+                    await self._run_flatten(hit.scope, hit.reason)
+        finally:
+            if fired != saved:
+                await self._states.put_fired(fired)
         return applied
 
     async def _run_flatten(self, scope: str, reason: str) -> int:

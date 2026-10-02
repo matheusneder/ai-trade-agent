@@ -11,7 +11,7 @@ import httpx
 import pytest
 import respx
 
-from tests.support.risk import CONDITIONS, NOW, POLICY
+from tests.support.risk import CONDITIONS, NOW, POLICY, snapshot
 from trade_agent.execution.orders import EntryOrder
 from trade_agent.execution.service import PositionService
 from trade_agent.notify.commands import OFFSET_KEY, CommandCenter
@@ -20,7 +20,7 @@ from trade_agent.notify.telegram import TelegramBot, TelegramError
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.research_store import ReportEntry, ResearchStore
 from trade_agent.persistence.store import Severity, Store
-from trade_agent.risk.guard import RiskGuard
+from trade_agent.risk.guard import RiskGuard, evaluate
 from trade_agent.risk.state import GLOBAL, OpState, ScopeState, StateStore
 from trade_agent.strategy.profiles import load_strategy_config
 
@@ -89,6 +89,12 @@ async def test_commands_change_operational_states(store: Store, http: httpx.Asyn
     assert await center.handle("/resume") == "global: retomado."
     assert await center.handle("/resume conservador") == "conservador: retomado."
     assert (await guard.effective("conservador")) is OpState.RUNNING
+    await guard.apply(evaluate(CONDITIONS, snapshot(consecutive_losses=4)))
+    assert await center.handle("/resume") == (
+        "global: retomado. Ainda valendo, só voltam a disparar se piorarem mais um limite: "
+        "max_consecutive_losses: 4 (limite 4)."
+    )
+    assert await center.handle("/resume conservador") == "conservador: retomado."
 
     await StateStore(store).put("moderado", ScopeState(OpState.FLATTENING))
     assert "aguarde" in await center.handle("/resume moderado")
