@@ -22,6 +22,7 @@ from tests.support.logs import (
     COMPOSE,
     DEPLOY,
     LOKI_CONFIG,
+    PROJECT,
     SIGNOZ_OTLP,
     alloy_blocks,
     counts,
@@ -279,7 +280,7 @@ def test_alloy_config_matches_compose_and_loki() -> None:
     hosts = re.findall(r'\bhost\s+=\s+"([^"]+)"', text)
     assert hosts == ["tcp://docker-proxy:2375"] * 2  # descoberta e leitura dos logs
     assert "unix:///var/run/docker.sock" not in text
-    assert f"com.docker.compose.project={COMPOSE['name']}" in text
+    assert f"com.docker.compose.project={PROJECT}" in text
     port = yaml.safe_load(LOKI_CONFIG.read_text(encoding="utf-8"))["server"]["http_listen_port"]
     blocks = alloy_blocks()
     assert f'url = "http://loki:{port}/loki/api/v1/push"' in blocks["loki.write.loki"]

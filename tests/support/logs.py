@@ -17,7 +17,8 @@ import pytest
 import yaml
 
 DEPLOY = Path(__file__).parents[2] / "deploy"
-COMPOSE: dict[str, Any] = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text("utf-8"))
+COMPOSE: dict[str, Any] = yaml.safe_load((DEPLOY / "stack.yml").read_text("utf-8"))
+PROJECT: str = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text("utf-8"))["name"]
 LOKI_CONFIG = DEPLOY / "loki" / "loki.yaml"
 ALLOY_CONFIG = DEPLOY / "alloy" / "config.alloy"
 TOP_LEVEL_BLOCK = re.compile(
