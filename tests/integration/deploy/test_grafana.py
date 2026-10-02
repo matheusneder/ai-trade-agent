@@ -85,7 +85,7 @@ def test_datasource_and_telegram_placeholder_match_compose() -> None:
     contact = yaml.safe_load((PROVISIONING / "alerting" / "telegram.yaml").read_text("utf-8"))
     settings = contact["contactPoints"][0]["receivers"][0]["settings"]
     assert settings["chatid"] == "__TELEGRAM_CHAT_ID__"  # renderizado na partida (texto)
-    compose = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text(encoding="utf-8"))
+    compose = yaml.safe_load((DEPLOY / "stack.yml").read_text(encoding="utf-8"))
     grafana = compose["services"]["grafana"]
     assert "s/__TELEGRAM_CHAT_ID__/$${TELEGRAM_CHAT_ID}/" in grafana["command"][0]
     provisioning = grafana["environment"]["GF_PATHS_PROVISIONING"]
@@ -93,3 +93,18 @@ def test_datasource_and_telegram_placeholder_match_compose() -> None:
     init = (DEPLOY / "postgres" / "init" / "10-grafana-readonly.sh").read_text(encoding="utf-8")
     assert "ALTER DEFAULT PRIVILEGES" in init and "grafana_ro" in init
     assert json.loads(render(build()["overview.json"]))["refresh"] == "1m"
+
+
+def test_compose_always_reads_the_root_env_file() -> None:
+    """Sem o include, ``docker compose -f deploy/docker-compose.yml`` (sem ``--env-file``)
+    procurava o .env em deploy/ e subia o Grafana com a senha padrão do grafana_ro."""
+    entry = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert entry == {
+        "name": "trade-agent",
+        "include": [{"path": "stack.yml", "env_file": "../.env"}],
+    }
+    stack = (DEPLOY / "stack.yml").read_text(encoding="utf-8")
+    assert not re.search(r"^name:", stack, re.M)  # o nome do projeto fica no arquivo de entrada
+    example = (DEPLOY.parent / ".env.example").read_text(encoding="utf-8")
+    for variable in ("GRAFANA_DB_PASSWORD", "GRAFANA_ADMIN_PASSWORD", "TA_TELEGRAM_BOT_TOKEN"):
+        assert f"${{{variable}:-" in stack and f"\n{variable}=" in example

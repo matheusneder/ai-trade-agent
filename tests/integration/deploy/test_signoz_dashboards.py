@@ -33,7 +33,7 @@ from trade_agent import tracing
 ROOT = Path(__file__).parents[3]
 METRICS_SOURCE = (ROOT / "src" / "trade_agent" / "metrics.py").read_text(encoding="utf-8")
 COMPOSE: dict[str, Any] = yaml.safe_load(
-    (ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
+    (ROOT / "deploy" / "stack.yml").read_text(encoding="utf-8")
 )
 BOARDS = build()
 SIGNOZ = "http://signoz.test"

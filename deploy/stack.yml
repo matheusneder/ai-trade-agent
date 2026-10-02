@@ -1,0 +1,176 @@
+# Serviços da implantação local/VPS. Suba pelo deploy/docker-compose.yml, que inclui este
+# arquivo com as variáveis do .env da raiz:
+#   docker compose -f deploy/docker-compose.yml up -d
+# Portas publicadas só em 127.0.0.1: acesse o Grafana por túnel SSH em uma VPS.
+
+# Rotação dos logs no host (o Alloy lê daqui e envia ao Loki, que guarda 30 dias).
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }
+
+# SigNoz (traces, logs e métricas em paralelo ao Jaeger e ao Loki): manifestos gerados pelo
+# Foundry em deploy/signoz/pours, com os ajustes locais de deploy/signoz/compose.override.yaml.
+include:
+  - path:
+      - signoz/pours/deployment/compose.yaml
+      - signoz/compose.override.yaml
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trade_agent
+      POSTGRES_USER: trade_agent
+      POSTGRES_PASSWORD: ${TA_POSTGRES_PASSWORD:-trade_agent_dev}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_ro_dev}
+    ports:
+      - "127.0.0.1:5432:5432"   # nunca expor publicamente
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro   # usuário somente leitura do Grafana
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trade_agent -d trade_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  agent:
+    build:
+      context: ..
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      TA_DATABASE_URL: postgresql+asyncpg://trade_agent:${TA_POSTGRES_PASSWORD:-trade_agent_dev}@postgres:5432/trade_agent
+      TA_LOG_FORMAT: json
+      # traces (OpenTelemetry) para o Jaeger e o SigNoz; métricas do agente para o SigNoz
+      TA_OTLP_ENDPOINT: http://jaeger:4318,http://signoz-ingester:4318
+      TA_OTLP_METRICS_ENDPOINT: http://signoz-ingester:4318
+    volumes:
+      - ../secrets:/app/secrets:ro
+      - ../config:/app/config:ro   # perfis, disjuntores e analista: edite e reinicie o agente
+    networks: [default, signoz-network]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    restart: unless-stopped
+    # renderiza o chatid do Telegram como texto numa cópia do provisionamento e inicia o Grafana
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        rm -rf /tmp/provisioning && cp -r /etc/grafana/provisioning-src /tmp/provisioning &&
+        sed -i "s/__TELEGRAM_CHAT_ID__/$${TELEGRAM_CHAT_ID}/" /tmp/provisioning/alerting/telegram.yaml &&
+        exec /run.sh
+    environment:
+      GF_PATHS_PROVISIONING: /tmp/provisioning
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_ro_dev}
+      # alertas do Grafana no mesmo chat do agente (placeholder mantém o provisionamento válido)
+      TELEGRAM_BOT_TOKEN: ${TA_TELEGRAM_BOT_TOKEN:-nao-configurado}
+      TELEGRAM_CHAT_ID: ${TA_TELEGRAM_CHAT_ID:-0}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning-src:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  # Traces do agente (OpenTelemetry → OTLP): um serviço por componente, 7 dias no Badger.
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0   # 2.21 removeu a API v1 que o Grafana usa
+    restart: unless-stopped
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    ports:
+      - "127.0.0.1:16686:16686"   # interface: System Architecture e busca de traces
+      - "127.0.0.1:4318:4318"     # OTLP/HTTP para o agente rodando fora do compose (uv run)
+    volumes:
+      - ./jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+      - jaeger:/tmp   # Badger em /tmp/jaeger (permissão: ver deploy/jaeger/config.yaml)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13133/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  # Logs dos contêineres: Alloy coleta → Loki guarda → Grafana consulta (dashboard "Logs").
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki:/loki
+    logging: *logging
+
+  # API do Docker só para leitura (listar contêineres, ler logs e estatísticas), numa rede
+  # interna que só os coletores (Alloy e container-metrics) alcançam: o socket equivale a root
+  # no host, e a inspeção de um contêiner mostra as variáveis de ambiente (chaves do .env).
+  # POST, EXEC e o resto ficam desligados.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      NETWORKS: "1"   # a descoberta de contêineres do Alloy também lista as redes
+      LOG_LEVEL: warning   # sem o log de acesso de cada leitura do Alloy (voltaria ao Loki)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # o da imagem mais um backend sem o corte de 10 min para docker logs --follow
+      - ./docker-proxy/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro
+    networks: [docker-api]
+    logging: *logging
+
+  alloy:
+    image: grafana/alloy:v1.20.1
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:12345:12345"   # interface do Alloy: alvos descobertos e saúde do pipeline
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy:/var/lib/alloy/data   # posição de leitura de cada contêiner
+    networks: [default, docker-api, signoz-network]   # logs para o Loki e para o SigNoz
+    depends_on: [docker-proxy, loki]
+    logging: *logging
+
+  # CPU, memória, rede e disco de cada contêiner do projeto → SigNoz (docker_stats).
+  container-metrics:
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otelcol/container-metrics.yaml:/etc/otelcol/config.yaml:ro
+    networks: [docker-api, signoz-network]
+    depends_on: [docker-proxy]
+    logging: *logging
+
+networks:
+  docker-api:
+    internal: true
+
+volumes:
+  pgdata: {}
+  grafana: {}
+  loki: {}
+  alloy: {}
+  jaeger: {}

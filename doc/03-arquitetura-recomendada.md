@@ -92,7 +92,8 @@ config/
   stop_conditions.yaml
   sources.yaml
 deploy/
-  docker-compose.yml
+  docker-compose.yml      # inclui stack.yml com o .env da raiz
+  stack.yml               # serviços
   grafana/                # dashboards e alertas provisionados como código
 ```
 
