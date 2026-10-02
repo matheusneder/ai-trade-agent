@@ -1,5 +1,7 @@
 # Condições de parada (doc 03, §10.3). Ações: pause (volta após o cooldown ou manual),
 # halt (volta só com /resume) e flatten (vende tudo e termina em halt).
+# Cada gatilho age uma vez por ocorrência: só volta a agir se a condição passar e voltar,
+# ou se piorar mais um limite inteiro (ex.: 4 → 8 perdas seguidas).
 # O teto de gasto com o LLM fica em config/research.yaml (budget.daily_usd): ao atingi-lo,
 # cada perfil degrada conforme llm.on_failure.
 

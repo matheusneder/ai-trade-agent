@@ -8,9 +8,11 @@
 | ``HALTED``    | não            | mantidas  | não              | só manual (``/resume``)    |
 
 Gatilhos automáticos só **escalam** (nunca aliviam um estado mais restritivo); o retorno
-a ``RUNNING`` é manual, exceto a pausa com cooldown vencido.
+a ``RUNNING`` é manual, exceto a pausa com cooldown vencido. Cada gatilho age uma vez por
+ocorrência (``Fired``): enquanto a condição continua, o ``/resume`` e o fim do cooldown valem.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -19,6 +21,7 @@ from typing import Any
 from trade_agent.persistence.store import Store
 
 GLOBAL = "global"
+FIRED_KEY = "risk.fired"
 
 
 class OpState(StrEnum):
@@ -76,6 +79,26 @@ class ScopeState:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Fired:
+    """Último disparo de um gatilho cuja condição continua valendo."""
+
+    value: float
+    reason: str
+    at: datetime
+
+    def to_json(self) -> dict[str, Any]:
+        return {"value": self.value, "reason": self.reason, "at": self.at.isoformat()}
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> "Fired":
+        return cls(float(data["value"]), data["reason"], datetime.fromisoformat(data["at"]))
+
+
+type FiredMap = dict[tuple[str, str], Fired]
+"""Disparos por (escopo, condição)."""
+
+
 def escalate(current: ScopeState, proposed: ScopeState) -> ScopeState | None:
     """Novo estado para um gatilho automático, ou ``None`` se não houver mudança."""
     if proposed.state is OpState.FLATTENING and current.flattened:
@@ -113,3 +136,17 @@ class StateStore:
 
     async def put(self, scope: str, state: ScopeState) -> None:
         await self._store.set_checkpoint(self._key(scope), state.to_json())
+
+    async def fired(self) -> FiredMap:
+        data = await self._store.get_checkpoint(FIRED_KEY) or {}
+        return {
+            (scope, condition): Fired.from_json(fired)
+            for scope, conditions in data.items()
+            for condition, fired in conditions.items()
+        }
+
+    async def put_fired(self, fired: Mapping[tuple[str, str], Fired]) -> None:
+        data: dict[str, dict[str, Any]] = {}
+        for (scope, condition), record in sorted(fired.items()):
+            data.setdefault(scope, {})[condition] = record.to_json()
+        await self._store.set_checkpoint(FIRED_KEY, data)

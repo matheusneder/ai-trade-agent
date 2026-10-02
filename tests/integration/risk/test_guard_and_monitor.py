@@ -17,7 +17,7 @@ from trade_agent.execution.service import PositionService
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.reconcile.reconciler import ReconcileReport
 from trade_agent.risk.conditions import Action
-from trade_agent.risk.guard import RiskGuard, RiskSnapshot, evaluate
+from trade_agent.risk.guard import Hit, RiskGuard, RiskSnapshot, evaluate
 from trade_agent.risk.monitor import EQUITY_KEY, RiskMonitor, quote_deviation
 from trade_agent.risk.state import GLOBAL, OpState, ScopeState, StateStore
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
@@ -92,6 +92,59 @@ async def test_pause_expires_extends_and_never_relaxes(store: Store) -> None:
     await guard.apply(evaluate(CONDITIONS, snapshot(equity=D(800), peak_equity=D(1000))))
     await guard.apply(btc_drop)  # halt nunca vira pausa
     assert (await guard.state(GLOBAL)).state is OpState.HALTED
+
+
+async def test_a_lasting_condition_acts_once_and_respects_the_operator(store: Store) -> None:
+    """Incidente de 02/10/2026: com 4 perdas seguidas, a pausa era estendida e alertada a cada
+    minuto, e o /resume durava até a avaliação seguinte."""
+    clock = Clock(NOW)
+    alerts: list[tuple[Severity, str]] = []
+    guard = _guard(store, clock, alerts)
+
+    async def minute(**overrides: Any) -> list[Hit]:
+        clock.now += timedelta(minutes=1)
+        return await guard.apply(evaluate(CONDITIONS, snapshot(**overrides)))
+
+    assert await minute(consecutive_losses=4)
+    paused = await guard.state(GLOBAL)
+    for _ in range(5):
+        assert await minute(consecutive_losses=4) == []
+    assert await guard.state(GLOBAL) == paused  # sem extensão
+    assert len(alerts) == 1
+
+    assert await guard.resume(GLOBAL)
+    assert await minute(consecutive_losses=4) == []
+    assert await minute(consecutive_losses=7) == []
+    assert (await guard.state(GLOBAL)).state is OpState.RUNNING  # o /resume vale
+
+    guard = _guard(store, clock, alerts)  # reinício: o disparo fica no banco
+    assert await minute(consecutive_losses=7) == []
+    assert [h.value for h in await minute(consecutive_losses=8)] == [8]  # 4 perdas novas
+    assert (await guard.state(GLOBAL)).state is OpState.PAUSED
+
+    clock.now += timedelta(hours=12)
+    assert await minute(consecutive_losses=8) == []
+    assert (await guard.state(GLOBAL)).state is OpState.RUNNING  # o fim do cooldown vale
+
+    assert await minute() == []  # uma vitória zera a sequência e rearma o gatilho
+    assert await minute(consecutive_losses=4)
+    assert [text.split()[1] for _, text in alerts] == ["PAUSED", "RUNNING", "PAUSED", "PAUSED"]
+
+
+async def test_a_trigger_held_by_a_stricter_state_acts_after_the_resume(store: Store) -> None:
+    alerts: list[tuple[Severity, str]] = []
+    guard = _guard(store, Clock(NOW), alerts)
+    streak = evaluate(CONDITIONS, snapshot(consecutive_losses=4))
+    await guard.pause(GLOBAL, "comando /pause")  # sem prazo: mais restritiva que 12h
+    assert await guard.apply(streak) == []
+    assert await guard.fired(GLOBAL) == []
+    assert await guard.resume(GLOBAL)
+    assert await guard.apply(streak)  # a pausa por perdas ainda não tinha agido
+    assert await guard.apply(streak) == []
+    (fired,) = await guard.fired(GLOBAL)
+    assert fired.reason == "max_consecutive_losses: 4 (limite 4)"
+    assert await guard.fired("moderado") == []
+    assert len(alerts) == 3
 
 
 async def test_manual_commands(store: Store) -> None:
