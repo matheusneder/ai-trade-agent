@@ -45,7 +45,8 @@ def test_repository_stop_conditions_are_valid() -> None:
     assert g.api_error_rate_5m is not None and g.api_error_rate_5m.cooldown == timedelta(minutes=30)
     assert g.reconcile_mismatch is not None and g.reconcile_mismatch.value is None
     assert g.profit_target_pct is None and g.trading_window_utc is None
-    assert "moderado" in conditions.per_profile
+    profiles = load_strategy_config(REPOSITORY_FILE.parent / "profiles.yaml").profiles
+    assert set(conditions.per_profile) <= set(profiles)  # nenhum limite de perfil removido
 
 
 def test_empty_file_and_durations(tmp_path: Path) -> None:

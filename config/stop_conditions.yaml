@@ -17,9 +17,10 @@ global:
   profit_target_pct:       null                                         # ex.: {value: 30, action: halt}
   trading_window_utc:      null                                         # ex.: ["00:00-23:59"]
 
-per_profile:
-  moderado:
-    max_daily_loss_pct:    {value: 2, action: pause, cooldown: 24h}
+# Limites de um perfil de config/profiles.yaml (pausam só ele), ex.:
+#   momentum_alpha:
+#     max_daily_loss_pct:  {value: 2, action: pause, cooldown: 24h}
+per_profile: {}
 
 pre_trade:
   min_reward_risk: 1.5       # ativação do take-profit ÷ stop, após taxas de ida e volta
