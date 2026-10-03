@@ -1,6 +1,6 @@
 # Runbook de operação
 
-> Procedimentos para quem opera o agente. O resumo está no [plano de construção](04-plano-de-construcao.md) (§4). **Regra de ouro:** as proteções (OCO) ficam na Binance e continuam valendo com o agente parado. Na dúvida, prefira `/halt` (mantém as proteções) a `/flatten` (vende tudo).
+> Procedimentos para quem opera o agente. O estado atual e o checklist de produção estão no [doc 04](04-estado-e-go-live.md). **Regra de ouro:** as proteções (OCO) ficam na Binance e continuam valendo com o agente parado. Na dúvida, prefira `/halt` (mantém as proteções) a `/flatten` (vende tudo).
 
 ## 1. Subir e verificar
 
@@ -14,7 +14,7 @@ docker compose -f deploy/docker-compose.yml logs -f agent
 | Agente iniciado | log `agent.started` / Telegram `/status` | reconciliação sem órfãs; estado `running` |
 | Modo | `/status` (1ª linha) | "SIMULAÇÃO" enquanto `TA_TRADING_ENABLED=false` |
 | Telemetria | Grafana → *Saúde técnica* → "Segundos desde a última foto" | abaixo de 360 s |
-| Heartbeat | painel do Healthchecks.io | ping a cada minuto |
+| Heartbeat | painel do Healthchecks.io (só com `TA_HEALTHCHECK_URL` definido) | ping a cada minuto |
 | Logs | Grafana → *Logs* | linhas chegando de todos os serviços, sem tracebacks |
 | Traces | Jaeger → *System Architecture* | os componentes do agente ligados entre si |
 | SigNoz | `http://127.0.0.1:8080` → *Services* e *Logs* | componentes do agente, logs de todos os serviços e métricas `trade_agent.*` |
@@ -32,7 +32,7 @@ O Grafana escuta só em `127.0.0.1:3000`. Numa VPS, use um túnel: `ssh -L 3000:
 | Evento | O que mostra |
 |--------|--------------|
 | `rest.request` / `rest.request_failed` | método, caminho (sem *query*), status, latência, peso usado |
-| `risk.snapshot` / `risk.evaluated` / `risk.hit_unchanged` | patrimônio, abertura do dia, pico, BTC 1h, paridade, erros de API; gatilhos atingidos |
+| `risk.snapshot` / `risk.evaluated` / `risk.hit_already_fired` / `risk.hit_unchanged` / `risk.trigger_rearmed` | patrimônio, abertura do dia, pico, BTC 1h, paridade, erros de API; gatilhos atingidos, os que já agiram (D-026), os barrados por um estado mais restritivo e os rearmados |
 | `decision.cycle_start` / `decision.signal` / `decision.reading` / `decision.plan` / `decision.exit_check` / `decision.pre_trade_rejected` | universo elegível, score e setup por ativo, leitura do analista, ideias e recusas, checagem de saída |
 | `position.sync` / `order.*` / `order_list.*` / `protection.replace` | veredito de cada sincronização e o caminho de cada ordem |
 | `reconcile.done` / `reconcile.position` / `reconcile.intent` | resumo e detalhe de cada reconciliação |
@@ -51,7 +51,7 @@ Segredos nunca vão para os logs: chaves, assinaturas, senhas e tokens são masc
 ```logql
 {service="agent", level=~"error|critical"}                          # erros e tracebacks do agente
 {service="agent"} | event="risk.state_changed"                       # mudanças de estado de risco
-{service="agent"} | json | event="decision.cycle" | profile="agressivo"
+{service="agent"} | json | event="decision.cycle" | profile="momentum_alpha"
 sum by (event) (count_over_time({service="agent"} | event!="" [1h]))  # eventos mais frequentes
 ```
 
@@ -196,7 +196,7 @@ Escopo: `global` (padrão) ou o nome do perfil. Só o `TA_TELEGRAM_CHAT_ID` conf
   - **Cópia para o SigNoz:** sai em lotes. As falhas do próprio Alloy ao enviar ao SigNoz ficam só no Loki. Se essas falhas fossem copiadas, cada uma viraria mais um envio para a fila cheia: ao subir antes do SigNoz, o Alloy chegou a registrar milhões de linhas de `sending queue is full` por hora. Uma rajada de `Exporting failed` no Loki indica que o SigNoz está fora do ar ou lento.
   - **Ruído descartado:** o `docker_stats` (`container-metrics`) registra como erro `Could not inspect updated container ... No such container` sempre que um contêiner some antes de ser inspecionado. O laboratório cria e remove dezenas por hora (`docker compose run --rm`), e o compose faz o mesmo ao recriar. Essa combinação é descartada no Alloy (contador `loki_process_dropped_lines_total{reason="container_gone"}`); os demais erros do coletor continuam passando.
 - **Configuração:** `config/` é montado no contêiner do agente. Edite os YAML e rode `docker compose ... restart agent` (sem rebuild).
-- **`.env`:** o `deploy/docker-compose.yml` lê sempre o `.env` da raiz do repositório e não sobe sem ele, com ou sem `--env-file` e de qualquer pasta. Os serviços ficam em `deploy/stack.yml`. Antes, sem `--env-file .env`, o Compose procurava o `.env` em `deploy/` e usava os valores padrão: o Grafana subia com a senha padrão do `grafana_ro` (o banco a recusava: `password authentication failed`) e sem o token do Telegram. O `.env` é lido só quando o contêiner é criado, e o `restart` não o relê. Depois de editar, rode `docker compose ... up -d` (recria o agente e o Grafana). Para o Telegram, `TA_TELEGRAM_CHAT_ID` é o id do seu usuário (chat privado com o bot), e é preciso enviar `/start` ao bot uma vez antes de ele conseguir escrever para você.
+- **`.env`:** o `deploy/docker-compose.yml` lê sempre o `.env` da raiz do repositório e não sobe sem ele, com ou sem `--env-file` e de qualquer pasta. Os serviços ficam em `deploy/stack.yml`; não suba o `stack.yml` direto, porque ele cai nos valores padrão e o Grafana não consegue entrar no banco (`password authentication failed for user "grafana_ro"`). O `.env` é lido só quando o contêiner é criado, e o `restart` não o relê. Depois de editar, rode `docker compose ... up -d` (recria o agente e o Grafana). Para o Telegram, `TA_TELEGRAM_CHAT_ID` é o id do seu usuário (chat privado com o bot), e é preciso enviar `/start` ao bot uma vez antes de ele conseguir escrever para você.
 - **Mudança do `managed_capital`:** não conta como ganho nem perda. A abertura do dia e o pico acompanham a diferença de capital (log `risk.equity_rebased`), e só o resultado das operações pesa na perda diária e no drawdown. Os percentuais passam a ser calculados sobre o novo capital.
 - **Mudança de parâmetros:** sempre via laboratório (`lab/walk_forward.py`) e *paper trading* no Demo antes de produção.
 - **Backup:** `docker compose ... exec postgres pg_dump -U trade_agent trade_agent | gzip > backup.sql.gz`, guardado fora da VPS.

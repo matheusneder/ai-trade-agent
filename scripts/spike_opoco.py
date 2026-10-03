@@ -1,6 +1,6 @@
-"""Spike da Fase 0: valida OPOCO/OCO com trailing no Spot Testnet ou no Demo Mode.
+"""Spike OPOCO: valida OPOCO/OCO com trailing no Spot Testnet ou no Demo Mode.
 
-Cenários (ver doc/04-plano-de-construcao.md, Fase 0):
+Cenários (resultados em doc/01-requisitos-e-binance.md, §3):
 
 A. OPOCO: compra LIMIT FOK "marketable" + OCO de venda com TAKE_PROFIT (ativação + trailing)
    acima e STOP_LOSS fixo abaixo. Inclui reenvio do mesmo listClientOrderId com a lista aberta.
