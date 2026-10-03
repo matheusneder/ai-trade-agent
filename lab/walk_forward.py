@@ -11,9 +11,9 @@ aplicados, sem ajuste, na janela seguinte. Os parâmetros que definem o risco do
 
 Uso::
 
-    uv run python -m lab.walk_forward --profile conservador --start 2023-01-01 \\
-        --end 2026-09-01 --window-months 3 --download
-    uv run python -m lab.walk_forward --profile conservador --start 2024-01-01 --optimize
+    uv run python -m lab.walk_forward --profile swing_trend --optimize --download
+    uv run python -m lab.walk_forward --profile momentum_alpha --start 2024-01-01 \\
+        --end 2026-09-01 --window-months 3
 """
 
 import argparse
@@ -354,7 +354,7 @@ def optimize(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--profile", default="conservador")
+    parser.add_argument("--profile", required=True, help="perfil de config/profiles.yaml")
     parser.add_argument("--profiles-file", type=Path, default=ROOT / "config" / "profiles.yaml")
     parser.add_argument("--start", type=date.fromisoformat, default=date(2023, 1, 1))
     parser.add_argument("--end", type=date.fromisoformat, default=date(2026, 9, 1))

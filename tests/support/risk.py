@@ -2,7 +2,7 @@
 
 import itertools
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -10,14 +10,19 @@ from typing import Any
 from trade_agent.execution.orders import EntryMode, ProtectionPolicy, StopMode, TakeProfitMode
 from trade_agent.execution.positions import Position, PositionState
 from trade_agent.persistence.store import Store
-from trade_agent.risk.conditions import Action, load_stop_conditions
+from trade_agent.risk.conditions import Action, ProfileConditions, Trigger, load_stop_conditions
 from trade_agent.risk.guard import RiskSnapshot
 from trade_agent.risk.state import GLOBAL
 
 D = Decimal
 NOW = datetime(2026, 9, 26, 12, tzinfo=UTC)
 STOP_CONDITIONS_FILE = Path(__file__).parents[2] / "config" / "stop_conditions.yaml"
-CONDITIONS = load_stop_conditions(STOP_CONDITIONS_FILE)
+# As condições do repositório, mais um limite por perfil para o "moderado" dos perfis de
+# teste (tests/fixtures/profiles.yaml): o repositório não traz limite por perfil.
+DAILY_LOSS_2PCT = Trigger(value=2, action=Action.PAUSE, cooldown=timedelta(hours=24))
+CONDITIONS = load_stop_conditions(STOP_CONDITIONS_FILE).model_copy(
+    update={"per_profile": {"moderado": ProfileConditions(max_daily_loss_pct=DAILY_LOSS_2PCT)}}
+)
 POLICY = ProtectionPolicy(
     TakeProfitMode.TRAILING, D("10.8"), StopMode.FIXED, take_profit_trailing_bips=130, stop_pct=D(4)
 )

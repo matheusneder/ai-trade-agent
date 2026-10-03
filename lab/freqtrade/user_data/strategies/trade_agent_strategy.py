@@ -9,7 +9,7 @@ contêiner via ``PYTHONPATH``) e replica a proteção nativa do agente:
   ``tp_trailing`` de distância (perna ``TAKE_PROFIT`` com ``trailingDelta``);
 * tamanho por risco: ``carteira × risco_por_trade / stop_pct``, limitado por posição.
 
-Os parâmetros padrão são os do perfil conservador; ``lab/walk_forward.py`` gera o arquivo
+Os parâmetros padrão são só um ponto de partida: ``lab/walk_forward.py`` gera o arquivo
 ``trade_agent_strategy.json`` com os valores do perfil escolhido em ``config/profiles.yaml``.
 """
 
