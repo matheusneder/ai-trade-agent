@@ -1,10 +1,11 @@
 """Motor de decisão de ponta a ponta (Binance simulada + PostgreSQL)."""
 
+import asyncio
 import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import httpx
 import pytest
@@ -17,12 +18,14 @@ from tests.support.fake_binance import FakeBinance
 from tests.support.metrics import Measured
 from tests.support.risk import CONDITIONS, POLICY
 from tests.support.tracing import Recorded
-from trade_agent.decision.engine import DecisionEngine, UniverseCache
+from trade_agent.decision import engine as engine_module
+from trade_agent.decision.engine import UNIVERSE_TTL, DecisionEngine, UniverseCache
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.orders import EntryMode, EntryOrder
 from trade_agent.execution.positions import PositionState
 from trade_agent.execution.service import PositionService
-from trade_agent.market.universe import UniverseConfig
+from trade_agent.market.candles import INTERVAL_MS
+from trade_agent.market.universe import Universe, UniverseConfig, build_universe
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.research_store import ResearchStore
 from trade_agent.persistence.store import Severity, Store
@@ -32,7 +35,7 @@ from trade_agent.research.service import ResearchService
 from trade_agent.research.tagging import AssetTagger
 from trade_agent.risk.guard import RiskGuard
 from trade_agent.risk.state import GLOBAL, StateStore
-from trade_agent.strategy.profiles import StrategyConfig
+from trade_agent.strategy.profiles import StrategyConfig, Timeframe
 
 D = Decimal
 FOUR_HOURS = 4 * HOUR_MS
@@ -369,3 +372,27 @@ async def test_universe_cache_ttl(api: BinanceSpotApi, fake: FakeBinance) -> Non
     now[0] = 61
     assert await cache.get() is not first
     assert len(fake.calls("GET", "/api/v3/exchangeInfo")) == calls + 1
+
+
+async def test_each_cycle_sees_a_fresh_universe(
+    api: BinanceSpotApi, fake: FakeBinance, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Com 6 h de cache e ciclos de 4 h, o ciclo seguinte usava o universo do anterior."""
+    _setup_market(fake)
+    builds: list[float] = []
+
+    async def build(api: BinanceSpotApi, config: UniverseConfig) -> Universe:
+        builds.append(now[0])
+        await asyncio.sleep(0)  # cede o loop, como a rede de verdade
+        return await build_universe(api, config)
+
+    monkeypatch.setattr(engine_module, "build_universe", build)
+    shortest = min(INTERVAL_MS[t] for t in get_args(Timeframe)) / 1000
+    assert UNIVERSE_TTL.total_seconds() < shortest
+    now = [0.0]
+    cache = UniverseCache(api, UNIVERSE, clock=lambda: now[0])
+    together = await asyncio.gather(cache.get(), cache.get())  # perfis no mesmo fechamento
+    assert together[0] is together[1] and builds == [0.0]
+    now[0] = shortest  # o próximo ciclo, no menor timeframe
+    assert await cache.get() is not together[0]
+    assert builds == [0.0, shortest]

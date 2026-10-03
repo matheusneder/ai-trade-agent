@@ -1,6 +1,6 @@
 """Motor de decisão por perfil, executado no fechamento do candle do perfil.
 
-1. universo (cache) e candles **fechados** dos ativos dos *tiers* do perfil;
+1. universo (montado a cada ciclo) e candles **fechados** dos ativos dos *tiers* do perfil;
 2. sinais técnicos (mesmo código do laboratório);
 3. analista LLM, só quando há setups ou posições (economia), com degradação por perfil;
 4. saídas por regra das posições do perfil (rotação, tempo, veto) e *break-even*;
@@ -10,6 +10,7 @@ Com ``dry_run`` (trava ``TA_TRADING_ENABLED`` desligada), as decisões são regi
 como eventos e nenhuma ordem é enviada.
 """
 
+import asyncio
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable
@@ -50,15 +51,25 @@ _EXIT_STATES = {PositionState.PROTECTED}
 _NO_FILL_STATES = {PositionState.PLANNED, PositionState.ENTRY_SENT}
 
 
+UNIVERSE_TTL = timedelta(minutes=5)
+"""Menor que o menor timeframe dos perfis (15m): cada ciclo monta o universo de novo."""
+
+
 class UniverseCache:
-    """Universo reconstruído no máximo a cada ``ttl`` (a seleção muda devagar)."""
+    """Universo de cada ciclo, com o ranking de volume do momento.
+
+    Um ativo que rompe com volume forte sobe no ranking justamente nas horas do rompimento.
+    Com 6 h de cache e ciclos de 4 h, um ciclo sim, outro não, usava o universo do ciclo
+    anterior e deixava esses ativos de fora (ONE e AR em 03/10). O cache só serve para que
+    os perfis que fecham candle juntos compartilhem uma montagem (a trava evita duas).
+    """
 
     def __init__(
         self,
         api: BinanceSpotApi,
         config: UniverseConfig,
         *,
-        ttl: timedelta = timedelta(hours=6),
+        ttl: timedelta = UNIVERSE_TTL,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._api = api
@@ -66,12 +77,14 @@ class UniverseCache:
         self._ttl_s = ttl.total_seconds()
         self._clock = clock
         self._cached: tuple[float, Universe] | None = None
+        self._lock = asyncio.Lock()
 
     @tracing.traced("decision", "universe.get")
     async def get(self) -> Universe:
-        if self._cached is None or self._clock() - self._cached[0] >= self._ttl_s:
-            self._cached = (self._clock(), await build_universe(self._api, self._config))
-        return self._cached[1]
+        async with self._lock:
+            if self._cached is None or self._clock() - self._cached[0] >= self._ttl_s:
+                self._cached = (self._clock(), await build_universe(self._api, self._config))
+            return self._cached[1]
 
 
 @dataclass(frozen=True, slots=True)
