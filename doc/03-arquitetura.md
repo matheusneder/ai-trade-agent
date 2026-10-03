@@ -510,7 +510,7 @@ Seis dashboards no Grafana, gerados por `scripts/grafana_dashboards.py`:
 
 Os logs de todos os contêineres ficam centralizados no **Loki** por 30 dias. A coleta é do **Grafana Alloy**, que lê a API do Docker por um proxy somente leitura numa rede interna exclusiva. Os rótulos são `service` e `level`, e o `event` do structlog vai como metadado estruturado.
 
-Os **traces** usam OpenTelemetry com exportação OTLP/HTTP ao **Jaeger** (7 dias em disco). Cada componente do agente é um serviço no namespace `trade-agent`: runtime, risco, decisão, pesquisa, LLM, execução, exchange, reconciliação, banco, Telegram e telemetria. Assim, o grafo *System Architecture* do Jaeger mostra as dependências entre eles. Cada tarefa de fundo é a raiz de um trace. Os spans nunca levam segredos nem conteúdo: só caminhos, métodos, contagens, identificadores, tokens e custos. O `trace_id` vai em cada log, e o Grafana liga logs e traces nos dois sentidos.
+Os **traces** usam OpenTelemetry com exportação OTLP/HTTP ao **Jaeger** (7 dias em disco). Cada componente do agente é um serviço no namespace `trade-agent`: runtime, risco, decisão, pesquisa, LLM, execução, exchange, reconciliação, banco, Telegram e telemetria. Assim, o grafo *System Architecture* do Jaeger mostra as dependências entre eles. O Jaeger não publica portas no host: os traces aparecem no Grafana (*Explore* → *Traces*), e a interface do Jaeger só abre com `deploy/jaeger-ports.yml`, quando necessário. Cada tarefa de fundo é a raiz de um trace. Os spans nunca levam segredos nem conteúdo: só caminhos, métodos, contagens, identificadores, tokens e custos. O `trace_id` vai em cada log, e o Grafana liga logs e traces nos dois sentidos.
 
 O **SigNoz** roda em paralelo, para comparação. Ele recebe os mesmos traces, uma cópia OTLP dos logs e as **métricas** OpenTelemetry. As métricas do agente saem a cada minuto: patrimônio, drawdown, PnL, exposição, posições, erros e peso da Binance, relógio, estado do risco, custo e tokens do LLM, ciclos, entradas e saídas. As de cada contêiner (CPU, memória, rede e disco) vêm de um OpenTelemetry Collector com `docker_stats`. Latência, vazão e erros por operação o SigNoz calcula a partir dos spans. Quatro dashboards (operação, saúde técnica, LLM e contêineres) são gerados por `scripts/signoz_dashboards.py` (runbook, §1.3).
 
@@ -552,7 +552,7 @@ Apenas um `chat_id` autorizado. Todo comando é auditado em `events`.
 | `loki` | `grafana/loki:3.7.8` | logs por 30 dias | — |
 | `alloy` | `grafana/alloy:v1.20.1` | coleta os logs dos contêineres para o Loki e o SigNoz | 12345 |
 | `docker-proxy` | `tecnativa/docker-socket-proxy:v0.5.0` | API do Docker somente leitura, para o Alloy e o `container-metrics` | — |
-| `jaeger` | `jaegertracing/jaeger:2.20.0` | traces por 7 dias (fixado: a 2.21 removeu a API que o Grafana usa) | 16686, 4318 |
+| `jaeger` | `jaegertracing/jaeger:2.20.0` | traces por 7 dias (fixado: a 2.21 removeu a API que o Grafana usa) | nenhuma; 16686 e 4318 com `deploy/jaeger-ports.yml` |
 | `container-metrics` | `otel/opentelemetry-collector-contrib` | CPU, memória, rede e disco de cada contêiner, para o SigNoz | — |
 | SigNoz (`signoz-*`, `ingester`) | manifestos do Foundry em `deploy/signoz/` | traces, logs e métricas em paralelo | 8080, 14318 (OTLP) |
 

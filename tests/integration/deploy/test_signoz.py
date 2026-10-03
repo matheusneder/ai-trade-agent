@@ -47,16 +47,14 @@ def test_every_published_port_is_local_and_unique(merged: dict[str, Any]) -> Non
         for name, service in merged["services"].items()
         for port in service.get("ports", [])
     ]
-    assert {name for name, _ in published} >= {"signoz-signoz-0", "ingester", "jaeger", "grafana"}
+    assert {name for name, _ in published} >= {"signoz-signoz-0", "ingester", "grafana"}
+    assert "jaeger" not in {name for name, _ in published}  # só com jaeger-ports.yml
     assert all(port["host_ip"] == "127.0.0.1" for _, port in published)
     counts = Counter(port["published"] for _, port in published)
-    assert all(n == 1 for n in counts.values()), counts  # SigNoz na 14318, Jaeger na 4318
+    assert all(n == 1 for n in counts.values()), counts
     ports = {name: port["published"] for name, port in published if port["target"] in (4318, 8080)}
-    assert (ports["ingester"], ports["signoz-signoz-0"], ports["jaeger"]) == (
-        "14318",
-        "8080",
-        "4318",
-    )
+    # o OTLP do SigNoz fica na 14318, livre a 4318 para o Jaeger (jaeger-ports.yml)
+    assert (ports["ingester"], ports["signoz-signoz-0"]) == ("14318", "8080")
 
 
 def test_signoz_services_rotate_logs_and_pin_versions(merged: dict[str, Any]) -> None:
