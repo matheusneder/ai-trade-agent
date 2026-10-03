@@ -16,8 +16,15 @@ docker compose -f deploy/docker-compose.yml logs -f agent
 | Telemetria | Grafana → *Saúde técnica* → "Segundos desde a última foto" | abaixo de 360 s |
 | Heartbeat | painel do Healthchecks.io (só com `TA_HEALTHCHECK_URL` definido) | ping a cada minuto |
 | Logs | Grafana → *Logs* | linhas chegando de todos os serviços, sem tracebacks |
-| Traces | Jaeger → *System Architecture* | os componentes do agente ligados entre si |
+| Traces | Grafana → *Explore* → *Traces* (fonte Jaeger) | traces chegando de cada componente do agente |
+| Portas | a verificação abaixo, a partir do host | Grafana (302), SigNoz (200) e OTLP do SigNoz (404) respondem |
 | SigNoz | `http://127.0.0.1:8080` → *Services* e *Logs* | componentes do agente, logs de todos os serviços e métricas `trade_agent.*` |
+
+Depois de subir ou recriar a pilha, confira as portas a partir do host. `000` é uma porta sem resposta: se o serviço estiver de pé, veja a nota sobre portas na §1.2.
+
+```bash
+for p in 3000 8080 14318; do curl -s -o /dev/null -m 5 -w "$p: %{http_code}\n" http://127.0.0.1:$p/; done
+```
 
 **Ambiente:** o **Spot Testnet** serve para validar ordens (spike e `pytest -m live`), mas não para o ciclo de decisão. Ele é reiniciado periodicamente e tem só ~20 dias de histórico (os sinais precisam de 201 candles e o universo, de 30 dias), além de volumes artificiais. O universo fica vazio e o log mostra `decision.empty_universe`. Para o *paper trading*, use o **Demo Mode** (`TA_BINANCE_ENV=demo`, com chaves criadas em demo.binance.com), que usa dados reais de mercado.
 
@@ -59,26 +66,32 @@ Um traceback do Python chega como uma entrada só, com `level="error"`. No Postg
 
 ### 1.2 Traces (OpenTelemetry e Jaeger)
 
-Cada tarefa do agente vira um trace no Jaeger (`http://127.0.0.1:16686`, 7 dias em disco): a verificação de risco, a coleta de notícias, a reconciliação, cada ciclo de decisão, cada comando do Telegram e a partida. Cada componente aparece como um serviço (`trade-agent.runtime`, `.risk`, `.decision`, `.research`, `.llm`, `.execution`, `.exchange`, `.reconcile`, `.db`, `.telegram`, `.telemetry`), e a aba **System Architecture** desenha quem chama quem, com a contagem de chamadas.
+Cada tarefa do agente vira um trace no Jaeger (7 dias em disco): a verificação de risco, a coleta de notícias, a reconciliação, cada ciclo de decisão, cada comando do Telegram e a partida. Cada componente aparece como um serviço (`trade-agent.runtime`, `.risk`, `.decision`, `.research`, `.llm`, `.execution`, `.exchange`, `.reconcile`, `.db`, `.telegram`, `.telemetry`).
+
+O Jaeger não publica portas no host: o Grafana e o agente o alcançam pela rede interna, e cada porta publicada é mais uma regra de NAT que o Rancher Desktop pode deixar velha (nota abaixo). Para abrir a interface do Jaeger (`http://127.0.0.1:16686`, com a aba **System Architecture**, que desenha quem chama quem) ou receber traces do agente rodando fora do compose (4318), publique as portas só enquanto precisar:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/jaeger-ports.yml up -d jaeger   # publica a 16686 e a 4318
+docker compose -f deploy/docker-compose.yml up -d jaeger                              # tira de novo
+```
 
 | Onde | Para quê |
 |------|----------|
-| Jaeger → *Search* (serviço `trade-agent.runtime`, operação `job ...`) | a tarefa inteira, passo a passo, com a duração de cada chamada |
-| Jaeger → *Search* (tag `error=true`) | traces com falha: exceção e mensagem no span |
-| Grafana → *Explore* → *Traces* | o mesmo trace; em cada span, **Logs for this span** abre os logs no Loki |
+| Grafana → *Explore* → *Traces* → *Search* (serviço `trade-agent.runtime`, operação `job ...`) | a tarefa inteira, passo a passo, com a duração de cada chamada; em cada span, **Logs for this span** abre os logs no Loki |
+| Grafana → *Explore* → *Traces* → *Search* (tag `error=true`) | traces com falha: exceção e mensagem no span |
 | Grafana → *Explore* → *Logs* | um log do agente com `trace_id` mostra **Abrir trace** |
 
 **O que cada span registra:** Binance (método, caminho sem query, status, peso usado), SQL (comando com `$1`, `$2`..., nunca os valores), LLM (modelo, finalidade, tokens, custo e motivo de parada, nunca o conteúdo), Telegram (método e comando, nunca o token nem o texto), decisão (perfil, avaliados, entradas, saídas e recusas), risco (patrimônio, gatilhos e mudanças de estado). O heartbeat e a espera por mensagens do Telegram não geram traces.
 
 O Jaeger fica fixado na 2.20: a 2.21 removeu a API v1 que o datasource do Grafana usa (há um teste que falha se a versão mudar). Com o Jaeger fora do ar, o agente segue normalmente e descarta os spans.
 
-**Uma porta não abre no Windows, mas o serviço está de pé?** Com Rancher Desktop, a conexão abre e a resposta nunca chega. Para confirmar, teste dentro da VM: `rdctl shell -- wget -qO- http://127.0.0.1:16686/` responde. O Rancher Desktop leva o tráfego do Windows até o contêiner com regras de NAT próprias (uma por IP do contêiner, na tabela `nat`, cadeia `DOCKER`), e há três casos em que o caminho falha:
+**Uma porta não abre no Windows, mas o serviço está de pé?** Com Rancher Desktop, a conexão abre e a resposta nunca chega. Para confirmar, teste dentro da VM: `rdctl shell -- wget -qO- http://127.0.0.1:8080/` responde. O Rancher Desktop leva o tráfego do Windows até o contêiner com regras de NAT próprias (uma por IP do contêiner, na tabela `nat`, cadeia `DOCKER`), e há três casos em que o caminho falha:
 
-- **Regra antiga na frente:** quando um contêiner para, o Rancher Desktop não consegue apagar a regra dele, porque já não sabe o IP. No `rancher-desktop-guestagent.log` aparece `--delete DOCKER ... --to-destination :16686` com `Bad rule`. Se o contêiner volta com outro IP, a regra antiga vem primeiro e a porta para de responder. Foi o que aconteceu com a 16686 do Jaeger e, depois de recriar a pilha inteira, também com a 4318. Cada recriação da pilha pode deixar regras antigas, de qualquer porta: para ver todas as de uma porta, rode `rdctl shell -- sudo iptables -t nat -S DOCKER | grep "dport 4318 "`. A 4318 só faz falta ao rodar o agente fora do compose (`uv run trade-agent run`, com `TA_OTLP_ENDPOINT=http://127.0.0.1:4318,...`); o agente no compose usa `jaeger:4318`, pela rede interna. Recriar o contêiner não resolve. Reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo), que limpa as regras. Os contêineres voltam sozinhos (`restart: unless-stopped`).
+- **Regra antiga na frente:** quando um contêiner para, o Rancher Desktop não consegue apagar a regra dele, porque já não sabe o IP. No `rancher-desktop-guestagent.log` aparece `--delete DOCKER ... --to-destination :16686` com `Bad rule`. Se o contêiner volta com outro IP, a regra antiga vem primeiro e a porta para de responder. Foi o que aconteceu com a 16686 do Jaeger e, depois de recriar a pilha inteira, também com a 4318. Cada recriação da pilha pode deixar regras antigas, de qualquer porta: para ver todas as de uma porta, rode `rdctl shell -- sudo iptables -t nat -S DOCKER | grep "dport 4318 "`. Desde então, a 16686 e a 4318 só ficam publicadas com `deploy/jaeger-ports.yml` (acima). Recriar o contêiner não resolve. Reinicie o Rancher Desktop (`rdctl shutdown` e abra de novo), que limpa as regras. Os contêineres voltam sozinhos (`restart: unless-stopped`).
 - **Regra de aceite do Docker ausente:** para cada porta publicada, o Docker cria uma regra que deixa o tráfego de fora chegar ao contêiner. Já aconteceu de ela sumir, depois de recriar a pilha e de a máquina sair da suspensão: a 8080 do SigNoz parou, com a regra de NAT certa. Para confirmar, rode `rdctl shell -- sh -c 'nft list ruleset | grep "dport 8080 .*accept"'`; se não sair nada, falta a regra (o `host-switch.log` mostra `error dialing "192.168.127.2:8080": context deadline exceeded`). `docker restart <contêiner>` faz o Docker recriar as regras da porta.
 - **Contêiner em várias redes (o Alloy, porta 12345):** o Rancher Desktop cria uma regra para cada rede, e vale a primeira. O Docker só aceita a porta publicada pela rede que escolheu para isso, e o tráfego que entra pelas outras é descartado. Reiniciar não resolve. A interface do Alloy fica inacessível no Windows, mas funciona num Linux com Docker comum, como a VPS. Para checar o Alloy no Windows, use `rdctl shell -- wget -qO- http://127.0.0.1:12345/-/ready` (dentro da VM) ou os logs `{service="alloy"}` no Grafana.
 
-Enquanto a 16686 não abre, os traces continuam no Grafana, em *Explore* → *Traces*, que acessa o Jaeger pela rede interna.
+Por isso o projeto publica só as portas usadas no dia a dia (Grafana, SigNoz, o OTLP do SigNoz, o Alloy e o Postgres), e o Jaeger fica de fora (acima). Depois de recriar a pilha, a verificação de portas da §1 mostra na hora se alguma regra ficou velha.
 
 ### 1.3 SigNoz (traces, logs e métricas num lugar só)
 
@@ -124,7 +137,7 @@ Os ajustes locais (portas só em `127.0.0.1`, OTLP na 14318 para não colidir co
 ### 2.1 Agente fora do ar (alerta "Agente sem telemetria" ou Healthchecks.io)
 
 1. As posições seguem protegidas pelos OCO na Binance. Não há urgência para vender.
-2. `docker compose ... ps` e `logs --tail 200 agent`. Procure `runtime.task_failed`, `AlreadyRunningError` e erros de banco. Se o contêiner foi removido, os logs anteriores à queda continuam no dashboard *Logs*. No Jaeger, a busca com `error=true` mostra em que passo a tarefa falhou.
+2. `docker compose ... ps` e `logs --tail 200 agent`. Procure `runtime.task_failed`, `AlreadyRunningError` e erros de banco. Se o contêiner foi removido, os logs anteriores à queda continuam no dashboard *Logs*. Em Grafana → *Explore* → *Traces*, a busca com `error=true` mostra em que passo a tarefa falhou.
 3. Reinicie com `docker compose ... restart agent`. A partida aplica as migrações, sincroniza o relógio e **reconcilia** tudo: intenções pendentes, posições e órfãs.
 4. Confira `/status` e o painel *Posições*.
 

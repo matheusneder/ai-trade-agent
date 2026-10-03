@@ -112,10 +112,22 @@ def test_jaeger_keeps_7_days_on_the_volume_and_listens_on_localhost() -> None:
     assert config["service"]["telemetry"]["traces"]["level"] == "none"
     service = COMPOSE["services"]["jaeger"]
     assert "jaeger:/tmp" in service["volumes"]
-    assert all(p.startswith("127.0.0.1:") for p in service["ports"])
     health = port(config["extensions"]["healthcheckv2"]["http"]["endpoint"])
     assert f"127.0.0.1:{health}/status" in " ".join(service["healthcheck"]["test"])
     assert f"{JAEGER_CONFIG.name}:/etc/jaeger/config.yaml:ro" in " ".join(service["volumes"])
+
+
+def test_jaeger_goes_to_the_host_only_when_asked() -> None:
+    """Cada porta publicada é mais uma regra de NAT que o Rancher Desktop pode deixar velha
+    (runbook, §1.2). O Jaeger só publica a interface e o OTLP com deploy/jaeger-ports.yml."""
+    assert "ports" not in COMPOSE["services"]["jaeger"]
+    config = jaeger_config()
+    ui = port(config["extensions"]["jaeger_query"]["http"]["endpoint"])
+    otlp = port(config["receivers"]["otlp"]["protocols"]["http"]["endpoint"])
+    extra = yaml.safe_load((DEPLOY / "jaeger-ports.yml").read_text(encoding="utf-8"))
+    assert extra == {
+        "services": {"jaeger": {"ports": [f"127.0.0.1:{ui}:{ui}", f"127.0.0.1:{otlp}:{otlp}"]}}
+    }
 
 
 def test_agent_exports_to_the_jaeger_otlp_receiver() -> None:
