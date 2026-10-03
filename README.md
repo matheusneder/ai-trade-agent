@@ -2,8 +2,8 @@
 
 Agente autônomo de trade de criptomoedas na **Binance Spot**. Ele decide com base em análise técnica e em pesquisa de mercado (LLM) e protege cada posição com ordens nativas da Binance (OPOCO/OCO com trailing). A proteção continua valendo mesmo com o agente desligado.
 
-- Arquitetura e plano: [`doc/`](doc/README.md)
-- Estado atual: consulte o histórico de commits. Cada commit corresponde a uma fase do [plano de construção](doc/04-plano-de-construcao.md).
+- Documentação: [`doc/`](doc/README.md) (arquitetura, operação e laboratório)
+- Estado atual: *paper trading* no Demo Mode desde 29/09/2026; o que falta para produção está em [`doc/04-estado-e-go-live.md`](doc/04-estado-e-go-live.md)
 
 > ⚠️ Software experimental. Não constitui recomendação de investimento. Use Testnet/Demo e, em produção, apenas capital que você aceita perder.
 
@@ -41,9 +41,9 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 
 Nunca habilite permissão de saque nas chaves de API.
 
-## Spike OPOCO (Fase 0)
+## Spike OPOCO
 
-Valida no Testnet/Demo os tipos de ordem dos quais a arquitetura depende:
+Valida num ambiente novo (Testnet ou Demo) os tipos de ordem dos quais a arquitetura depende:
 
 ```bash
 uv run python scripts/spike_opoco.py --env-file .env           # usa BTCUSDT por padrão
@@ -52,7 +52,7 @@ uv run python scripts/spike_opoco.py --env-file .env --symbol ETHUSDT
 
 O script recusa o ambiente `prod`. Os resultados brutos ficam em `var/spike/`.
 
-Resultado da execução no Spot Testnet (19/19) e achados: [`doc/spike-opoco.md`](doc/spike-opoco.md).
+Resultado no Spot Testnet (19/19, 28/09/2026) e achados sobre a API: [`doc/01-requisitos-e-binance.md`](doc/01-requisitos-e-binance.md) (§3).
 
 ## CLI de operação manual
 
@@ -77,7 +77,7 @@ O agente precisa de PostgreSQL e das chaves no `.env`. Na partida, ele aplica as
 - reconcilia a cada 5 minutos e reage aos eventos do User Data Stream;
 - avalia as condições de parada a cada minuto (`config/stop_conditions.yaml`);
 - coleta notícias a cada 15 minutos;
-- roda o ciclo de decisão de cada perfil habilitado no fechamento do candle (conservador: a cada 4h).
+- monta o universo e roda o ciclo de decisão de cada perfil habilitado no fechamento do candle (os perfis atuais usam 4h).
 
 Use o **Demo Mode** (`TA_BINANCE_ENV=demo`) para rodar o agente: o Spot Testnet tem só ~20 dias de histórico, e o universo fica vazio (ver [`doc/runbook.md`](doc/runbook.md)). Com `TA_TRADING_ENABLED=false` (padrão), o agente roda em **simulação**: decide e registra as entradas e saídas como eventos, sem enviar ordens. Com o Telegram configurado (`TA_TELEGRAM_BOT_TOKEN` e `TA_TELEGRAM_CHAT_ID`), ele envia alertas e aceita `/status`, `/pause`, `/resume`, `/halt` e `/flatten` (este com código de confirmação).
 
@@ -97,17 +97,17 @@ uv run alembic -x url=postgresql+asyncpg://trade_agent:trade_agent_dev@localhost
 A estratégia "casca" do Freqtrade importa o mesmo pacote de sinais usado em produção (`trade_agent.signals`). A configuração e os parâmetros são gerados a partir de `config/profiles.yaml`.
 
 ```bash
-# baixa os candles (dados públicos) e roda o walk-forward com os parâmetros fixos do perfil
-uv run python -m lab.walk_forward --profile conservador --start 2023-01-01 --end 2026-09-01 --download
 # walk-forward otimizado: hyperopt nos 12 meses anteriores a cada janela trimestral de validação
-uv run python -m lab.walk_forward --profile conservador --start 2024-01-01 --optimize --epochs 100 --download
+uv run python -m lab.walk_forward --profile swing_trend --optimize --download
+# com os parâmetros atuais do perfil, sem otimizar
+uv run python -m lab.walk_forward --profile momentum_alpha
 ```
 
 Para comparar outra versão do código (A/B), aponte `TA_LAB_SRC` para a pasta `src/` dessa versão (ex.: um `git worktree`).
 
-Os relatórios ficam em `var/lab/`. O resumo comentado está em [`doc/lab-resultados.md`](doc/lab-resultados.md).
+As janelas vão de 2023-01-01 a 2026-09-01 por padrão (`--start`, `--end`). Os relatórios ficam em `var/lab/`, e o resumo comentado da calibração em uso está em [`doc/lab-resultados.md`](doc/lab-resultados.md).
 
-## Analista de mercado (Fase 4)
+## Analista de mercado
 
 Coleta notícias e métricas públicas, faz a triagem com `claude-sonnet-5` e produz uma leitura de mercado (`MarketView`) com `claude-opus-5`. As regras de segurança são aplicadas por código: o LLM só pode vetar ativos e reduzir a exposição. Modelos, fontes, orçamento (US$ 5/dia) e limites ficam em `config/research.yaml`; a chave vai no `.env` (`ANTHROPIC_API_KEY`).
 
@@ -115,10 +115,10 @@ Coleta notícias e métricas públicas, faz a triagem com `claude-sonnet-5` e pr
 uv run trade-agent research ingest                     # coleta notícias e métricas (PostgreSQL)
 uv run trade-agent research run --assets BTC,ETH,SOL   # um ciclo de pesquisa
 uv run trade-agent research show                       # última leitura válida
-uv run trade-agent research eval                       # avaliação com 31 casos rotulados (~US$ 3)
+uv run trade-agent research eval                       # avaliação com 31 casos rotulados (~US$ 0,60)
 ```
 
-## Observabilidade (Fase 6)
+## Observabilidade
 
 O agente grava uma foto de telemetria a cada 5 minutos (`telemetry_snapshots`) e envia um heartbeat a cada minuto para a URL de `TA_HEALTHCHECK_URL` (ex.: Healthchecks.io). O Grafana sobe junto no compose, com 6 dashboards (visão geral, posições, performance, decisões e pesquisa, saúde técnica e logs) e alertas no Telegram. Acesse em `http://127.0.0.1:3000` (admin / `GRAFANA_ADMIN_PASSWORD`). Os logs de todos os contêineres vão para o Loki (coletados pelo Grafana Alloy, guardados por 30 dias). Os traces do agente (OpenTelemetry) vão para o Jaeger (`http://127.0.0.1:16686`, 7 dias), com cada componente como serviço e o grafo de dependências entre eles; logs e traces se ligam nos dois sentidos pelo `trace_id`. Em paralelo, o SigNoz (`http://127.0.0.1:8080`) reúne traces, logs e métricas: as do agente (patrimônio, drawdown, estado do risco, custo do LLM...) e as de cada contêiner, com 4 dashboards (operação, saúde técnica, LLM e contêineres) gerados por `scripts/signoz_dashboards.py`. Procedimentos de incidente: [`doc/runbook.md`](doc/runbook.md).
 
@@ -130,11 +130,11 @@ uv run python -m scripts.grafana_dashboards   # regenera os dashboards após edi
 ## Estrutura
 
 ```text
-src/trade_agent/      código da aplicação (ver doc/03-arquitetura-recomendada.md §4)
+src/trade_agent/      código da aplicação (ver doc/03-arquitetura.md §4)
 tests/unit/           testes unitários
 tests/integration/    testes de integração (Binance simulada, Postgres em contêiner)
 tests/live/           testes contra Testnet/Demo (marcador `live`)
-scripts/              utilitários operacionais (spike etc.)
+scripts/              spike OPOCO e geradores dos dashboards do Grafana e do SigNoz
 lab/                  laboratório de backtest (Freqtrade via Docker, walk-forward)
 config/               perfis de alocação (profiles.yaml) e analista (research.yaml)
 evals/                casos rotulados para avaliar o analista LLM
