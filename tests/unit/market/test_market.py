@@ -186,3 +186,13 @@ async def test_build_universe_without_delist_endpoint(
     fake.inject(Fault("GET", "/sapi/v1/spot/delist-schedule", "reject", code=-1000, message="n/d"))
     universe = await build_universe(api, UniverseConfig())
     assert universe.symbols() == ["BTCUSDT", "ETHUSDT"]
+
+
+async def test_build_universe_where_there_is_no_delist_schedule(
+    market_api: tuple[FakeBinance, BinanceSpotApi],
+) -> None:
+    fake, api = market_api
+    fake.delisted = {"ETHUSDT"}
+    universe = await build_universe(api, UniverseConfig(delist_schedule=False))
+    assert universe.symbols() == ["BTCUSDT", "ETHUSDT"]
+    assert fake.calls("GET", "/sapi/v1/spot/delist-schedule") == []

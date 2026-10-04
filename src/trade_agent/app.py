@@ -115,7 +115,13 @@ def assemble(
         store=store,
         guard=guard,
         strategy=strategy,
-        universe=UniverseCache(api, UniverseConfig(quote_asset=strategy.account.quote_asset)),
+        universe=UniverseCache(
+            api,
+            UniverseConfig(
+                quote_asset=strategy.account.quote_asset,
+                delist_schedule=endpoints_for(settings.binance_env).sapi,
+            ),
+        ),
         research=research,
         view_max_age=timedelta(hours=research_config.safety.max_view_age_hours),
         dry_run=not settings.trading_enabled,

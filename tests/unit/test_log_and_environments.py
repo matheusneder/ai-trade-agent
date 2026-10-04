@@ -16,6 +16,10 @@ def test_every_environment_has_endpoints() -> None:
         assert endpoints.rest.startswith("https://")
         assert endpoints.ws_api.startswith("wss://")
         assert endpoints.ws_streams.startswith("wss://")
+    # as rotas /sapi (cronograma de delistagem) só existem na produção
+    assert {env for env, endpoints in ENDPOINTS.items() if endpoints.sapi} == {
+        BinanceEnvironment.PROD
+    }
 
 
 def test_json_logging(capsys: pytest.CaptureFixture[str]) -> None:
