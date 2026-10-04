@@ -50,6 +50,8 @@ class UniverseConfig:
     """Posições 1..N por volume (excluindo o *core*) formam o tier *large*."""
     mid_rank: int = 60
     excluded_assets: frozenset[str] = STABLE_OR_FIAT
+    delist_schedule: bool = True
+    """Consulta o cronograma de delistagem; desligado onde a Binance não o tem (``sapi``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,11 +177,12 @@ async def build_universe(api: BinanceSpotApi, config: UniverseConfig) -> Univers
     rules = await api.exchange_info()
     tickers = {t.symbol: t for t in await api.tickers_24h()}
     books = {b.symbol: b for b in await api.book_tickers()}
-    try:
-        delisted = await api.delist_schedule()
-    except BinanceError as exc:
-        log.warning("universe.delist_schedule_unavailable", error=str(exc))
-        delisted = set()
+    delisted: set[str] = set()
+    if config.delist_schedule:
+        try:
+            delisted = await api.delist_schedule()
+        except BinanceError as exc:
+            log.warning("universe.delist_schedule_unavailable", error=str(exc))
     ranked, _ = prefilter(rules, tickers, books, delisted, config)
     history: dict[str, int] = {}
     for symbol in ranked:

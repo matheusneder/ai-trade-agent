@@ -67,7 +67,7 @@ Outros pontos da API:
 - **Não existe substituição atômica de uma *order list*.** `cancelReplace` vale só para ordens simples, e `amend/keepPriority` só reduz quantidade. Para mover o stop de um OCO, o agente cancela a lista e cria outra, com *fail-safe* de venda se o novo OCO for rejeitado (D-007).
 - **User Data Stream:** o modelo com `listenKey` foi depreciado em abril de 2025. O agente usa a **WebSocket API** (`userDataStream.subscribe.signature`) e reconecta de forma proativa ao receber o evento `serverShutdown`.
 - **Comissões:** `GET /api/v3/account/commission` retorna as taxas da conta. O agente mede a comissão de cada execução pelos `fills`, e a validação pré-ordem usa a taxa de ida e volta configurada (`pre_trade.round_trip_fee_pct`, 0,2%).
-- **Delistagens:** `GET /sapi/v1/spot/delist-schedule` lista os pares com delistagem agendada, que o universo exclui.
+- **Delistagens:** `GET /sapi/v1/spot/delist-schedule` lista os pares com delistagem agendada, que o universo exclui. A rota só existe na produção: a Testnet e o Demo Mode não têm as rotas `/sapi` (HTTP 404), e nelas o agente não a consulta.
 
 ### 2.4 Ambientes
 
@@ -104,7 +104,7 @@ O `scripts/spike_opoco.py` repete essas verificações num ambiente novo e recus
 | Fonte | Tipo | Uso no agente |
 |-------|------|---------------|
 | Binance Spot (klines, tickers de 24h, melhor oferta) | Técnica | Sinais, universo (volume, spread) e preço de entrada |
-| `delist-schedule` da Binance | Eventos | Exclusão do universo |
+| `delist-schedule` da Binance | Eventos | Exclusão do universo (só na produção) |
 | Anúncios do site da Binance (listagens, delistagens, notícias) | Eventos | Notícias para o analista |
 | RSS: CoinDesk, Cointelegraph, The Block, Decrypt | Notícias | Notícias para o analista |
 | Fear & Greed Index (alternative.me) | Sentimento | Métrica para o analista e disjuntor `fear_greed_below` |

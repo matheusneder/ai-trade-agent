@@ -9,6 +9,7 @@ import httpx
 import pytest
 from structlog.testing import capture_logs
 
+from tests.support.candles import raw_klines, uptrend_with_pullback
 from tests.support.claude import FakeClaude
 from tests.support.fake_binance import FakeBinance
 from trade_agent.app import assemble
@@ -132,6 +133,34 @@ async def test_assemble_without_telegram(
         assert (await parts.guard.state(GLOBAL)).state is OpState.PAUSED
         await parts.on_reconcile(ReconcileReport(started_at=datetime.now(UTC), orphans=["x"]))
         assert parts.monitor.reconcile_anomalies == 1
+
+
+@pytest.mark.parametrize(("env", "calls"), [("prod", 1), ("demo", 0), ("testnet", 0)])
+async def test_the_delist_schedule_is_asked_only_where_it_exists(
+    db: Database,
+    api: BinanceSpotApi,
+    store: Store,
+    service: PositionService,
+    fake: FakeBinance,
+    env: str,
+    calls: int,
+) -> None:
+    """A Testnet e a Demo não têm as rotas /sapi: sem um 404 (e um aviso) a cada ciclo."""
+    research = load_research_config(ROOT / "config" / "research.yaml").model_copy(
+        update={"sources": SourcesConfig(fear_greed=False, derivatives=False)}
+    )
+    async with httpx.AsyncClient() as http:
+        parts = assemble(
+            _settings(binance_env=env),
+            api=api, db=db, store=store, positions=service, strategy=STRATEGY,
+            conditions=load_stop_conditions(ROOT / "config" / "stop_conditions.yaml"),
+            research_config=research, http=http, llm=None,
+        )  # fmt: skip
+        fake.candles[("BTCUSDT", "4h")] = raw_klines(uptrend_with_pullback())
+        with capture_logs() as logs:
+            await parts.engine.run_profile("conservador")
+    assert len(fake.calls("GET", "/sapi/v1/spot/delist-schedule")) == calls
+    assert "universe.delist_schedule_unavailable" not in {log["event"] for log in logs}
 
 
 async def test_assemble_with_telegram_and_decision_job(

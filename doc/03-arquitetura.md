@@ -183,7 +183,7 @@ sequenceDiagram
 O universo é montado a cada ciclo, com o ranking de volume do momento (D-027):
 
 1. `exchangeInfo`: `status = TRADING`, moeda de cotação USDT e as flags `ocoAllowed`, `otoAllowed`, `opoAllowed` e `allowTrailingStop`.
-2. Exclusões: stablecoins e ativos atrelados a moeda fiduciária, tokens alavancados e pares em `delist-schedule`.
+2. Exclusões: stablecoins e ativos atrelados a moeda fiduciária, tokens alavancados e pares em `delist-schedule` (só na produção: a Testnet e o Demo não têm a rota).
 3. Liquidez: volume de 24h de pelo menos US$ 5 milhões e spread de até 20 bps.
 4. Histórico: pelo menos 30 dias de candles.
 5. *Tiers* por volume em USDT na própria Binance (D-013): `core` (BTC e ETH), `large` (posições 1 a 20 do ranking, sem o *core*), `mid` (21 a 60) e `small` (o resto). Cada perfil define quais *tiers* pode usar e com qual peso.
