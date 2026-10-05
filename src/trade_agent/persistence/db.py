@@ -110,9 +110,13 @@ class Database:
         """Garante uma única instância ativa (``pg_try_advisory_lock``).
 
         O *lock* pertence à conexão: se o processo morrer, o PostgreSQL o libera sozinho.
+        A conexão fica sem transação (*autocommit*): aberta durante toda a execução do
+        agente, uma transação prenderia o horizonte do VACUUM, e as linhas mortas de todas
+        as tabelas ficariam sem limpeza.
         """
         conn = await self.engine.connect()
         try:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
             acquired = await conn.scalar(
                 text("SELECT pg_try_advisory_lock(:key)").bindparams(key=key)
             )
