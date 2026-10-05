@@ -42,6 +42,19 @@ async def test_exclusive_lock_allows_a_single_instance(db: Database, postgres_ur
         await other.dispose()
 
 
+async def test_the_instance_lock_leaves_no_open_transaction(db: Database) -> None:
+    """Com uma transação aberta, a conexão do lock prenderia o horizonte do VACUUM (o
+    ``backend_xmin``) enquanto o agente roda, e as linhas mortas não seriam removidas."""
+    async with db.exclusive_lock(key=4243), db.session() as session:
+        holder = await session.execute(
+            text(
+                "SELECT a.state, a.backend_xmin FROM pg_locks l JOIN pg_stat_activity a"
+                " USING (pid) WHERE l.locktype = 'advisory' AND l.objid = 4243"
+            )
+        )
+        assert holder.one() == ("idle", None)
+
+
 async def test_pool_recovers_after_connection_is_killed(db: Database) -> None:
     assert await db.ping()
     async with db.engine.connect() as admin:
