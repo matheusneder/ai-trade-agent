@@ -11,6 +11,7 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -71,6 +72,14 @@ def test_signoz_services_rotate_logs_and_pin_versions(merged: dict[str, Any]) ->
     assert signoz["signoz-telemetrystore-migrator"]["image"] == casting["ingester"]["spec"]["image"]
     for spec in (casting["signoz"]["spec"], casting["ingester"]["spec"]):
         assert spec["image"].endswith(f":{spec['version']}")  # versão e imagem coerentes
+
+
+def test_signoz_waits_for_its_metastore(merged: dict[str, Any]) -> None:
+    """O SigNoz encerra na partida se o PostgreSQL de metadados ainda não aceita conexões."""
+    signoz = merged["services"]["signoz-signoz-0"]
+    metastore = urlsplit(signoz["environment"]["SIGNOZ_SQLSTORE_POSTGRES_DSN"]).hostname
+    assert metastore is not None and "healthcheck" in merged["services"][metastore]
+    assert signoz["depends_on"][metastore]["condition"] == "service_healthy"
 
 
 def test_agent_and_collectors_reach_the_signoz_ingester(merged: dict[str, Any]) -> None:
