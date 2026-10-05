@@ -15,6 +15,11 @@ services:
   signoz-signoz-0:
     ports: !override
       - "127.0.0.1:8080:8080"   # interface do SigNoz
+    # sem o metastore aceitando conexões, o SigNoz encerra na partida ("connection refused")
+    # e só sobe na reinicialização seguinte
+    depends_on:
+      signoz-metastore-postgres-0:
+        condition: service_healthy
     logging: *logging
 
   signoz-metastore-postgres-0:
