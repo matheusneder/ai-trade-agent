@@ -16,7 +16,7 @@ import yaml
 from opentelemetry.trace import SpanKind
 
 from tests.support.jaeger import JAEGER_CONFIG, Jaeger, jaeger_config, jaeger_container, port
-from tests.support.logs import COMPOSE, DEPLOY, alloy_blocks, image
+from tests.support.logs import COMPOSE, DEPLOY, alloy_blocks, compose_config, image
 from tests.support.tracing import Recorded
 from trade_agent import tracing
 from trade_agent.config.settings import LogFormat
@@ -117,17 +117,20 @@ def test_jaeger_keeps_7_days_on_the_volume_and_listens_on_localhost() -> None:
     assert f"{JAEGER_CONFIG.name}:/etc/jaeger/config.yaml:ro" in " ".join(service["volumes"])
 
 
-def test_jaeger_goes_to_the_host_only_when_asked() -> None:
+def test_jaeger_ui_reaches_the_host_only_in_development() -> None:
     """Cada porta publicada é mais uma regra de NAT que o Rancher Desktop pode deixar velha
-    (runbook, §1.2). O Jaeger só publica a interface e o OTLP com deploy/jaeger-ports.yml."""
+    (runbook, §1.2). O Jaeger não publica portas; a interface chega ao host por um repasse
+    que só existe com DEV_JAEGER_UI=1 no .env (desenvolvimento no Windows)."""
     assert "ports" not in COMPOSE["services"]["jaeger"]
-    config = jaeger_config()
-    ui = port(config["extensions"]["jaeger_query"]["http"]["endpoint"])
-    otlp = port(config["receivers"]["otlp"]["protocols"]["http"]["endpoint"])
-    extra = yaml.safe_load((DEPLOY / "jaeger-ports.yml").read_text(encoding="utf-8"))
-    assert extra == {
-        "services": {"jaeger": {"ports": [f"127.0.0.1:{ui}:{ui}", f"127.0.0.1:{otlp}:{otlp}"]}}
-    }
+    ui = port(jaeger_config()["extensions"]["jaeger_query"]["http"]["endpoint"])
+    off = compose_config()["services"]["jaeger-ui"]
+    on = compose_config(DEV_JAEGER_UI="1")["services"]["jaeger-ui"]
+    assert (off["deploy"]["replicas"], on["deploy"]["replicas"]) == (0, 1)
+    assert re.fullmatch(r"alpine/socat:\d+(\.\d+)+", on["image"])  # versão fixada
+    assert on["command"] == [f"tcp-listen:{ui},fork,reuseaddr", f"tcp-connect:jaeger:{ui}"]
+    published = [(p["host_ip"], p["published"], p["target"]) for p in on["ports"]]
+    assert published == [("127.0.0.1", str(ui), ui)]
+    assert list(on["networks"]) == ["default"]  # com várias redes, o Rancher não repassa
 
 
 def test_agent_exports_to_the_jaeger_otlp_receiver() -> None:

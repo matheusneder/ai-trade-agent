@@ -92,7 +92,7 @@ services:
 
   # Traces do agente (OpenTelemetry → OTLP): um serviço por componente, 7 dias no Badger.
   # Sem portas no host: o Grafana (Explore → Traces) e o agente o alcançam pela rede interna.
-  # A interface (16686) e o OTLP (4318) no host ficam em jaeger-ports.yml, para quando precisar.
+  # A interface no host existe só em desenvolvimento: veja o jaeger-ui, logo abaixo.
   jaeger:
     image: jaegertracing/jaeger:2.20.0   # 2.21 removeu a API v1 que o Grafana usa
     restart: unless-stopped
@@ -105,6 +105,27 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    logging: *logging
+
+  # ── SÓ DESENVOLVIMENTO (Rancher Desktop no Windows): DESLIGADO POR PADRÃO ─────────────────
+  # Abre a interface do Jaeger em http://127.0.0.1:16686 (com o grafo System Architecture).
+  # Por que um repasse, e não a porta no próprio Jaeger: o Rancher Desktop não apaga a regra de
+  # NAT de um contêiner que para, e a porta morre se ele volta com outro IP (runbook, §1.2). O
+  # socat procura o Jaeger pelo nome a cada conexão: recriar o Jaeger não afeta a porta. Fica
+  # numa rede só, porque o Rancher Desktop não repassa a porta de um contêiner em várias redes.
+  # Ligar: DEV_JAEGER_UI=1 no .env da raiz e `docker compose -f deploy/docker-compose.yml up -d`.
+  # Desligar: apague a linha (ou use 0) e rode o mesmo comando. Desligado, nenhum contêiner é
+  # criado (zero réplicas), mas o Compose ainda baixa a imagem (cerca de 6 MB). Mudar a
+  # variável também reinicia o agente, que recebe o .env inteiro: faça fora de um ciclo.
+  # Em Linux ou Kubernetes, deixe desligado: os traces ficam no Grafana (Explore → Traces).
+  jaeger-ui:
+    image: alpine/socat:1.8.1.3
+    restart: unless-stopped
+    command: ["tcp-listen:16686,fork,reuseaddr", "tcp-connect:jaeger:16686"]
+    ports:
+      - "127.0.0.1:16686:16686"
+    deploy:
+      replicas: ${DEV_JAEGER_UI:-0}   # 0 = desligado (padrão); 1 = ligado
     logging: *logging
 
   # Logs dos contêineres: Alloy coleta → Loki guarda → Grafana consulta (dashboard "Logs").
