@@ -5,7 +5,6 @@ aqui ficam as garantias de configuração, verificadas no modelo que o próprio 
 monta e com os binários oficiais. A ingestão real foi conferida na pilha em execução.
 """
 
-import json
 import shutil
 import subprocess
 from collections import Counter
@@ -16,7 +15,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
-from tests.support.logs import COMPOSE, DEPLOY, image
+from tests.support.logs import COMPOSE, DEPLOY, compose_config, image
 
 SIGNOZ = DEPLOY / "signoz"
 POURS = SIGNOZ / "pours" / "deployment"
@@ -32,14 +31,7 @@ def _docker() -> None:
 @pytest.fixture(scope="module")
 def merged() -> dict[str, Any]:
     """O modelo final do compose (include + override), como o Docker Compose o monta."""
-    _docker()
-    compose = str(DEPLOY / "stack.yml")  # sem o .env da raiz, que o docker-compose.yml exige
-    done = subprocess.run(  # noqa: S603 - comando fixo
-        ["docker", "compose", "-f", compose, "config", "--format", "json"],  # noqa: S607
-        capture_output=True, check=True,
-    )  # fmt: skip
-    model: dict[str, Any] = json.loads(done.stdout)
-    return model
+    return compose_config()
 
 
 def test_every_published_port_is_local_and_unique(merged: dict[str, Any]) -> None:
@@ -49,12 +41,12 @@ def test_every_published_port_is_local_and_unique(merged: dict[str, Any]) -> Non
         for port in service.get("ports", [])
     ]
     assert {name for name, _ in published} >= {"signoz-signoz-0", "ingester", "grafana"}
-    assert "jaeger" not in {name for name, _ in published}  # só com jaeger-ports.yml
+    assert "jaeger" not in {name for name, _ in published}  # a interface sai pelo jaeger-ui
     assert all(port["host_ip"] == "127.0.0.1" for _, port in published)
     counts = Counter(port["published"] for _, port in published)
     assert all(n == 1 for n in counts.values()), counts
     ports = {name: port["published"] for name, port in published if port["target"] in (4318, 8080)}
-    # o OTLP do SigNoz fica na 14318, livre a 4318 para o Jaeger (jaeger-ports.yml)
+    # o OTLP do SigNoz fica na 14318 no host, com a 4318 (porta padrão do OTLP) livre
     assert (ports["ingester"], ports["signoz-signoz-0"]) == ("14318", "8080")
 
 
