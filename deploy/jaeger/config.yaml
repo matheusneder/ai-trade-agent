@@ -1,5 +1,6 @@
 # Jaeger v2 (sobre o OpenTelemetry Collector): recebe OTLP do agente e guarda os traces no
-# Badger por 7 dias. Interface e API em 127.0.0.1:16686; o Grafana consulta por jaeger:16686.
+# Badger por 7 dias. Interface e API na 16686: o Grafana consulta por jaeger:16686, e no host
+# ela só abre em desenvolvimento, pelo jaeger-ui (deploy/stack.yml).
 # O volume `jaeger` é montado em /tmp: o Docker copia para ele a permissão do /tmp da imagem,
 # gravável pelo usuário do Jaeger (10001); um diretório novo nasceria só para o root.
 # Versão fixada em 2.20: a 2.21 removeu a API HTTP v1 (/api/services, /api/traces), que o

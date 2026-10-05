@@ -5,8 +5,11 @@ do arquivo versionado. Só a origem muda: arquivos de amostra no lugar da API do
 """
 
 import contextlib
+import json
+import os
 import re
 import shutil
+import subprocess
 import time
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -28,6 +31,23 @@ TOP_LEVEL_BLOCK = re.compile(
 
 def image(service: str) -> str:
     return str(COMPOSE["services"][service]["image"])
+
+
+def compose_config(**env: str) -> dict[str, Any]:
+    """O modelo do ``stack.yml`` como o Docker Compose o monta, com ``env`` no ambiente.
+
+    Sem o ``.env`` da raiz (o ``docker-compose.yml`` o exige) e sem as variáveis ``DEV_`` do
+    ambiente de quem roda os testes: o que vale é o padrão de um ambiente novo.
+    """
+    if shutil.which("docker") is None:
+        pytest.skip("Docker indisponível")
+    base = {k: v for k, v in os.environ.items() if not k.startswith("DEV_")}
+    done = subprocess.run(  # noqa: S603 - comando fixo
+        ["docker", "compose", "-f", str(DEPLOY / "stack.yml"), "config", "--format", "json"],  # noqa: S607
+        capture_output=True, check=True, env=base | env,
+    )  # fmt: skip
+    model: dict[str, Any] = json.loads(done.stdout)
+    return model
 
 
 def alloy_blocks() -> dict[str, str]:
