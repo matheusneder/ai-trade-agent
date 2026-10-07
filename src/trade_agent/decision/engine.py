@@ -141,6 +141,7 @@ class DecisionEngine:
         self._clock = clock
         self._names = {p.code: name for name, p in strategy.profiles.items()}
         self._features = FeatureParams()
+        self._entry_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ sinais
     async def _signals(
@@ -259,15 +260,19 @@ class DecisionEngine:
         opened: list[str] = []
         rejected: list[tuple[str, str]] = []
         if state.allows_entries:
-            opened, rejected = await self._entries(
-                name,
-                profile=profile,
-                universe=universe,
-                signals=signals,
-                active=active,
-                reading=reading,
-                state=state,
-            )
+            # Os perfis do mesmo timeframe rodam juntos, e a pesquisa (minutos) separa a
+            # leitura do início do ciclo da compra: um perfil compra de cada vez, com as
+            # posições relidas, ou os dois compram o mesmo ativo (one_position_per_asset).
+            async with self._entry_lock:
+                opened, rejected = await self._entries(
+                    name,
+                    profile=profile,
+                    universe=universe,
+                    signals=signals,
+                    active=await self._store.active_positions(),
+                    reading=reading,
+                    state=state,
+                )
         report = CycleReport(
             profile=name,
             at=self._clock(),

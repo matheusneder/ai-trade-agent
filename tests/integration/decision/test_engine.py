@@ -1,6 +1,7 @@
 """Motor de decisão de ponta a ponta (Binance simulada + PostgreSQL)."""
 
 import asyncio
+import copy
 import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -46,7 +47,11 @@ UNIVERSE = UniverseConfig(
 
 
 def _strategy(**conservador: Any) -> StrategyConfig:
-    data = yaml.safe_load(FIXTURE.read_text(encoding="utf-8"))
+    return StrategyConfig.model_validate(_strategy_data(**conservador))
+
+
+def _strategy_data(**conservador: Any) -> dict[str, Any]:
+    data: dict[str, Any] = yaml.safe_load(FIXTURE.read_text(encoding="utf-8"))
     profile = data["profiles"]["conservador"]
     profile["entry"]["min_score"] = 0.0
     profile["protection"]["take_profit"] = {
@@ -54,7 +59,7 @@ def _strategy(**conservador: Any) -> StrategyConfig:
     }  # fmt: skip
     profile.update(conservador)
     data["profiles"]["moderado"]["enabled"] = False
-    return StrategyConfig.model_validate(data)
+    return data
 
 
 def _candles(closes: list[float]) -> list[list[Any]]:
@@ -114,6 +119,38 @@ def _engine(
     )
     guard.set_flattener(engine.flatten)
     return engine, guard
+
+
+async def test_profiles_of_the_same_timeframe_never_buy_the_same_asset(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Os perfis do mesmo timeframe rodam juntos (swing_trend e momentum_alpha, em 4h), e a
+    pesquisa leva minutos entre a leitura das posições, no início do ciclo, e a compra. Sem
+    uma compra de cada vez, com as posições relidas, os dois compravam o mesmo ativo
+    (STRKUSDT, 04/10/2026), contra o one_position_per_asset."""
+    _setup_market(fake)
+    data = _strategy_data()
+    twin = copy.deepcopy(data["profiles"]["conservador"])
+    data["profiles"]["moderado"] = {**twin, "code": "mod", "capital_share": 0.3}
+    engine, _ = _engine(api, service, store, strategy=StrategyConfig.model_validate(data))
+    reading = engine._reading
+
+    async def researching(*args: Any) -> Any:
+        await asyncio.sleep(0.05)  # a pesquisa: o outro perfil avança enquanto isso
+        return await reading(*args)
+
+    monkeypatch.setattr(engine, "_reading", researching)
+    reports = await asyncio.gather(
+        engine.run_profile("conservador"), engine.run_profile("moderado")
+    )
+    assert sorted(r.opened for r in reports) == [(), ("SOLUSDT",)]
+    (late,) = (r for r in reports if not r.opened)
+    assert ("SOLUSDT", "ativo já em carteira") in late.rejected
+    assert [p.symbol for p in await store.active_positions()] == ["SOLUSDT"]
 
 
 async def test_dry_run_simulates_entries_without_orders(
