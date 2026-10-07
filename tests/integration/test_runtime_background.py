@@ -12,6 +12,7 @@ from structlog.testing import capture_logs
 from tests.support.candles import raw_klines, uptrend_with_pullback
 from tests.support.claude import FakeClaude
 from tests.support.fake_binance import FakeBinance
+from tests.support.logs import COMPOSE
 from trade_agent.app import assemble
 from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.api import BinanceSpotApi
@@ -91,6 +92,15 @@ async def test_background_jobs_services_and_reconcile_hook(
     assert ticks.count("imediato") == 1 and ticks.count("heartbeat") == 1
     kinds = [e.kind for e in await store.recent_events(200)]
     assert "runtime.service_failed" in kinds and "runtime.task_failed" in kinds
+
+
+def test_docker_gives_the_agent_time_to_stop_in_order() -> None:
+    """Ao parar, o agente termina a tarefa em andamento e grava o agent.stopped. Com os 10 s
+    padrão do Docker, uma coleta de notícias (até timeout_s por fonte, em paralelo) seria
+    encerrada à força no meio."""
+    grace = str(COMPOSE["services"]["agent"]["stop_grace_period"])
+    sources = load_research_config(ROOT / "config" / "research.yaml").sources
+    assert grace.endswith("s") and int(grace[:-1]) >= 2 * sources.timeout_s
 
 
 def _settings(**overrides: object) -> Settings:

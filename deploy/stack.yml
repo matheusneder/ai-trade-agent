@@ -40,6 +40,11 @@ services:
     build:
       context: ..
     restart: unless-stopped
+    # Ao parar (SIGTERM), o agente termina a tarefa em andamento e grava o agent.stopped. Os
+    # 10 s padrão do Docker não cobrem uma coleta de notícias (até 15 s por fonte, em
+    # paralelo). Um ciclo de decisão (minutos, com o LLM) ainda é interrompido; a reconciliação
+    # na partida retoma o estado. No Kubernetes, o equivalente é terminationGracePeriodSeconds.
+    stop_grace_period: 30s
     env_file:
       - path: ../.env
         required: false

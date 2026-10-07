@@ -14,7 +14,7 @@ import respx
 from tests.support.risk import CONDITIONS, NOW, POLICY, snapshot
 from trade_agent.execution.orders import EntryOrder
 from trade_agent.execution.service import PositionService
-from trade_agent.notify.commands import OFFSET_KEY, CommandCenter
+from trade_agent.notify.commands import OFFSET_KEY, CommandCenter, until_stopped
 from trade_agent.notify.status import status_text
 from trade_agent.notify.telegram import TelegramBot, TelegramError
 from trade_agent.persistence.db import Database
@@ -145,7 +145,7 @@ async def test_run_loop_backs_off_on_errors_and_stops(
     stop = asyncio.Event()
     calls: list[int] = []
 
-    async def failing(*, timeout_s: int = 30) -> int:
+    async def failing(*, timeout_s: int = 30, **_: object) -> int:
         calls.append(timeout_s)
         if len(calls) == 2:
             stop.set()
@@ -154,6 +154,42 @@ async def test_run_loop_backs_off_on_errors_and_stops(
     monkeypatch.setattr(center, "poll_once", failing)
     await asyncio.wait_for(center.run(stop, backoff_s=0.01, timeout_s=1), timeout=5)
     assert calls == [1, 1]
+
+
+async def test_run_loop_stops_during_the_long_poll(store: Store, http: httpx.AsyncClient) -> None:
+    """A espera longa do getUpdates (até 30 s) não segura a parada do agente: o Docker o
+    encerraria à força depois de alguns segundos, sem terminar de forma ordenada."""
+    center, _ = _center(store, http, Clock())
+    stop = asyncio.Event()
+    waiting = asyncio.Event()
+
+    async def long_poll(request: httpx.Request) -> httpx.Response:
+        waiting.set()
+        await asyncio.sleep(30)  # a Bot API só responde quando chega mensagem
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    with respx.mock(assert_all_called=False) as router:  # a chamada é cancelada, não termina
+        router.post(f"{API}/getUpdates").mock(side_effect=long_poll)
+        task = asyncio.create_task(center.run(stop, timeout_s=30))
+        await asyncio.wait_for(waiting.wait(), timeout=5)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+
+
+async def test_until_stopped_returns_raises_or_gives_up() -> None:
+    stop = asyncio.Event()
+
+    async def value() -> int:
+        return 7
+
+    async def failing() -> int:
+        raise TelegramError("fora do ar")
+
+    assert await until_stopped(value(), stop) == 7
+    with pytest.raises(TelegramError):
+        await until_stopped(failing(), stop)
+    stop.set()
+    assert await until_stopped(asyncio.sleep(30, result=1), stop) is None
 
 
 async def test_status_text(db: Database, store: Store, service: PositionService) -> None:

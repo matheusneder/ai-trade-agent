@@ -147,6 +147,8 @@ Se o processo reiniciar no meio de um `decision_cycle`, o ciclo pode ser refeito
 
 Os perfis que fecham candle juntos (hoje os dois, em 4h) rodam o ciclo ao mesmo tempo, mas compram um de cada vez, com as posições relidas na hora da compra (D-029).
 
+Ao parar (SIGTERM), o agente termina a tarefa em andamento e grava `agent.stopped`. A espera de mensagens do Telegram (*long polling*, até 30 s) é interrompida na hora, e o compose dá 30 s ao agente (`stop_grace_period`; no Kubernetes, `terminationGracePeriodSeconds`), o bastante para uma coleta de notícias. Um `decision_cycle` em andamento leva minutos e é interrompido: na partida, a reconciliação retoma (parágrafo acima).
+
 ## 6. Ciclo de decisão
 
 ```mermaid
