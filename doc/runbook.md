@@ -152,7 +152,7 @@ O agente tenta re-proteger na hora. Se o novo OCO for rejeitado, ele vende a mer
 | Estado | O que significa | O que fazer |
 |--------|-----------------|-------------|
 | `paused` com prazo | pausa automática (ex.: queda do BTC, Fear & Greed, erros de API) | nada; volta sozinho no fim do *cooldown* |
-| `paused` sem prazo | divergência na reconciliação ou `/pause` | diagnosticar e `/resume <escopo>` |
+| `paused` sem prazo | divergência na reconciliação (órfã, ou erro em duas reconciliações seguidas) ou `/pause` | diagnosticar e `/resume <escopo>` |
 | `halted` | drawdown do pico, meta atingida ou `/halt` | analisar a causa no painel *Visão geral* e `/resume` quando seguro |
 | `halted` após flatten | *depeg* da moeda de cotação ou `/flatten` | confirmar que as vendas saíram (painel *Posições*) antes do `/resume` |
 

@@ -23,6 +23,9 @@ from trade_agent.reconcile.reconciler import ReconcileReport
 from trade_agent.risk.guard import RiskSnapshot
 from trade_agent.strategy.profiles import StrategyConfig
 
+RECONCILE_FAILURES_TO_COUNT = 2
+"""Reconciliações seguidas com erro a partir das quais os erros contam em reconcile_mismatch."""
+
 log = structlog.get_logger(__name__)
 
 EQUITY_KEY = "risk.equity"
@@ -72,10 +75,20 @@ class RiskMonitor:
         self._clock = clock
         self._names = {p.code: name for name, p in strategy.profiles.items()}
         self.reconcile_anomalies = 0
+        self._failed_in_a_row = 0
 
     def note_reconcile(self, report: ReconcileReport) -> None:
-        """Órfãs e erros da última reconciliação alimentam ``reconcile_mismatch``."""
-        self.reconcile_anomalies = len(report.orphans) + len(report.errors)
+        """Órfãs e erros persistentes da última reconciliação alimentam ``reconcile_mismatch``.
+
+        Uma órfã (lista do agente na Binance sem posição) é divergência real e conta na hora.
+        Um erro é uma checagem que não terminou (rede, DNS, Binance fora do ar) e só conta se
+        as reconciliações seguidas também falharem: em 07/10, 2 min sem DNS viraram uma pausa
+        sem prazo, embora a reconciliação 5 min depois tenha saído limpa. Uma queda longa da
+        API já pausa pelo api_error_rate_5m.
+        """
+        self._failed_in_a_row = self._failed_in_a_row + 1 if report.errors else 0
+        persistent = self._failed_in_a_row >= RECONCILE_FAILURES_TO_COUNT
+        self.reconcile_anomalies = len(report.orphans) + (len(report.errors) if persistent else 0)
 
     async def _btc_change_1h(self) -> float | None:
         candles = await self._api.klines(BENCHMARK, "1m", limit=61)

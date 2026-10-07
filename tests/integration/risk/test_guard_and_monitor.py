@@ -201,6 +201,7 @@ async def test_monitor_snapshot(
         api=api, store=store, strategy=PROFILES, health=health, fear_greed=lambda: 22,
         clock=lambda: NOW,
     )  # fmt: skip
+    monitor.note_reconcile(ReconcileReport(started_at=NOW, errors=["e"]))
     monitor.note_reconcile(ReconcileReport(started_at=NOW, orphans=["x"], errors=["e"]))
     with capture_logs() as logs:
         first = await monitor.snapshot()
@@ -290,3 +291,26 @@ async def test_monitor_without_market_references(
     fake.candles[("BTCUSDT", "1m")] = _klines([0.0] * 61)
     assert (await monitor.snapshot()).btc_change_1h is None
     assert quote_deviation({}) is None
+
+
+async def test_reconcile_counts_orphans_at_once_and_errors_only_when_they_persist(
+    api: BinanceSpotApi, store: Store
+) -> None:
+    """Uma órfã (lista do agente na Binance sem posição) é divergência real e conta na hora. Um
+    erro é uma checagem que não terminou (rede, DNS) e só conta se a reconciliação seguinte
+    também falhar: em 07/10, 2 min sem DNS pausaram as entradas por 7 h, embora a
+    reconciliação 5 min depois tenha saído limpa."""
+    monitor = RiskMonitor(api=api, store=store, strategy=PROFILES, health=CallHealth())
+
+    def note(orphans: tuple[str, ...] = (), errors: tuple[str, ...] = ()) -> int:
+        report = ReconcileReport(started_at=NOW, orphans=list(orphans), errors=list(errors))
+        monitor.note_reconcile(report)
+        return monitor.reconcile_anomalies
+
+    assert note(orphans=("x",)) == 1
+    assert note(errors=("dns",)) == 0  # a primeira falha não conta
+    assert note() == 0  # a seguinte saiu limpa
+    assert note(errors=("dns",)) == 0
+    assert note(errors=("dns", "dns")) == 2  # duas seguidas: os erros contam
+    assert note(orphans=("x",), errors=("dns",)) == 2
+    assert note() == 0
