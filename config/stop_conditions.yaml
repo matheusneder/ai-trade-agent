@@ -13,7 +13,7 @@ global:
   quote_depeg_pct:         {value: 1.5, action: flatten}                # USDT fora da paridade
   fear_greed_below:        {value: 10,  action: pause, cooldown: 24h}
   api_error_rate_5m:       {value: 0.2, action: pause, cooldown: 30m}
-  reconcile_mismatch:      {action: pause}                              # até diagnóstico
+  reconcile_mismatch:      {action: pause}                              # até diagnóstico (órfãs; erros só em 2 reconciliações seguidas)
   profit_target_pct:       null                                         # ex.: {value: 30, action: halt}
   trading_window_utc:      null                                         # ex.: ["00:00-23:59"]
 
