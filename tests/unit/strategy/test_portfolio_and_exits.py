@@ -116,11 +116,28 @@ def test_budget_and_tier_room_cap_the_size() -> None:
     assert idea.notional <= D("50")  # tier large: 20% de 1000 = 200 − 150 em uso
 
 
-def test_exposure_multiplier_reduces_slots_and_risk() -> None:
+def test_exposure_multiplier_scales_the_size_not_the_slots() -> None:
+    """A cautela do analista reduz o tamanho de cada posição, e não o número de vagas (D-030):
+    nas duas, ela contava duas vezes, e com 2 vagas qualquer leitura abaixo de 1,0 deixava 1."""
     candidates = [_candidate("AAAUSDT", score=0.9), _candidate("BBBUSDT", score=0.8)]
     result = _plan(candidates=candidates, exposure_multiplier=D("0.5"))
-    assert [i.symbol for i in result.ideas] == ["AAAUSDT"]  # floor(3 × 0,5) = 1 vaga
-    assert result.ideas[0].notional == pytest.approx(D("125"), rel=D("0.01"))
+    assert [i.symbol for i in result.ideas] == ["AAAUSDT", "BBBUSDT"]  # as 3 vagas continuam
+    assert result.ideas[0].notional == pytest.approx(D("125"), rel=D("0.01"))  # 250 × 0,5
+
+
+def test_exposure_multiplier_also_scales_a_capped_size() -> None:
+    """Com o tamanho limitado pelo tier (e não pelo risco), a cautela continua valendo."""
+    holdings = [Holding("conservador", "HELDUSDT", Tier.LARGE, D("150"))]
+    candidate = _candidate("AAAUSDT", Tier.LARGE, stop_pct=0.01)
+    full = _plan(holdings=holdings, candidates=[candidate])
+    half = _plan(holdings=holdings, candidates=[candidate], exposure_multiplier=D("0.5"))
+    assert half.ideas[0].notional == pytest.approx(full.ideas[0].notional / 2, rel=D("0.01"))
+
+
+def test_zero_exposure_opens_nothing() -> None:
+    """Leitura que zera a exposição, ou on_failure: pause_entries sem leitura válida."""
+    result = _plan(candidates=[_candidate("AAAUSDT")], exposure_multiplier=D(0))
+    assert result.ideas == () and dict(result.rejections) == {"AAAUSDT": "exposição zero"}
 
 
 def test_llm_opinion_blends_score_when_confident() -> None:

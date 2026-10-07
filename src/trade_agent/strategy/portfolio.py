@@ -14,7 +14,7 @@ Regras (doc 03, §6.3):
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import ROUND_FLOOR, Decimal
+from decimal import Decimal
 
 from trade_agent.execution.orders import EntryMode, EntryOrder, ProtectionPolicy
 from trade_agent.market.universe import Tier, UniverseMember
@@ -96,12 +96,13 @@ def plan_entries(
     own = [h for h in holdings if h.profile == name]
     held = {h.symbol for h in (holdings if one_position_per_asset else own)}
     allocation = profile.allocation
-    slots = int(
-        (allocation.max_open_positions * exposure_multiplier).to_integral_value(ROUND_FLOOR)
-    ) - len(own)
+    # O exposure_multiplier do analista escala só o tamanho de cada posição (abaixo), não o
+    # número de vagas: aplicado às duas, a cautela contava duas vezes, e com 2 vagas qualquer
+    # leitura abaixo de 1,0 cortava a capacidade do perfil pela metade (D-030).
+    slots = allocation.max_open_positions - len(own)
     budget = capital * (1 - allocation.cash_reserve_pct) - sum((h.cost for h in own), ZERO)
     tier_used = {tier: sum((h.cost for h in own if h.tier is tier), ZERO) for tier in Tier}
-    risk_budget = capital * allocation.risk_per_trade_pct / PCT * exposure_multiplier
+    risk_budget = capital * allocation.risk_per_trade_pct / PCT
 
     ideas: list[TradeIdea] = []
     rejections: list[tuple[str, str]] = []
@@ -118,6 +119,8 @@ def plan_entries(
             reason = "score abaixo do mínimo"
         elif symbol in held:
             reason = "ativo já em carteira"
+        elif exposure_multiplier <= 0:  # leitura que zera a exposição, ou on_failure: pause_entries
+            reason = "exposição zero"
         elif slots <= 0:
             reason = "sem vagas no perfil"
         if reason is not None:
@@ -127,7 +130,7 @@ def plan_entries(
         stop_pct = profile.protection.stop_distance_pct(
             Decimal(str(candidate.signal.stop_pct)) * PCT
         )
-        notional = min(
+        notional = exposure_multiplier * min(  # depois dos limites: a cautela sempre reduz
             risk_budget / (stop_pct / PCT),
             capital * allocation.max_position_pct,
             budget,
