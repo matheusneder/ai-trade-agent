@@ -10,9 +10,10 @@ ignoradas e registradas como evento.
 import asyncio
 import contextlib
 import secrets
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 
@@ -29,6 +30,21 @@ CONFIRMATION_TTL = timedelta(minutes=2)
 CONTROL = "/pause [escopo] · /resume [escopo] · /halt [escopo] · /flatten [escopo]"
 
 type Query = Callable[[list[str]], Awaitable[str]]
+
+
+async def until_stopped[T](call: Coroutine[Any, Any, T], stop: asyncio.Event) -> T | None:
+    """O resultado de ``call``, ou ``None`` se ``stop`` vier antes (``call`` é cancelada)."""
+    task = asyncio.ensure_future(call)
+    waiter = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait((task, waiter), return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiter.cancel()
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    return None if task.cancelled() else task.result()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,11 +155,19 @@ class CommandCenter:
         await self._store.record_event("telegram.command", Severity.INFO, {"text": update.text})
         await self._bot.send_message(self._chat_id, reply)
 
-    async def poll_once(self, *, timeout_s: int = 30) -> int:
-        """Busca e processa um lote de mensagens; o offset fica persistido."""
+    async def poll_once(self, *, timeout_s: int = 30, stop: asyncio.Event | None = None) -> int:
+        """Busca e processa um lote de mensagens; o offset fica persistido.
+
+        Com ``stop``, a espera longa (até ``timeout_s``) termina assim que o agente para: o
+        Docker encerra o processo à força depois de alguns segundos, e o agente sairia sem
+        terminar de forma ordenada. As mensagens já recebidas são processadas até o fim.
+        """
         saved = await self._store.get_checkpoint(OFFSET_KEY)
         offset = int(saved["offset"]) if saved else None
-        updates = await self._bot.get_updates(offset, timeout_s=timeout_s)
+        fetch = self._bot.get_updates(offset, timeout_s=timeout_s)
+        updates = await (until_stopped(fetch, stop) if stop is not None else fetch)
+        if updates is None:
+            return 0
         log.debug("telegram.poll", offset=offset, updates=len(updates))
         for update in updates:
             await self._store.set_checkpoint(OFFSET_KEY, {"offset": update.update_id + 1})
@@ -155,7 +179,7 @@ class CommandCenter:
     ) -> None:
         while not stop.is_set():
             try:
-                await self.poll_once(timeout_s=timeout_s)
+                await self.poll_once(timeout_s=timeout_s, stop=stop)
             except TelegramError as exc:
                 log.warning("telegram.poll_failed", error=str(exc))
                 with contextlib.suppress(TimeoutError):
