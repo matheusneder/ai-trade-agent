@@ -15,7 +15,7 @@ Autonomous cryptocurrency trading agent for **Binance Spot**. It decides with te
 | # | Document | Contents |
 |---|----------|----------|
 | 01 | [Requirements and the Binance API](01-requirements-and-binance.md) | Requirements, native *order lists* and trailing, limits, environments, account security, behaviors confirmed on Testnet and Demo, data sources and pitfalls |
-| 03 | [Architecture](03-architecture.md) | Principles, containers, stack, code, tasks, decision cycle, LLM analyst, profiles, OPOCO and the position lifecycle, risk, persistence and recovery, monitoring, security, deployment and the decision log (D-001 to D-031) |
+| 03 | [Architecture](03-architecture.md) | Principles, containers, stack, code, tasks, decision cycle, LLM analyst, profiles, OPOCO and the position lifecycle, risk, persistence and recovery, monitoring, security, deployment and the decision log (D-001 to D-033) |
 | 04 | [Current status and *go-live*](04-status-and-go-live.md) | What has been validated, production checklist, testing strategy, costs, risks and open decisions |
 | 05 | [References](05-references.md) | Documentation of Binance, the tools and the data sources |
 | — | [Runbook](runbook.md) | Operation: start and check, logs, traces, SigNoz, incidents, Telegram commands and maintenance |

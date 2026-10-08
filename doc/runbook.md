@@ -166,7 +166,7 @@ The errors carry the `Retry-After` reported by Binance, and an infrastructure fa
 
 ### 2.5 LLM analyst unavailable or out of budget
 
-Each profile follows its `llm.on_failure` (`ta_only`, `ta_only_reduced` or `pause_entries`). See the *Decisões e pesquisa* dashboard ("Ciclos do analista por status", "Custo diário do LLM"). The daily cap lives in `config/research.yaml` (`budget.daily_usd`).
+Each profile follows its `llm.on_failure` (`ta_only`, `ta_only_reduced` or `pause_entries`). See the *Decisões e pesquisa* dashboard ("Ciclos do analista por status", "Custo diário do LLM"). The daily cap lives in `config/research.yaml` (`budget.daily_usd`). It is checked once per research cycle (D-033): a cycle that started runs to the end, so the day may close slightly above the cap (by at most one cycle, about US$ 0.50). The profiles of the same timeframe share one research per close (D-032), so its `trigger` names both (`ciclo:swing_trend+momentum_alpha`).
 
 ### 2.6 Out-of-sync clock (`-1021 Timestamp outside recvWindow`)
 

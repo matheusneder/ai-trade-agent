@@ -123,9 +123,14 @@ class ResearchService:
         try:
             if self._client is None:
                 raise LlmError("chave da API Claude ausente (ANTHROPIC_API_KEY)")
-            analyst = MarketAnalyst(
-                ClaudeClient(self._client, self._config, ledger, self._clock), self._config
+            # The cap applies per cycle (D-033): checked once, before the first call. A
+            # check before each call let the web step (most of the cost) run and then refused
+            # the reading, paying for nothing (2026-10-06, 20:03).
+            llm = ClaudeClient(
+                self._client, self._config, ledger, self._clock, budget_per_call=False
             )
+            await llm.check_budget()
+            analyst = MarketAnalyst(llm, self._config)
             news = await self._triaged_news(analyst, since, known, notes)
             analysis = await analyst.analyze(
                 as_of=now,

@@ -12,9 +12,10 @@ and no order is sent.
 """
 
 import asyncio
+import contextlib
 import time
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
@@ -24,7 +25,7 @@ from trade_agent import metrics, tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService
-from trade_agent.market.candles import fetch_candles
+from trade_agent.market.candles import INTERVAL_MS, fetch_candles
 from trade_agent.market.universe import (
     Tier,
     Universe,
@@ -33,7 +34,7 @@ from trade_agent.market.universe import (
     build_universe,
 )
 from trade_agent.persistence.store import Severity, Store
-from trade_agent.research.models import CandidateContext
+from trade_agent.research.models import CandidateContext, MarketView
 from trade_agent.research.reading import MarketReading, market_reading
 from trade_agent.research.service import ResearchService
 from trade_agent.risk.guard import PreTradeContext, RiskGuard, pre_trade_violations
@@ -88,6 +89,97 @@ class UniverseCache:
             return self._cached[1]
 
 
+SHARED_RESEARCH_WAIT = timedelta(minutes=2)
+"""How long the first profile of a candle close waits for the others' candidates."""
+NO_CANDIDATES = "sem candidatos (leitura anterior)"
+
+
+def merge_candidates(groups: Iterable[Sequence[CandidateContext]]) -> list[CandidateContext]:
+    """Union of the profiles' candidates, one per symbol (best TA score; held if any)."""
+    merged: dict[str, CandidateContext] = {}
+    for group in groups:
+        for candidate in group:
+            seen = merged.get(candidate.symbol)
+            if seen is None:
+                merged[candidate.symbol] = candidate
+                continue
+            best = candidate if candidate.ta_score > seen.ta_score else seen
+            merged[candidate.symbol] = replace(
+                best,
+                setup=best.setup or seen.setup or candidate.setup,
+                held=seen.held or candidate.held,
+            )
+    return list(merged.values())
+
+
+@dataclass
+class _Round:
+    expected: frozenset[str]
+    candidates: dict[str, list[CandidateContext]] = field(default_factory=dict)
+    complete: asyncio.Event = field(default_factory=asyncio.Event)
+    closed: bool = False
+    """The shared research has started: whoever arrives now researches on its own."""
+    task: asyncio.Task[tuple[MarketView | None, str]] | None = None
+
+
+class SharedResearch:
+    """One research cycle per candle close for the profiles that close together (D-032).
+
+    Each profile of the same timeframe brings its candidates; the first one waits up to
+    ``wait`` for the others, then a single cycle researches the union and every profile
+    gets the same ``MarketView``. With one cycle per profile, a close cost almost twice as
+    much for nearly the same reading, and on 2026-10-06 both cycles hit the daily cap at
+    once. A profile that arrives after the research started researches on its own (when it
+    has candidates), so its candidates are never left without the analyst.
+    """
+
+    def __init__(self, research: ResearchService, *, wait: timedelta) -> None:
+        self._research = research
+        self._wait_s = wait.total_seconds()
+        self._rounds: dict[tuple[str, int], _Round] = {}
+
+    async def read(
+        self,
+        key: tuple[str, int],
+        expected: frozenset[str],
+        name: str,
+        candidates: Sequence[CandidateContext],
+    ) -> tuple[MarketView | None, str]:
+        """Reading for ``name``: ``key`` is (timeframe, candle period), ``expected`` its peers."""
+        round_ = self._rounds.get(key)
+        if round_ is None or name in round_.candidates:  # first of the close, or a new cycle
+            self._rounds = {k: r for k, r in self._rounds.items() if k[1] >= key[1]}
+            round_ = self._rounds[key] = _Round(expected | {name})
+        elif round_.closed and round_.task is not None:  # arrived after the research started
+            if candidates:
+                log.debug("decision.research_late", profile=name, candidates=len(candidates))
+                return await self._cycle({name: list(candidates)})
+            return await asyncio.shield(round_.task)
+        round_.candidates[name] = list(candidates)
+        if round_.candidates.keys() >= round_.expected:
+            round_.complete.set()
+        if round_.task is None:
+            round_.task = asyncio.ensure_future(self._run(round_))
+        return await asyncio.shield(round_.task)
+
+    async def _run(self, round_: _Round) -> tuple[MarketView | None, str]:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(round_.complete.wait(), self._wait_s)
+        round_.closed = True
+        return await self._cycle(round_.candidates)
+
+    async def _cycle(
+        self, candidates: dict[str, list[CandidateContext]]
+    ) -> tuple[MarketView | None, str]:
+        merged = merge_candidates(candidates.values())
+        if not merged:
+            return await self._research.latest_view(), NO_CANDIDATES
+        trigger = "ciclo:" + "+".join(sorted(n for n, c in candidates.items() if c))
+        result = await self._research.run_cycle(trigger=trigger, candidates=merged)
+        status = "ok" if result.ok else f"falhou: {result.error}"
+        return result.view or await self._research.latest_view(), status
+
+
 @dataclass(frozen=True, slots=True)
 class CycleReport:
     profile: str
@@ -128,6 +220,7 @@ class DecisionEngine:
         dry_run: bool = True,
         notify: Callable[[Severity, str], Awaitable[None]] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        research_wait: timedelta = SHARED_RESEARCH_WAIT,
     ) -> None:
         self._api = api
         self._positions = positions
@@ -143,6 +236,7 @@ class DecisionEngine:
         self._names = {p.code: name for name, p in strategy.profiles.items()}
         self._features = FeatureParams()
         self._entry_lock = asyncio.Lock()
+        self._shared = SharedResearch(research, wait=research_wait) if research else None
 
     # ------------------------------------------------------------------ signals
     async def _signals(
@@ -191,7 +285,7 @@ class DecisionEngine:
         own: list[Position],
     ) -> tuple[MarketReading, str]:
         now = self._clock()
-        if self._research is None:
+        if self._shared is None:
             return market_reading(
                 None, profile.llm, now=now, max_age=self._view_max_age
             ), "sem analista"
@@ -214,14 +308,15 @@ class DecisionEngine:
             for s in dict.fromkeys([*setups, *held])
             if s in by_symbol
         ]
-        status = "sem candidatos (leitura anterior)"
-        view = None
-        if contexts:
-            result = await self._research.run_cycle(trigger=f"ciclo:{name}", candidates=contexts)
-            view = result.view
-            status = "ok" if result.ok else f"falhou: {result.error}"
-        if view is None:
-            view = await self._research.latest_view()
+        # the profiles of the same timeframe close together and share one research (D-032)
+        interval = INTERVAL_MS[profile.timeframe]
+        period = int(now.timestamp() * 1000) // interval * interval
+        peers = frozenset(
+            n
+            for n, p in self._strategy.enabled_profiles().items()
+            if p.timeframe == profile.timeframe
+        )
+        view, status = await self._shared.read((profile.timeframe, period), peers, name, contexts)
         return market_reading(view, profile.llm, now=now, max_age=self._view_max_age), status
 
     # ------------------------------------------------------------------ cycle

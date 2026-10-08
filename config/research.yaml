@@ -17,7 +17,7 @@ pricing:                     # US$ per million tokens (platform.claude.com/docs/
   web_search_per_1000: 10.00
 
 budget:
-  daily_usd: 5               # llm_daily_budget_usd circuit breaker (UTC day)
+  daily_usd: 5               # llm_daily_budget_usd circuit breaker (UTC day), checked once per cycle
 
 web:                         # research step with web_search/web_fetch (Anthropic's server)
   enabled: true
