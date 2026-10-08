@@ -74,6 +74,18 @@ def test_signoz_waits_for_its_metastore(merged: dict[str, Any]) -> None:
     assert signoz["depends_on"][metastore]["condition"] == "service_healthy"
 
 
+def test_clickhouse_keeps_its_hostname_across_recreations(merged: dict[str, Any]) -> None:
+    """ClickHouse registers itself in the keeper under its hostname; the container ID, Docker's
+    default, changes on every recreation and leaves stale entries that each startup resolves."""
+    name = "signoz-telemetrystore-clickhouse-0-0"
+    config = yaml.safe_load(
+        (POURS / "telemetrystore" / "clickhouse" / "config-0-0.yaml").read_text(encoding="utf-8")
+    )
+    shards = config["remote_servers"]["cluster"]["shard"]
+    assert [replica["host"] for shard in shards for replica in shard["replica"]] == [name]
+    assert merged["services"][name]["hostname"] == name
+
+
 def test_agent_and_collectors_reach_the_signoz_ingester(merged: dict[str, Any]) -> None:
     ingester = merged["services"]["ingester"]
     aliases = ingester["networks"]["signoz-network"]["aliases"]

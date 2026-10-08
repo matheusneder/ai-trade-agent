@@ -30,6 +30,11 @@ services:
     logging: *logging
 
   signoz-telemetrystore-clickhouse-0-0:
+    # ClickHouse registers itself in the keeper (/clickhouse/task_queue/replicas) under its
+    # hostname. Docker's default is the container ID, a new one on every recreation; the old
+    # entries stay, and each startup tries to resolve them ("Cannot resolve host", ~3 s apiece).
+    # A fixed hostname, the same name the cluster config uses, keeps a single entry.
+    hostname: signoz-telemetrystore-clickhouse-0-0
     logging: *logging
 
   signoz-telemetrystore-clickhouse-user-scripts:
