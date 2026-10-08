@@ -1,4 +1,4 @@
-"""Repositório do analista: notícias, triagem, relatórios de pesquisa e uso do LLM."""
+"""Analyst repository: news, triage, research reports and LLM usage."""
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -51,9 +51,9 @@ class ResearchStore:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    # ================================================================== notícias
+    # ================================================================== news
     async def add_news(self, items: Iterable[NewsItem]) -> int:
-        """Grava as notícias novas (deduplicadas por ``dedupe_key``); retorna quantas."""
+        """Records the new news items (deduplicated by ``dedupe_key``); returns how many."""
         rows = [
             {
                 "dedupe_key": i.dedupe_key,
@@ -101,7 +101,7 @@ class ResearchStore:
                     )
                 )
 
-    # ================================================================== relatórios e uso
+    # ================================================================== reports and usage
     async def add_report(self, entry: ReportEntry) -> int:
         record = ResearchReportRecord(
             as_of=entry.as_of,

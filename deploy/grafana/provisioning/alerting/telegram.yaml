@@ -1,6 +1,6 @@
-# Contato e política de alertas: tudo vai para o mesmo chat do agente no Telegram.
-# O chatid é substituído na partida do contêiner (ver deploy/stack.yml): o Grafana
-# converte em número qualquer variável de ambiente numérica, e o Telegram exige string.
+# Alert contact point and policy: everything goes to the agent's Telegram chat.
+# The chatid is replaced at container startup (see deploy/stack.yml): Grafana turns any
+# numeric environment variable into a number, and Telegram requires a string.
 apiVersion: 1
 
 contactPoints:

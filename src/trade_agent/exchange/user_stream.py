@@ -1,10 +1,10 @@
-"""User Data Stream pela WebSocket API (``userDataStream.subscribe.signature``).
+"""User Data Stream over the WebSocket API (``userDataStream.subscribe.signature``).
 
-* Reconecta automaticamente com *backoff* exponencial; reconecta de imediato ao receber
-  ``serverShutdown`` (aviso de desligamento do servidor) ou ``eventStreamTerminated``.
-* A cada (re)assinatura emite :class:`StreamConnected`. Eventos podem ter sido perdidos
-  enquanto a conexão esteve fora, então o consumidor deve **reconciliar** com a REST API.
-* Os *pings* do servidor são respondidos pela biblioteca ``websockets``.
+* Reconnects automatically with exponential backoff; reconnects immediately on
+  ``serverShutdown`` (server shutdown notice) or ``eventStreamTerminated``.
+* Every (re)subscription emits :class:`StreamConnected`. Events may have been lost while
+  the connection was down, so the consumer must **reconcile** with the REST API.
+* Server *pings* are answered by the ``websockets`` library.
 """
 
 import asyncio
@@ -29,7 +29,7 @@ log = structlog.get_logger(__name__)
 SUBSCRIBE_METHOD = "userDataStream.subscribe.signature"
 
 
-# ====================================================================== eventos
+# ====================================================================== events
 @dataclass(frozen=True, slots=True)
 class StreamConnected:
     subscription_id: int
@@ -77,7 +77,7 @@ class ListStatusEvent:
     list_client_order_id: str
     transaction_time: int
     orders: tuple[tuple[int, str], ...]
-    """Pares ``(orderId, clientOrderId)``."""
+    """``(orderId, clientOrderId)`` pairs."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +114,7 @@ _RECONNECT_NOW = frozenset({"serverShutdown", "eventStreamTerminated"})
 
 
 def parse_user_event(event: Mapping[str, Any]) -> UserEvent:
-    """Converte o objeto ``event`` de uma mensagem do stream no evento tipado."""
+    """Converts the ``event`` object of a stream message into the typed event."""
     kind = str(event.get("e", ""))
     if kind == "executionReport":
         return ExecutionReport(
@@ -176,9 +176,9 @@ def parse_user_event(event: Mapping[str, Any]) -> UserEvent:
     return UnknownEvent(event_type=kind, raw=event)
 
 
-# ====================================================================== conexão
+# ====================================================================== connection
 class SubscriptionError(Exception):
-    """A Binance recusou a assinatura do stream (ex.: assinatura inválida)."""
+    """Binance refused the stream subscription (e.g. invalid signature)."""
 
 
 class WebSocketLike(Protocol):
@@ -195,7 +195,7 @@ def _default_connector(url: str) -> AbstractAsyncContextManager[WebSocketLike]:
 
 
 class UserDataStream:
-    """Assinatura resiliente do User Data Stream."""
+    """Resilient User Data Stream subscription."""
 
     def __init__(
         self,
@@ -246,7 +246,7 @@ class UserDataStream:
                 return int(message["result"]["subscriptionId"])
 
     async def events(self) -> AsyncIterator[UserEvent]:
-        """Itera eventos indefinidamente, reconectando quando necessário."""
+        """Iterates over events forever, reconnecting when needed."""
         failures = 0
         connected_before = False
         while True:
@@ -265,7 +265,7 @@ class UserDataStream:
                         message = json.loads(raw)
                         event = message.get("event")
                         if not isinstance(event, dict):
-                            continue  # respostas de requisições
+                            continue  # responses to requests
                         if event.get("e") in _RECONNECT_NOW:
                             log.info("user_stream.reconnect_requested", reason=event.get("e"))
                             break

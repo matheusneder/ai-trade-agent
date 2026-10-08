@@ -1,4 +1,4 @@
-"""Métricas do agente (OpenTelemetry): medidores da última leitura e contadores de eventos."""
+"""Agent metrics (OpenTelemetry): gauges of the latest reading and event counters."""
 
 from collections.abc import Sequence
 from decimal import Decimal
@@ -40,7 +40,7 @@ def test_without_configuration_nothing_is_recorded() -> None:
 
 def test_gauges_follow_the_latest_reading(measured: Measured) -> None:
     assert metrics.enabled()
-    assert "trade_agent.equity" not in measured.points()  # sem leitura: nada a medir
+    assert "trade_agent.equity" not in measured.points()  # no reading: nothing to measure
     metrics.observe(READING)
     assert measured.value("trade_agent.equity") == 950
     assert measured.value("trade_agent.equity.day_start") == 1000
@@ -69,7 +69,7 @@ def test_gauges_skip_unknown_values_and_zero_peak(measured: Measured) -> None:
         )
     )  # fmt: skip
     points = measured.points()
-    assert "trade_agent.binance.weight_used_1m" not in points  # peso ainda desconhecido
+    assert "trade_agent.binance.weight_used_1m" not in points  # weight still unknown
     assert measured.value("trade_agent.drawdown") == 0
     assert "trade_agent.risk.state" not in points
 
@@ -99,7 +99,7 @@ def test_counters(measured: Measured) -> None:
 
 
 class FakeExporter(MetricExporter):
-    instances: list["FakeExporter"] = []  # noqa: RUF012 - registro do teste
+    instances: list["FakeExporter"] = []  # noqa: RUF012 - the test's record
 
     def __init__(self, *, endpoint: str, timeout: float) -> None:
         super().__init__()
@@ -126,7 +126,7 @@ def test_configure_metrics_exports_to_the_endpoint(monkeypatch: pytest.MonkeyPat
     agent_metrics = metrics.configure_metrics("http://signoz-ingester:4318/", environment="demo")
     assert agent_metrics is not None and metrics.enabled()
     metrics.observe(READING)
-    agent_metrics.shutdown()  # última exportação
+    agent_metrics.shutdown()  # last export
     metrics.install(None)
     (exporter,) = FakeExporter.instances
     assert exporter.endpoint == "http://signoz-ingester:4318/v1/metrics"

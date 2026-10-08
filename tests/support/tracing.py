@@ -1,4 +1,4 @@
-"""Rastreamento em memória: os mesmos provedores por componente, sem exportar nada."""
+"""In-memory tracing: the same per-component providers, exporting nothing."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -35,7 +35,7 @@ class Recorded:
         return next((s for s in self.spans if s.context.span_id == span.parent.span_id), None)
 
     def edges(self) -> set[tuple[str, str]]:
-        """Pares (componente pai → filho) entre componentes diferentes, como o Jaeger calcula."""
+        """(parent → child component) pairs across different components, as Jaeger computes them."""
         pairs: set[tuple[str, str]] = set()
         for span in self.spans:
             parent = self.parent(span)
@@ -44,7 +44,7 @@ class Recorded:
         return pairs
 
     def attribute_text(self) -> str:
-        """Todos os valores de atributos e eventos, para procurar segredos."""
+        """Every attribute and event value, to look for secrets."""
         parts: list[str] = []
         for span in self.spans:
             parts.append(span.name)

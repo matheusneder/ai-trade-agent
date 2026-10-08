@@ -31,7 +31,7 @@ def test_compute_features_adds_all_columns_without_mutating_input() -> None:
     for column in FEATURES:
         assert column in features.columns
     pd.testing.assert_frame_equal(frame, before)
-    assert features["rs_roc"].isna().all()  # sem benchmark
+    assert features["rs_roc"].isna().all()  # no benchmark
     last = features.iloc[-1]
     assert last["ema_fast"] > last["ema_slow"]
     assert 0 < last["atr_pct"] < 0.1
@@ -102,7 +102,7 @@ def test_regime_filter_blocks_setups_when_benchmark_is_falling() -> None:
 
 def test_breakout_requires_uptrend() -> None:
     closes = [100 * math.exp(-0.003 * i) for i in range(300)]
-    closes.append(closes[-1] * 1.5)  # rompimento forte, mas contra a tendência
+    closes.append(closes[-1] * 1.5)  # strong breakout, but against the trend
     frame = ohlcv(closes, volumes=[100.0] * 300 + [400.0])
     last = compute_features(frame).iloc[-1]
     assert last["close"] > last["breakout_high"]
@@ -128,7 +128,7 @@ def test_vectorized_frames_align_with_evaluate() -> None:
     assert setup_frame(features).iloc[-1] == TREND_PULLBACK
     assert entry_mask(features, min_score=0.2).iloc[-1]
     stops = stop_pct_frame(features, SignalParams(atr_stop_mult=100.0))
-    assert stops.dropna().eq(0.08).all()  # limitado por max_stop_pct
+    assert stops.dropna().eq(0.08).all()  # capped by max_stop_pct
 
 
 def test_score_penalizes_overbought_and_rewards_relative_strength() -> None:

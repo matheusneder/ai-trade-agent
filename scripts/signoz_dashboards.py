@@ -1,16 +1,16 @@
-"""Gera os dashboards do SigNoz em ``deploy/signoz/dashboards`` e os aplica pela API.
+"""Generates the SigNoz dashboards in ``deploy/signoz/dashboards`` and applies them through the API.
 
-Dashboards como código, no esquema v2 (Perses) do SigNoz 0.144. Edite aqui e rode:
+Dashboards as code, in the v2 (Perses) schema of SigNoz 0.144. Edit here and run:
 
-    uv run python -m scripts.signoz_dashboards            # regenera os JSON versionados
-    uv run python -m scripts.signoz_dashboards --apply    # cria ou atualiza cada um no SigNoz
-    uv run python -m scripts.signoz_dashboards --check    # roda cada consulta (últimas 24 h)
+    uv run python -m scripts.signoz_dashboards            # regenerates the versioned JSON
+    uv run python -m scripts.signoz_dashboards --apply    # creates or updates each one in SigNoz
+    uv run python -m scripts.signoz_dashboards --check    # runs every query (last 24 h)
 
-``--apply`` e ``--check`` usam a chave de uma conta de serviço com papel Editor
-(``TA_SIGNOZ_API_KEY`` no ``.env``) e ``TA_SIGNOZ_URL`` (padrão ``http://127.0.0.1:8080``).
-Os dashboards são identificados pelo ``name`` (``trade-agent-...``): aplicar de novo atualiza.
-Um teste garante que os JSON versionados estão em dia com este gerador, que a geometria e os
-tipos de consulta seguem as regras do SigNoz e que as métricas usadas existem no agente.
+``--apply`` and ``--check`` use the key of a service account with the Editor role
+(``TA_SIGNOZ_API_KEY`` in the ``.env``) and ``TA_SIGNOZ_URL`` (default ``http://127.0.0.1:8080``).
+The dashboards are identified by ``name`` (``trade-agent-...``): applying again updates them.
+A test makes sure the versioned JSON files are in sync with this generator, that the layout
+and the query types follow SigNoz's rules and that the metrics used exist in the agent.
 """
 
 import argparse
@@ -40,12 +40,12 @@ ERRORS = "severity_text IN ('error', 'critical', 'fatal')"
 CONTAINERS = "service.namespace = 'trade-agent'"
 
 type Json = dict[str, Any]
-type Cell = tuple[str, Json, int, int]  # chave do painel, painel, largura, altura
+type Cell = tuple[str, Json, int, int]  # panel key, panel, width, height
 
 
-# ================================================================== consultas
+# ================================================================== queries
 def key(name: str, context: str | None = None) -> Json:
-    """Campo de agrupamento ou ordenação (``context``: resource, attribute, span, log...)."""
+    """Grouping or ordering field (``context``: resource, attribute, span, log...)."""
     return {"name": name, **({"fieldContext": context} if context else {})}
 
 
@@ -75,14 +75,14 @@ def metric(
     reduce: str | None = None,
     query: str = "A",
 ) -> Json:
-    """Métrica: ``latest``/``avg`` para medidores; ``increase``/``rate`` para contadores."""
+    """Metric: ``latest``/``avg`` for gauges; ``increase``/``rate`` for counters."""
     aggregation: Json = {
         "metricName": name,
         "temporality": "",
         "timeAggregation": time_agg,
         "spaceAggregation": space,
     }
-    if reduce is not None:  # painéis de valor único reduzem a série a um número
+    if reduce is not None:  # single-value panels reduce the series to a number
         aggregation["reduceTo"] = reduce
     return {**_builder("metrics", query, where, by, legend), "aggregations": [aggregation]}
 
@@ -97,19 +97,19 @@ def events(
     query: str = "A",
     limit: int | None = None,
 ) -> Json:
-    """Logs ou traces agregados (``count()``, ``p95(duration_nano)``...)."""
+    """Aggregated logs or traces (``count()``, ``p95(duration_nano)``...)."""
     spec = {
         **_builder(signal, query, where, by, legend),
         "aggregations": [{"expression": expression}],
     }
-    if limit is not None:  # séries mais altas primeiro
+    if limit is not None:  # highest series first
         spec["order"] = [{"key": {"name": expression}, "direction": "desc"}]
         spec["limit"] = limit
     return spec
 
 
 def rows(signal: str, *, where: str, limit: int = 50) -> Json:
-    """Registros brutos (logs ou spans) mais recentes, para os painéis de lista."""
+    """Most recent raw records (logs or spans), for the list panels."""
     return {
         **_builder(signal, "A", where, (), ""),
         "order": [{"key": key("timestamp"), "direction": "desc"}],
@@ -117,7 +117,7 @@ def rows(signal: str, *, where: str, limit: int = 50) -> Json:
     }
 
 
-# ================================================================== painéis
+# ================================================================== panels
 def _panel(
     title: str,
     kind: str,
@@ -160,7 +160,7 @@ def series(
         "formatting": _formatting(unit, decimals),
         "legend": {"position": "bottom"},
     }
-    if steps:  # estados e contagens mudam em degraus, não em curvas
+    if steps:  # states and counts change in steps, not in curves
         spec["chartAppearance"] = {"lineInterpolation": "step_after"}
     return _panel(
         title,
@@ -195,7 +195,7 @@ def number(
     alert: float | None = None,
     description: str = "",
 ) -> Json:
-    """Valor único do período; ``warn``/``alert``: a partir de quanto fica amarelo/vermelho."""
+    """Single value of the period; ``warn``/``alert``: from what value it turns yellow/red."""
     thresholds = [
         {"value": value, "operator": "above_or_equal", "color": color, "format": "text"}
         for value, color in ((warn, YELLOW), (alert, RED))
@@ -227,7 +227,7 @@ def dashboard(
     description: str,
     sections: Sequence[tuple[str, Sequence[Sequence[Cell]]]],
 ) -> Json:
-    """Uma grade por seção (com título, recolhível); cada linha é preenchida da esquerda."""
+    """One grid per section (with a title, collapsible); each row is filled from the left."""
     panels: Json = {}
     layouts: list[Json] = []
     for section, lines in sections:
@@ -908,7 +908,7 @@ def _containers() -> Json:
     service = key("compose.service")
 
     def per_service(name: str, *, time_agg: str = "latest") -> Json:
-        """Uma série por serviço do compose; contadores (``rate``) somam as interfaces."""
+        """One series per compose service; counters (``rate``) add up the interfaces."""
         space = "sum" if time_agg == "rate" else "avg"
         legend = "{{compose.service}}"
         return metric(
@@ -1073,7 +1073,7 @@ def render(board: Json) -> str:
     return json.dumps(board, ensure_ascii=False, indent=2) + "\n"
 
 
-# ================================================================== API do SigNoz
+# ================================================================== SigNoz API
 class SigNozSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TA_SIGNOZ_", env_file=".env", extra="ignore")
     api_key: SecretStr
@@ -1095,7 +1095,7 @@ def _data(response: httpx.Response) -> Any:
 
 
 def existing(http: httpx.Client) -> dict[str, str]:
-    """``name`` → ``id`` dos dashboards já criados."""
+    """``name`` → ``id`` of the dashboards already created."""
     data = _data(http.get("/api/v2/dashboards", params={"limit": 200}))
     listed = data.get("dashboards", []) if isinstance(data, dict) else data
     return {board["name"]: board["id"] for board in listed}
@@ -1105,7 +1105,7 @@ def apply(http: httpx.Client, boards: dict[str, Json]) -> None:
     ids = existing(http)
     for board in boards.values():
         name = board["name"]
-        if name in ids:  # a atualização não aceita generateName
+        if name in ids:  # the update does not accept generateName
             body = {k: v for k, v in board.items() if k != "generateName"}
             _data(http.put(f"/api/v2/dashboards/{ids[name]}", json=body))
             print(f"atualizado: {name}")
@@ -1125,22 +1125,22 @@ def _queries(panel: Json) -> list[tuple[str, Json]]:
 
 
 def _summary(data: Any) -> str:
-    """Quantas séries, linhas ou valores a consulta devolveu."""
+    """How many series, rows or values the query returned."""
     results = (data.get("data") or {}).get("results") or []
     counts = []
     for result in results:
-        if "aggregations" in result:  # série temporal
+        if "aggregations" in result:  # time series
             counts.append(sum(len(a.get("series") or []) for a in result["aggregations"] or []))
-        elif "rows" in result:  # lista
+        elif "rows" in result:  # list
             counts.append(len(result["rows"] or []))
-        elif "data" in result:  # escalar
+        elif "data" in result:  # scalar
             counts.append(len(result["data"] or []))
     return "+".join(map(str, counts)) or "0"
 
 
 def check(http: httpx.Client, boards: dict[str, Json], *, hours: float = 24) -> int:
-    """Roda cada consulta dos painéis na janela recente; devolve quantas falharam ou vieram
-    vazias (vazio pode ser só falta de eventos: sem mudança de estado, sem falha)."""
+    """Runs every panel query on the recent window; returns how many failed or came back
+    empty (empty may just be a lack of events: no state change, no failure)."""
     end = int(time.time() * 1000)
     start = end - int(hours * 3_600_000)
     empty = 0
@@ -1177,7 +1177,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         (OUTPUT / name).write_text(render(board), encoding="utf-8", newline="\n")
         print(OUTPUT / name)
     if args.apply or args.check:
-        with client(SigNozSettings()) as http:  # a chave vem do .env
+        with client(SigNozSettings()) as http:  # the key comes from the .env
             if args.apply:
                 apply(http, boards)
             if args.check:

@@ -1,15 +1,15 @@
-"""Backtest *walk-forward* dos sinais do agente no Freqtrade (via Docker).
+"""*Walk-forward* backtest of the agent's signals in Freqtrade (through Docker).
 
-Gera a configuração e os parâmetros da estratégia a partir de ``config/profiles.yaml``
-(fonte única da verdade), baixa os dados da Binance, executa um backtest por janela e
-resume os resultados contra o *buy & hold* da cesta de pares e do BTC.
+Generates the strategy's configuration and parameters from ``config/profiles.yaml`` (the
+single source of truth), downloads the Binance data, runs one backtest per window and
+summarizes the results against the *buy & hold* of the pair basket and of BTC.
 
-Com ``--optimize``, cada janela de validação é precedida de um *hyperopt* nos
-``--train-months`` anteriores (fora da amostra): os parâmetros escolhidos no treino são
-aplicados, sem ajuste, na janela seguinte. Os parâmetros que definem o risco do perfil
-(stop máximo, risco por trade, tamanho máximo) nunca são otimizados.
+With ``--optimize``, each validation window is preceded by a *hyperopt* on the previous
+``--train-months`` (out of sample): the parameters chosen in training are applied,
+unchanged, to the next window. The parameters that define the profile's risk (maximum stop,
+risk per trade, maximum size) are never optimized.
 
-Uso::
+Usage::
 
     uv run python -m lab.walk_forward --profile swing_trend --optimize --download
     uv run python -m lab.walk_forward --profile momentum_alpha --start 2024-01-01 \\
@@ -40,15 +40,15 @@ USER_DATA = LAB / "user_data"
 COMPOSE = LAB / "docker-compose.yml"
 OUTPUT = ROOT / "var" / "lab"
 STRATEGY = "TradeAgentStrategy"
-# O Freqtrade lê os parâmetros do JSON com o nome do *arquivo* da estratégia.
+# Freqtrade reads the parameters from the JSON named after the strategy's *file*.
 PARAMS_FILE = "trade_agent_strategy.json"
 BENCHMARK = "BTC/USDT"
 DATA = USER_DATA / "data" / "binance"
 OPTIMIZED_SPACES = ("buy", "sell")
-# Definem o risco do perfil: nunca são otimizados (optimize=False na estratégia).
+# They define the profile's risk: never optimized (optimize=False in the strategy).
 RISK_PARAMS = frozenset({"risk_per_trade", "max_position_pct", "stop_max_pct"})
 
-# Pares com histórico contínuo desde 2023 por tier (aproximação estática do universo).
+# Pairs with continuous history since 2023 per tier (a static approximation of the universe).
 PAIRS_BY_TIER: dict[Tier, tuple[str, ...]] = {
     Tier.CORE: ("BTC/USDT", "ETH/USDT"),
     Tier.LARGE: (
@@ -69,25 +69,25 @@ class WindowResult:
     winrate_pct: float
     max_drawdown_pct: float
     market_change_pct: float
-    """*Buy & hold* da cesta de pares (média simples, calculada pelo Freqtrade)."""
+    """*Buy & hold* of the pair basket (simple average, computed by Freqtrade)."""
     btc_pct: float | None = None
-    """*Buy & hold* do BTC na janela (``None`` sem os dados locais)."""
+    """BTC *buy & hold* in the window (``None`` without the local data)."""
     params: dict[str, float] = field(default_factory=dict)
-    """Parâmetros escolhidos no treino (apenas com ``--optimize``)."""
+    """Parameters chosen in training (only with ``--optimize``)."""
 
     @property
     def excess_pct(self) -> float:
         return self.profit_pct - self.market_change_pct
 
 
-# ============================================================================ funções puras
+# ============================================================================ pure functions
 def add_months(day: date, months: int) -> date:
     month_index = day.month - 1 + months
     return date(day.year + month_index // 12, month_index % 12 + 1, 1)
 
 
 def windows(start: date, end: date, months: int) -> list[tuple[date, date]]:
-    """Janelas consecutivas de ``months`` meses (a última pode ser mais curta)."""
+    """Consecutive windows of ``months`` months (the last one may be shorter)."""
     if months < 1 or start >= end:
         raise ValueError("janela inválida")
     result: list[tuple[date, date]] = []
@@ -104,7 +104,7 @@ def timerange(start: date, end: date) -> str:
 
 
 def train_range(start: date, months: int) -> tuple[date, date]:
-    """Janela de treino imediatamente anterior à janela de validação."""
+    """Training window right before the validation window."""
     if months < 1:
         raise ValueError("treino inválido")
     return add_months(start.replace(day=1), -months), start
@@ -119,7 +119,7 @@ def profile_pairs(profile: ProfileConfig) -> list[str]:
 
 
 def lab_config(base: dict[str, Any], profile: ProfileConfig, capital: Decimal) -> dict[str, Any]:
-    """Configuração do Freqtrade para o perfil (timeframe, vagas, reserva, pares, carteira)."""
+    """Freqtrade configuration for the profile (timeframe, slots, reserve, pairs, wallet)."""
     config: dict[str, Any] = json.loads(json.dumps(base))
     config.pop("$comment", None)
     config["timeframe"] = profile.timeframe
@@ -131,13 +131,13 @@ def lab_config(base: dict[str, Any], profile: ProfileConfig, capital: Decimal) -
 
 
 def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
-    """Conteúdo de ``trade_agent_strategy.json`` (formato de parâmetros do Freqtrade)."""
+    """Content of ``trade_agent_strategy.json`` (Freqtrade's parameter format)."""
     signals = profile.signal_params()
     protection = profile.protection
     stop = protection.stop
-    if stop.mode is StopMode.FIXED:  # já refletidos em signal_params()
+    if stop.mode is StopMode.FIXED:  # already reflected in signal_params()
         stop_max, atr_mult = signals.max_stop_pct, signals.atr_stop_mult
-    else:  # aproximação: stop trailing modelado como stop fixo na distância do trailing
+    else:  # approximation: trailing stop modeled as a fixed stop at the trailing distance
         stop_max = (stop.trailing_delta_bps or 0) / 10_000
         atr_mult = 100.0
     return {
@@ -173,7 +173,7 @@ def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
 
 
 def chosen_params(exported: dict[str, Any]) -> dict[str, float]:
-    """Parâmetros escolhidos pelo *hyperopt*, sem os de risco do perfil."""
+    """Parameters chosen by *hyperopt*, without the profile's risk ones."""
     return {
         name: float(value)
         for space in OPTIMIZED_SPACES
@@ -183,8 +183,8 @@ def chosen_params(exported: dict[str, Any]) -> dict[str, float]:
 
 
 def merge_optimized(base: dict[str, Any], exported: dict[str, Any]) -> dict[str, Any]:
-    """Aplica os parâmetros escolhidos pelo *hyperopt* sobre os do perfil. Os de risco
-    (``RISK_PARAMS``) sempre vêm do perfil, mesmo que o arquivo exportado os traga."""
+    """Applies the parameters chosen by *hyperopt* on top of the profile's. The risk ones
+    (``RISK_PARAMS``) always come from the profile, even if the exported file has them."""
     merged: dict[str, Any] = json.loads(json.dumps(base))
     chosen = chosen_params(exported)
     for space in OPTIMIZED_SPACES:
@@ -195,8 +195,8 @@ def merge_optimized(base: dict[str, Any], exported: dict[str, Any]) -> dict[str,
 
 
 def buy_and_hold_pct(data_file: Path, start: date, end: date) -> float | None:
-    """Variação % entre a abertura do primeiro candle da janela e o fechamento do último
-    (arquivo ``jsongz`` do Freqtrade: ``[[ms, open, high, low, close, volume], ...]``)."""
+    """% change between the open of the window's first candle and the close of the last one
+    (Freqtrade ``jsongz`` file: ``[[ms, open, high, low, close, volume], ...]``)."""
     if not data_file.exists():
         return None
     start_ms = int(datetime(start.year, start.month, start.day, tzinfo=UTC).timestamp() * 1000)
@@ -210,7 +210,7 @@ def buy_and_hold_pct(data_file: Path, start: date, end: date) -> float | None:
 
 
 def parse_result(archive: Path, start: date, end: date) -> WindowResult:
-    """Lê o resultado (.zip ou .json) de um backtest do Freqtrade."""
+    """Reads the result (.zip or .json) of a Freqtrade backtest."""
     if archive.suffix == ".zip":
         with zipfile.ZipFile(archive) as zipped:
             name = next(
@@ -250,8 +250,8 @@ def _pct(value: float | None) -> str:
 
 
 def summarize(profile_name: str, results: Sequence[WindowResult], subtitle: str = "") -> str:
-    """Relatório em Markdown com uma linha por janela, o agregado e, com otimização, os
-    parâmetros escolhidos em cada treino."""
+    """Markdown report with one row per window, the aggregate and, with optimization, the
+    parameters chosen in each training."""
     lines = [
         f"# Walk-forward — perfil `{profile_name}`",
         "",
@@ -302,14 +302,14 @@ def summarize(profile_name: str, results: Sequence[WindowResult], subtitle: str 
     return "\n".join(lines) + "\n"
 
 
-# ============================================================================ execução (Docker)
+# ============================================================================ execution (Docker)
 def _freqtrade(*args: str, attempts: int = 3) -> None:
-    """Executa um comando do Freqtrade no contêiner, com retentativa (a carga de mercados
-    da Binance a cada execução pode sofrer *timeout* de rede)."""
+    """Runs a Freqtrade command in the container, with retries (loading the Binance markets
+    on every run may hit a network *timeout*)."""
     command = ["docker", "compose", "-f", str(COMPOSE), "run", "--rm", "freqtrade", *args]
     for attempt in range(1, attempts + 1):
         try:
-            subprocess.run(command, check=True)  # noqa: S603 - comando montado localmente
+            subprocess.run(command, check=True)  # noqa: S603 - command built locally
             return
         except subprocess.CalledProcessError:
             if attempt == attempts:
@@ -325,7 +325,7 @@ def _write_params(params: dict[str, Any]) -> None:
 
 
 def prepare(config: StrategyConfig, profile_name: str) -> str:
-    """Gera ``config.<perfil>.json`` e ``trade_agent_strategy.json``; retorna o caminho relativo."""
+    """Writes ``config.<profile>.json`` and ``trade_agent_strategy.json``; returns its path."""
     profile = config.profiles[profile_name]
     base = json.loads((USER_DATA / "config.base.json").read_text(encoding="utf-8"))
     generated = lab_config(base, profile, config.profile_capital(profile_name))
@@ -338,7 +338,7 @@ def prepare(config: StrategyConfig, profile_name: str) -> str:
 def optimize(
     profile: ProfileConfig, config_path: str, train: tuple[date, date], args: argparse.Namespace
 ) -> dict[str, float]:
-    """*Hyperopt* na janela de treino; grava os parâmetros escolhidos (sobre os do perfil)."""
+    """*Hyperopt* on the training window; records the chosen parameters (over the profile's)."""
     base = strategy_params(profile)
     _write_params(base)
     _freqtrade(

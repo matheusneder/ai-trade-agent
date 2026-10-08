@@ -53,7 +53,7 @@ def test_lab_config_from_profile() -> None:
     assert config["tradable_balance_ratio"] == pytest.approx(0.8)
     assert config["dry_run_wallet"] == 300.0
     assert "ATOM/USDT" in config["exchange"]["pair_whitelist"]
-    assert BASE["exchange"]["pair_whitelist"] == []  # a base não é alterada
+    assert BASE["exchange"]["pair_whitelist"] == []  # the base is not changed
 
 
 def test_strategy_params_fixed_and_trailing_stop() -> None:
@@ -73,7 +73,7 @@ def _exported(**sell: float) -> dict[str, object]:
     return {
         "strategy_name": wf.STRATEGY,
         "params": {
-            # o Freqtrade também exporta os não otimizados; os de risco devem ser ignorados
+            # Freqtrade also exports the non-optimized ones; the risk ones must be ignored
             "buy": {"min_score": 0.45, "adx_min": 25, "risk_per_trade": 0.02},
             "sell": {"tp_activation": 0.07, **sell},
             "roi": {"0": 100},
@@ -85,10 +85,10 @@ def test_merge_optimized_keeps_profile_risk_parameters() -> None:
     base = wf.strategy_params(CONFIG.profiles["moderado"])
     merged = wf.merge_optimized(base, _exported())
     assert merged["params"]["buy"]["min_score"] == 0.45
-    assert merged["params"]["buy"]["risk_per_trade"] == pytest.approx(0.01)  # do perfil
+    assert merged["params"]["buy"]["risk_per_trade"] == pytest.approx(0.01)  # from the profile
     assert merged["params"]["sell"]["tp_activation"] == 0.07
     assert merged["params"]["sell"]["stop_max_pct"] == pytest.approx(0.07)
-    assert base["params"]["buy"]["min_score"] == 0.5  # a base não é alterada
+    assert base["params"]["buy"]["min_score"] == 0.5  # the base is not changed
     assert wf.chosen_params(_exported()) == {
         "min_score": 0.45,
         "adx_min": 25.0,
@@ -200,7 +200,7 @@ class FakeLab:
 
 @pytest.fixture
 def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeLab:
-    """Laboratório isolado em ``tmp_path`` com o Freqtrade (Docker) simulado."""
+    """Lab isolated in ``tmp_path`` with a simulated Freqtrade (Docker)."""
     user_data = tmp_path / "user_data"
     (user_data / "strategies").mkdir(parents=True)
     (user_data / "config.base.json").write_text(json.dumps(BASE), encoding="utf-8")
@@ -213,7 +213,7 @@ def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeLab:
 
     def fake_freqtrade(*args: str) -> None:
         fake.calls.append(args)
-        if args[0] == "hyperopt":  # o Freqtrade exporta apenas os espaços otimizados
+        if args[0] == "hyperopt":  # Freqtrade exports only the optimized spaces
             params_file.write_text(json.dumps(_exported(tp_trailing=0.02)), encoding="utf-8")
         if args[0] == "backtesting":
             fake.backtest_params.append(json.loads(params_file.read_text(encoding="utf-8")))
@@ -235,7 +235,7 @@ def test_main_with_fixed_profile_params(lab: FakeLab) -> None:
     assert code == 0
     assert lab.calls[0][0] == "download-data"
     assert "20241001-20250701" in lab.calls[0]
-    assert lab.calls[0].count("BTC/USDT") == 1  # par de referência sem duplicidade
+    assert lab.calls[0].count("BTC/USDT") == 1  # reference pair without duplication
     assert [c[0] for c in lab.calls[1:]] == ["backtesting", "backtesting"]
     config = json.loads((lab.root / "user_data" / "config.conservador.json").read_text())
     assert config["timeframe"] == "4h"
@@ -243,7 +243,7 @@ def test_main_with_fixed_profile_params(lab: FakeLab) -> None:
     assert lab.backtest_params[0] == lab.backtest_params[1]
     reports = lab.reports("walk-forward-conservador-fixo-*.md")
     assert len(reports) == 1
-    assert "| — |" in reports[0].read_text(encoding="utf-8")  # sem dados locais do BTC
+    assert "| — |" in reports[0].read_text(encoding="utf-8")  # no local BTC data
 
 
 def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
@@ -258,7 +258,7 @@ def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
         ]
     )  # fmt: skip
     assert code == 0
-    assert "20240401-20250401" in lab.calls[0]  # treino + aquecimento
+    assert "20240401-20250401" in lab.calls[0]  # training + warm-up
     hyperopt = lab.calls[1]
     assert hyperopt[0] == "hyperopt"
     assert "20240701-20250101" in hyperopt
@@ -271,7 +271,7 @@ def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
     assert applied["sell"]["tp_trailing"] == 0.02
     text = lab.reports("walk-forward-conservador-otimizado-*.md")[0].read_text(encoding="utf-8")
     assert "Parâmetros otimizados (SharpeHyperOptLossDaily, 30 épocas) nos 6 meses" in text
-    assert "| 20.00 |" in text  # buy & hold do BTC calculado dos dados locais
+    assert "| 20.00 |" in text  # BTC buy & hold computed from the local data
     assert "| 2025-01-01 | 25 | 0.45 | 0.07 | 0.02 |" in text
 
 

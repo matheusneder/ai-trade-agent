@@ -1,4 +1,4 @@
-"""Tarefas de fundo do runtime e composição da aplicação (Fase 5)."""
+"""Runtime background tasks and application composition (Phase 5)."""
 
 import asyncio
 from dataclasses import replace
@@ -44,14 +44,14 @@ async def test_background_jobs_services_and_reconcile_hook(
         ticks.append("periodic")
 
     async def hourly() -> None:
-        ticks.append("imediato")  # intervalo longo: só roda por ser executado na partida
+        ticks.append("imediato")  # long interval: only runs because it runs at startup
 
     async def heartbeat() -> None:
         ticks.append("heartbeat")
 
     async def on_candle() -> None:
         ticks.append("candle")
-        raise RuntimeError("falha no ciclo")  # registrada, não derruba o agendamento
+        raise RuntimeError("falha no ciclo")  # recorded, does not break the scheduling
 
     async def flaky_service(event: asyncio.Event) -> None:
         attempts.append(1)
@@ -78,11 +78,11 @@ async def test_background_jobs_services_and_reconcile_hook(
         on_reconcile=on_reconcile,
         candle_delay=timedelta(milliseconds=10),
         service_backoff_s=0.01,
-        clock=lambda: datetime(2026, 9, 26, 16, tzinfo=UTC),  # congelado num fechamento
+        clock=lambda: datetime(2026, 9, 26, 16, tzinfo=UTC),  # frozen at a close
     )
     with capture_logs() as logs:
         await asyncio.wait_for(runtime.run(stop), timeout=15)
-    assert len(attempts) >= 2  # o serviço foi reiniciado após a falha
+    assert len(attempts) >= 2  # the service was restarted after the failure
     started = next(e for e in logs if e["event"] == "runtime.tasks_started")
     assert started["candle_jobs"] == ["1m"] and started["services"] == 1
     jobs = {e["job"] for e in logs if e["event"] == "runtime.job"}
@@ -95,9 +95,9 @@ async def test_background_jobs_services_and_reconcile_hook(
 
 
 def test_docker_gives_the_agent_time_to_stop_in_order() -> None:
-    """Ao parar, o agente termina a tarefa em andamento e grava o agent.stopped. Com os 10 s
-    padrão do Docker, uma coleta de notícias (até timeout_s por fonte, em paralelo) seria
-    encerrada à força no meio."""
+    """On stop, the agent finishes the task in progress and records agent.stopped. With
+    Docker's default 10 s, a news collection (up to timeout_s per source, in parallel)
+    would be killed halfway."""
     grace = str(COMPOSE["services"]["agent"]["stop_grace_period"])
     sources = load_research_config(ROOT / "config" / "research.yaml").sources
     assert grace.endswith("s") and int(grace[:-1]) >= 2 * sources.timeout_s
@@ -122,24 +122,24 @@ async def test_assemble_without_telegram(
         )  # fmt: skip
         assert isinstance(parts.notifier, LogNotifier) and parts.commands is None
         assert parts.services == []
-        assert [tf for tf, _ in parts.candle_jobs] == ["4h", "1h"]  # perfis habilitados
+        assert [tf for tf, _ in parts.candle_jobs] == ["4h", "1h"]  # enabled profiles
         (risk_s, check_risk), (ingest_s, ingest) = parts.periodic
         assert (risk_s, ingest_s) == (60.0, 900.0)
         assert parts.heartbeat is None
-        assert await parts.telemetry.record() is False  # nada observado ainda
+        assert await parts.telemetry.record() is False  # nothing observed yet
         fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
-        await check_risk()  # a primeira verificação já grava a telemetria
+        await check_risk()  # the first check already records telemetry
         assert (await parts.guard.state(GLOBAL)).state is OpState.RUNNING
         saved = await parts.telemetry.last_recorded()
         assert saved is not None and saved.states["global"] == "running"
         latest = parts.telemetry.latest
         assert latest is not None
-        assert await parts.telemetry.observe(latest) is False  # dentro do intervalo
+        assert await parts.telemetry.observe(latest) is False  # within the interval
         later = replace(latest, now=latest.now + timedelta(minutes=5))
         assert await parts.telemetry.observe(later) is True
         await ingest()
         parts.research.metrics = MarketMetrics(fear_greed=FearGreed(5, "Extreme Fear"))
-        await check_risk()  # Fear & Greed abaixo de 10 → pausa
+        await check_risk()  # Fear & Greed below 10 → pause
         assert (await parts.guard.state(GLOBAL)).state is OpState.PAUSED
         await parts.on_reconcile(ReconcileReport(started_at=datetime.now(UTC), orphans=["x"]))
         assert parts.monitor.reconcile_anomalies == 1
@@ -155,7 +155,7 @@ async def test_the_delist_schedule_is_asked_only_where_it_exists(
     env: str,
     calls: int,
 ) -> None:
-    """A Testnet e a Demo não têm as rotas /sapi: sem um 404 (e um aviso) a cada ciclo."""
+    """Testnet and Demo do not have the /sapi routes: no 404 (and warning) every cycle."""
     research = load_research_config(ROOT / "config" / "research.yaml").model_copy(
         update={"sources": SourcesConfig(fear_greed=False, derivatives=False)}
     )

@@ -1,4 +1,4 @@
-"""esquema inicial
+"""initial schema
 
 Revision ID: 0001
 Revises:

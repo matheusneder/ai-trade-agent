@@ -1,4 +1,4 @@
-"""Comandos do Telegram e /status (PostgreSQL + Bot API simulada)."""
+"""Telegram commands and /status (PostgreSQL + simulated Bot API)."""
 
 import asyncio
 import json
@@ -106,13 +106,13 @@ async def test_flatten_requires_confirmation_code(store: Store, http: httpx.Asyn
     prompt = await center.handle("/flatten moderado")
     assert "/flatten moderado ABC123" in prompt and "VENDE" in prompt
     assert "incorreto" in await center.handle("/flatten moderado XXXXXX")
-    assert "Confirme" in await center.handle("/flatten moderado")  # novo código
+    assert "Confirme" in await center.handle("/flatten moderado")  # new code
     clock.now += timedelta(minutes=3)
-    assert "Confirme" in await center.handle("/flatten moderado ABC123")  # expirado: pede de novo
+    assert "Confirme" in await center.handle("/flatten moderado ABC123")  # expired: asks again
     confirmed = await center.handle("/flatten moderado abc123")
     assert confirmed == "moderado: flatten concluído (1 posições). Estado: halted."
     assert (await guard.state("moderado")).state is OpState.HALTED
-    assert "Confirme" in await center.handle("/flatten moderado ABC123")  # código já usado
+    assert "Confirme" in await center.handle("/flatten moderado ABC123")  # code already used
 
 
 async def test_polling_authorization_and_offset(store: Store, http: httpx.AsyncClient) -> None:
@@ -130,7 +130,7 @@ async def test_polling_authorization_and_offset(store: Store, http: httpx.AsyncC
         send = router.post(f"{API}/sendMessage").respond(200, json={"ok": True, "result": {}})
         assert await center.poll_once(timeout_s=1) == 2
         assert await center.poll_once(timeout_s=1) == 0
-    assert (await guard.state(GLOBAL)).state is OpState.PAUSED  # o /halt de outro chat foi ignorado
+    assert (await guard.state(GLOBAL)).state is OpState.PAUSED  # /halt from another chat ignored
     assert await store.get_checkpoint(OFFSET_KEY) == {"offset": 12}
     assert json.loads(updates.calls[1].request.content)["offset"] == 12
     assert len(send.calls) == 1
@@ -157,18 +157,18 @@ async def test_run_loop_backs_off_on_errors_and_stops(
 
 
 async def test_run_loop_stops_during_the_long_poll(store: Store, http: httpx.AsyncClient) -> None:
-    """A espera longa do getUpdates (até 30 s) não segura a parada do agente: o Docker o
-    encerraria à força depois de alguns segundos, sem terminar de forma ordenada."""
+    """The long getUpdates wait (up to 30 s) does not hold up the agent's shutdown: Docker
+    would kill it after a few seconds, without an orderly shutdown."""
     center, _ = _center(store, http, Clock())
     stop = asyncio.Event()
     waiting = asyncio.Event()
 
     async def long_poll(request: httpx.Request) -> httpx.Response:
         waiting.set()
-        await asyncio.sleep(30)  # a Bot API só responde quando chega mensagem
+        await asyncio.sleep(30)  # the Bot API only answers when a message arrives
         return httpx.Response(200, json={"ok": True, "result": []})
 
-    with respx.mock(assert_all_called=False) as router:  # a chamada é cancelada, não termina
+    with respx.mock(assert_all_called=False) as router:  # the call is canceled, it does not finish
         router.post(f"{API}/getUpdates").mock(side_effect=long_poll)
         task = asyncio.create_task(center.run(stop, timeout_s=30))
         await asyncio.wait_for(waiting.wait(), timeout=5)
@@ -235,5 +235,5 @@ async def test_status_text(db: Database, store: Store, service: PositionService)
     assert lines[0] == "Ordens: habilitadas"
     assert lines[1] == "global: paused (até 26/09 16:00 UTC) — btc"
     assert lines[3] == "moderado: paused — manual"
-    assert lines[6] == "• BTCUSDT [con] protected entrada 63000 qtd 0.00099"  # líquida da taxa
+    assert lines[6] == "• BTCUSDT [con] protected entrada 63000 qtd 0.00099"  # net of the fee
     assert lines[7] == "Analista (26/09 12:00 UTC): regime risk_off, exposição 0.5"

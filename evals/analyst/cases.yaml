@@ -1,12 +1,12 @@
-# Conjunto de avaliação do analista (Fase 4). Manchetes PARAFRASEADAS; URLs no domínio
-# reservado .example (não são fontes reais). Casos "synthetic" usam ativos fictícios para
-# reduzir o efeito de o modelo já conhecer o desfecho de eventos históricos.
+# Analyst evaluation set (Phase 4). PARAPHRASED headlines; URLs in the reserved .example
+# domain (they are not real sources). "synthetic" cases use fictional assets to reduce
+# the effect of the model already knowing the outcome of historical events.
 #
-# expect: veto (deve vetar), no_veto (não pode vetar), regime (aceitos), max/min_exposure,
-#         negative (sentimento <= 0 ou veto), positive (> 0 sem veto), max_sentiment.
+# expect: veto (must veto), no_veto (must not veto), regime (accepted), max/min_exposure,
+#         negative (sentiment <= 0 or veto), positive (> 0 without veto), max_sentiment.
 
 cases:
-  # ======================================================================== históricos
+  # ======================================================================== historical
   - id: ftx-colapso
     kind: historical
     critical: true
@@ -320,7 +320,7 @@ cases:
       no_veto: [BTC]
       regime: [risk_off]
 
-  # ======================================================================== sintéticos
+  # ======================================================================== synthetic
   - id: syn-ruido-previsoes
     kind: synthetic
     description: Só ruído (previsões de influenciadores); nada que justifique veto.

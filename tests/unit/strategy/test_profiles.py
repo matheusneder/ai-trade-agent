@@ -31,7 +31,7 @@ def test_repository_profiles_are_valid_and_within_exchange_limits() -> None:
         protection = config.profiles[name].protection
         policy = protection.policy(D("2"))
         for bips in (policy.take_profit_trailing_bips, policy.stop_trailing_bips):
-            assert bips is None or 10 <= bips <= 2000  # filtro TRAILING_DELTA
+            assert bips is None or 10 <= bips <= 2000  # TRAILING_DELTA filter
         assert protection.stop_distance_pct(D("100")) <= 10
 
 
@@ -82,10 +82,10 @@ def test_signal_params_overrides() -> None:
 
 def test_fixed_stop_drives_signal_atr_multiple_and_cap() -> None:
     config = load_strategy_config(CONFIG_FILE)
-    moderate = config.profiles["moderado"].signal_params()  # stop: atr 2.5, máx. 7%
+    moderate = config.profiles["moderado"].signal_params()  # stop: atr 2.5, max 7%
     assert moderate.atr_stop_mult == 2.5
     assert moderate.max_stop_pct == pytest.approx(0.07)
-    trailing = config.profiles["agressivo"].signal_params()  # stop trailing: padrões
+    trailing = config.profiles["agressivo"].signal_params()  # trailing stop: defaults
     assert trailing.atr_stop_mult == SignalParams().atr_stop_mult
     assert trailing.max_stop_pct == SignalParams().max_stop_pct
 

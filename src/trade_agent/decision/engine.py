@@ -1,13 +1,14 @@
-"""Motor de decisão por perfil, executado no fechamento do candle do perfil.
+"""Per-profile decision engine, run at the close of the profile's candle.
 
-1. universo (montado a cada ciclo) e candles **fechados** dos ativos dos *tiers* do perfil;
-2. sinais técnicos (mesmo código do laboratório);
-3. analista LLM, só quando há setups ou posições (economia), com degradação por perfil;
-4. saídas por regra das posições do perfil (rotação, tempo, veto) e *break-even*;
-5. entradas: carteira (``plan_entries``) → validações pré-ordem → OPOCO.
+1. universe (built every cycle) and **closed** candles of the assets in the profile's tiers;
+2. technical signals (the same code as the lab);
+3. LLM analyst, only when there are setups or positions (saves cost), with per-profile
+   degradation;
+4. rule-based exits for the profile's positions (rotation, time, veto) and break-even;
+5. entries: portfolio (``plan_entries``) → pre-trade checks → OPOCO.
 
-Com ``dry_run`` (trava ``TA_TRADING_ENABLED`` desligada), as decisões são registradas
-como eventos e nenhuma ordem é enviada.
+With ``dry_run`` (the ``TA_TRADING_ENABLED`` lock off), decisions are recorded as events
+and no order is sent.
 """
 
 import asyncio
@@ -46,22 +47,22 @@ log = structlog.get_logger(__name__)
 
 BENCHMARK = "BTCUSDT"
 RESEARCH_SLOTS = 8
-"""Máximo de candidatos com setup enviados ao analista por ciclo (além das posições)."""
+"""Maximum number of candidates with a setup sent to the analyst per cycle (plus positions)."""
 _EXIT_STATES = {PositionState.PROTECTED}
 _NO_FILL_STATES = {PositionState.PLANNED, PositionState.ENTRY_SENT}
 
 
 UNIVERSE_TTL = timedelta(minutes=5)
-"""Menor que o menor timeframe dos perfis (15m): cada ciclo monta o universo de novo."""
+"""Shorter than the profiles' shortest timeframe (15m): every cycle builds the universe again."""
 
 
 class UniverseCache:
-    """Universo de cada ciclo, com o ranking de volume do momento.
+    """Universe of each cycle, with the volume ranking of the moment.
 
-    Um ativo que rompe com volume forte sobe no ranking justamente nas horas do rompimento.
-    Com 6 h de cache e ciclos de 4 h, um ciclo sim, outro não, usava o universo do ciclo
-    anterior e deixava esses ativos de fora (ONE e AR em 03/10). O cache só serve para que
-    os perfis que fecham candle juntos compartilhem uma montagem (a trava evita duas).
+    An asset breaking out on strong volume climbs the ranking precisely during the breakout
+    hours. With a 6 h cache and 4 h cycles, every other cycle used the previous cycle's
+    universe and left those assets out (ONE and AR on 2026-10-03). The cache only lets the
+    profiles that close a candle together share one build (the lock prevents two).
     """
 
     def __init__(
@@ -143,7 +144,7 @@ class DecisionEngine:
         self._features = FeatureParams()
         self._entry_lock = asyncio.Lock()
 
-    # ------------------------------------------------------------------ sinais
+    # ------------------------------------------------------------------ signals
     async def _signals(
         self, members: list[UniverseMember], profile: ProfileConfig, now_ms: int
     ) -> dict[str, Signal]:
@@ -163,7 +164,7 @@ class DecisionEngine:
                     self._api, member.symbol, profile.timeframe, limit=limit, now_ms=now_ms
                 )
             if len(frame) < self._features.warmup:
-                continue  # histórico insuficiente para os indicadores
+                continue  # not enough history for the indicators
             reference = None if member.symbol == BENCHMARK else benchmark
             features = compute_features(frame, self._features, benchmark_close=reference)
             signal = evaluate(features, params)
@@ -180,7 +181,7 @@ class DecisionEngine:
             )
         return signals
 
-    # ------------------------------------------------------------------ analista
+    # ------------------------------------------------------------------ analyst
     async def _reading(
         self,
         name: str,
@@ -223,7 +224,7 @@ class DecisionEngine:
             view = await self._research.latest_view()
         return market_reading(view, profile.llm, now=now, max_age=self._view_max_age), status
 
-    # ------------------------------------------------------------------ ciclo
+    # ------------------------------------------------------------------ cycle
     @tracing.traced("decision", "decision.cycle")
     async def run_profile(self, name: str) -> CycleReport:
         profile = self._strategy.profiles[name]
@@ -260,9 +261,9 @@ class DecisionEngine:
         opened: list[str] = []
         rejected: list[tuple[str, str]] = []
         if state.allows_entries:
-            # Os perfis do mesmo timeframe rodam juntos, e a pesquisa (minutos) separa a
-            # leitura do início do ciclo da compra: um perfil compra de cada vez, com as
-            # posições relidas, ou os dois compram o mesmo ativo (one_position_per_asset).
+            # Profiles of the same timeframe run together, and the research (minutes) separates
+            # the reading at the start of the cycle from the purchase: one profile buys at a time,
+            # with the positions read again, or both buy the same asset (one_position_per_asset).
             async with self._entry_lock:
                 opened, rejected = await self._entries(
                     name,
@@ -444,8 +445,8 @@ class DecisionEngine:
     # ------------------------------------------------------------------ flatten
     @tracing.traced("decision", "decision.flatten")
     async def flatten(self, scope: str) -> int:
-        """Encerra as posições do escopo: vende as que têm execução e cancela as entradas
-        pendentes. Retorna quantas foram tratadas."""
+        """Closes the scope's positions: sells the ones with a fill and cancels the pending
+        entries. Returns how many were handled."""
         active = await self._store.active_positions()
         targets = [p for p in active if scope == GLOBAL or self._names.get(p.profile) == scope]
         handled = 0
@@ -459,7 +460,7 @@ class DecisionEngine:
                 else:
                     await self._positions.close_position(position, ExitReason.RISK)
                 handled += 1
-            except Exception as exc:  # uma falha não impede as demais
+            except Exception as exc:  # one failure does not stop the others
                 log.error("flatten.failed", position=position.id, error=repr(exc))
                 await self._store.record_event(
                     "flatten.failed", Severity.CRITICAL, {"error": repr(exc)},

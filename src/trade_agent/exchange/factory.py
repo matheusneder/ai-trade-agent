@@ -1,4 +1,4 @@
-"""Construção de assinador e cliente REST a partir das configurações."""
+"""Builds the signer and the REST client from the settings."""
 
 from typing import Any
 
@@ -10,7 +10,7 @@ from trade_agent.exchange.signing import Ed25519Signer, HmacSigner, Signer
 
 
 def build_signer(settings: Settings) -> Signer | None:
-    """Cria o assinador adequado ao tipo de chave; ``None`` se não houver credenciais."""
+    """Creates the signer for the key type; ``None`` if there are no credentials."""
     if not settings.has_credentials:
         return None
     if settings.binance_key_type is KeyType.HMAC:
@@ -27,7 +27,7 @@ def build_signer(settings: Settings) -> Signer | None:
 
 
 def build_rest_client(settings: Settings, **kwargs: Any) -> BinanceRestClient:
-    """Cria o cliente REST do ambiente configurado."""
+    """Creates the REST client of the configured environment."""
     api_key = settings.binance_api_key.get_secret_value() if settings.binance_api_key else None
     return BinanceRestClient(
         endpoints_for(settings.binance_env).rest,

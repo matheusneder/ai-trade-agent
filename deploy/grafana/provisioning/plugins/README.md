@@ -1,2 +1,2 @@
-Sem plugins provisionados. A pasta existe porque o Grafana registra um erro na partida quando
-ela falta no diretório de provisionamento.
+No provisioned plugins. The folder exists because Grafana logs an error at startup when it is
+missing from the provisioning directory.

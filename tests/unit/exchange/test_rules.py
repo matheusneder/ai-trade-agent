@@ -160,14 +160,14 @@ def test_market_qty_violations_on_market_grid() -> None:
     problems = rules.qty_violations(D("0.7"), market=True)
     assert any("MARKET_LOT_SIZE" in v and "minQty" in v for v in problems)
     assert any("MARKET_LOT_SIZE" in v and "stepSize" in v for v in problems)
-    assert rules.qty_violations(D("1000")) == []  # LOT_SIZE sem maxQty
+    assert rules.qty_violations(D("1000")) == []  # LOT_SIZE without maxQty
 
 
 def test_notional_violations(btc: SymbolRules) -> None:
     assert btc.notional_violations(D("100"), D("0.1")) == []
     assert any("minNotional" in v for v in btc.notional_violations(D("100"), D("0.01")))
     assert any("maxNotional" in v for v in btc.notional_violations(D("100000"), D("100000")))
-    # applyMaxToMarket=false no BTCUSDT: ordens a mercado ignoram o máximo
+    # applyMaxToMarket=false on BTCUSDT: market orders ignore the maximum
     assert btc.notional_violations(D("100000"), D("100000"), market=True) == []
 
 

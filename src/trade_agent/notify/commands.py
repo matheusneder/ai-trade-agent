@@ -1,10 +1,10 @@
-"""Comandos do operador pelo Telegram, com autorização por ``chat_id``.
+"""Operator commands over Telegram, authorized by ``chat_id``.
 
-Consultas (``/status``, ``/positions``, ``/pnl``, ``/report``, ``/config``) são injetadas
-pela aplicação. Controle: ``/pause [escopo]`` · ``/resume [escopo]`` · ``/halt [escopo]`` ·
-``/flatten [escopo]`` (pede confirmação com código, válido por 2 min) · ``/help``.
-O escopo é ``global`` (padrão) ou o nome de um perfil. Mensagens de outros chats são
-ignoradas e registradas como evento.
+Queries (``/status``, ``/positions``, ``/pnl``, ``/report``, ``/config``) are injected by
+the application. Control: ``/pause [scope]`` · ``/resume [scope]`` · ``/halt [scope]`` ·
+``/flatten [scope]`` (asks for confirmation with a code, valid for 2 min) · ``/help``.
+The scope is ``global`` (default) or a profile name. Messages from other chats are ignored
+and recorded as an event.
 """
 
 import asyncio
@@ -33,7 +33,7 @@ type Query = Callable[[list[str]], Awaitable[str]]
 
 
 async def until_stopped[T](call: Coroutine[Any, Any, T], stop: asyncio.Event) -> T | None:
-    """O resultado de ``call``, ou ``None`` se ``stop`` vier antes (``call`` é cancelada)."""
+    """The result of ``call``, or ``None`` if ``stop`` comes first (``call`` is canceled)."""
     task = asyncio.ensure_future(call)
     waiter = asyncio.ensure_future(stop.wait())
     try:
@@ -138,7 +138,7 @@ class CommandCenter:
     @tracing.traced("telegram", "telegram.command")
     async def process(self, update: Update) -> None:
         command = update.text.split(maxsplit=1)[0] if update.text.strip() else ""
-        # só a palavra do comando: o texto pode ter o código de confirmação do /flatten
+        # only the command word: the text may carry the /flatten confirmation code
         tracing.annotate(command=command, authorized=update.chat_id == self._chat_id)
         log.debug(
             "telegram.update",
@@ -156,11 +156,11 @@ class CommandCenter:
         await self._bot.send_message(self._chat_id, reply)
 
     async def poll_once(self, *, timeout_s: int = 30, stop: asyncio.Event | None = None) -> int:
-        """Busca e processa um lote de mensagens; o offset fica persistido.
+        """Fetches and processes a batch of messages; the offset is persisted.
 
-        Com ``stop``, a espera longa (até ``timeout_s``) termina assim que o agente para: o
-        Docker encerra o processo à força depois de alguns segundos, e o agente sairia sem
-        terminar de forma ordenada. As mensagens já recebidas são processadas até o fim.
+        With ``stop``, the long wait (up to ``timeout_s``) ends as soon as the agent stops:
+        Docker kills the process after a few seconds, and the agent would exit without an
+        orderly shutdown. Messages already received are processed to the end.
         """
         saved = await self._store.get_checkpoint(OFFSET_KEY)
         offset = int(saved["offset"]) if saved else None

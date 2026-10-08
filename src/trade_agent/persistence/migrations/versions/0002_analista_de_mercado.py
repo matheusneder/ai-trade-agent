@@ -1,4 +1,4 @@
-"""analista de mercado
+"""market analyst
 
 Revision ID: 0002
 Revises: 0001

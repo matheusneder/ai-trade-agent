@@ -1,4 +1,4 @@
-"""Raiz de composição: monta os componentes do agente a partir das configurações."""
+"""Composition root: builds the agent's components from the settings."""
 
 import asyncio
 import contextlib
@@ -91,7 +91,7 @@ def assemble(
     http: httpx.AsyncClient,
     llm: anthropic.AsyncAnthropic | None,
 ) -> AgentParts:
-    """Liga risco, analista, motor de decisão e Telegram (sem abrir conexões)."""
+    """Wires risk, analyst, decision engine and Telegram (without opening connections)."""
     notifier: Notifier = LogNotifier()
     bot: TelegramBot | None = None
     if settings.telegram_bot_token is not None and settings.telegram_chat_id is not None:
@@ -153,7 +153,7 @@ def assemble(
         async def action() -> object:
             return await engine.run_profile(name)
 
-        action.__qualname__ = f"decide_{name}"  # nome da tarefa nos logs e traces
+        action.__qualname__ = f"decide_{name}"  # task name in logs and traces
         return action
 
     commands: CommandCenter | None = None
@@ -245,7 +245,7 @@ async def build_runtime(
     llm: anthropic.AsyncAnthropic | None = None,
     user_stream: bool = True,
 ) -> AsyncIterator[AgentRuntime]:
-    """Cria o runtime completo; libera conexões (HTTP e banco) ao sair."""
+    """Builds the complete runtime; releases connections (HTTP and database) on exit."""
     if settings.database_url is None:
         raise BinanceConfigurationError("defina TA_DATABASE_URL para executar o agente")
     signer = build_signer(settings)
@@ -305,7 +305,7 @@ async def build_runtime(
 
 
 def install_signal_handlers(stop: asyncio.Event) -> None:
-    """SIGTERM/SIGINT encerram o agente de forma ordenada (onde o SO permite)."""
+    """SIGTERM/SIGINT shut the agent down in an orderly way (where the OS allows it)."""
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         with contextlib.suppress(NotImplementedError, RuntimeError):
@@ -333,8 +333,8 @@ async def run_agent(
             await runtime.run(stop)
     finally:
         if traces is not None:
-            traces.shutdown()  # envia os spans que ainda estão na fila
+            traces.shutdown()  # sends the spans still in the queue
         if agent_metrics is not None:
-            agent_metrics.shutdown()  # última exportação das métricas
+            agent_metrics.shutdown()  # last export of the metrics
         install_tracing(None)
         install_metrics(None)

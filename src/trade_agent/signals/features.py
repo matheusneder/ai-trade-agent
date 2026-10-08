@@ -1,4 +1,4 @@
-"""Indicadores técnicos (TA-Lib) calculados sobre candles fechados."""
+"""Technical indicators (TA-Lib) computed over closed candles."""
 
 from dataclasses import dataclass
 
@@ -25,7 +25,7 @@ class FeatureParams:
 
     @property
     def warmup(self) -> int:
-        """Candles necessários até todos os indicadores estarem definidos."""
+        """Candles needed until every indicator is defined."""
         longest = max(
             self.ema_slow,
             self.adx_period * 2,
@@ -46,9 +46,9 @@ def compute_features(
     params: FeatureParams | None = None,
     benchmark_close: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """Retorna uma cópia de ``frame`` com as colunas de indicadores.
+    """Returns a copy of ``frame`` with the indicator columns.
 
-    ``benchmark_close`` (ex.: BTCUSDT no mesmo intervalo) habilita a força relativa.
+    ``benchmark_close`` (e.g. BTCUSDT on the same interval) enables relative strength.
     """
     missing = [c for c in REQUIRED_COLUMNS if c not in frame.columns]
     if missing:
@@ -84,7 +84,7 @@ def compute_features(
     else:
         reference = close
         out["rs_roc"] = np.nan
-    # Regime de mercado: referência (benchmark ou o próprio ativo) acima da EMA lenta.
+    # Market regime: reference (benchmark or the asset itself) above the slow EMA.
     with np.errstate(invalid="ignore"):
         out["regime_up"] = reference > talib.EMA(reference, timeperiod=p.ema_slow)
     return out

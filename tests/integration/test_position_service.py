@@ -1,4 +1,4 @@
-"""Serviço de posições contra a Binance simulada e um PostgreSQL real."""
+"""Position service against the simulated Binance and a real PostgreSQL."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -73,7 +73,7 @@ async def _open(
 
 
 def _fail_lookups(fake: FakeBinance, path: str, *, skip: int = 0) -> None:
-    """Faz as 3 consultas de confirmação do gateway falharem (após ``skip`` leituras)."""
+    """Makes the gateway's 3 confirmation lookups fail (after ``skip`` reads)."""
     fake.inject(Fault("GET", path, "timeout_before", skip=skip))
     fake.inject(Fault("GET", path, "timeout_before"))
     fake.inject(Fault("GET", path, "timeout_before"))
@@ -83,7 +83,7 @@ async def _kinds(store: Store) -> list[str]:
     return [e.kind for e in reversed(await store.recent_events(200))]
 
 
-# ================================================================ abertura
+# ================================================================ opening
 async def test_open_fok_becomes_protected_with_entry_fills(
     service: PositionService, store: Store, fake: FakeBinance
 ) -> None:
@@ -149,7 +149,7 @@ async def test_open_never_placed_is_rejected_after_grace(
     for _ in range(3):
         fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))
     position = await _open(_service(api, store))
-    assert (await _service(api, store).sync(position)).state is S.PLANNED  # dentro da carência
+    assert (await _service(api, store).sync(position)).state is S.PLANNED  # within the grace period
     rejected = await _service(api, store, now=_later()).sync(position)
     assert rejected.state is S.REJECTED
     assert (await store.intents_for(position.id))[0].status is IntentStatus.FAILED
@@ -198,7 +198,7 @@ async def test_partial_maker_entry(
     assert (await _kinds(store)).count("position.partial_entry") == 1
 
 
-# ================================================================ encerramento pela exchange
+# ================================================================ closed by the exchange
 async def test_take_profit_closes_with_realized_pnl(
     service: PositionService, fake: FakeBinance
 ) -> None:
@@ -213,7 +213,7 @@ async def test_take_profit_closes_with_realized_pnl(
     assert closed.realized_pnl == D("652.347") - D("630") - D("0.652347")
     assert closed.fees == {"BTC": "0.00001", "USDT": "0.652347"}
     assert closed.closed_at is not None
-    assert await service.sync(closed) is closed  # posição terminal: nada muda
+    assert await service.sync(closed) is closed  # terminal position: nothing changes
 
 
 async def test_stop_loss_closes_with_loss(service: PositionService, fake: FakeBinance) -> None:
@@ -228,9 +228,9 @@ async def test_entry_and_exit_executed_while_offline(
     service: PositionService, fake: FakeBinance
 ) -> None:
     position = await _open(service, price="62500", mode=EntryMode.LIMIT_MAKER_GTC)
-    fake.set_price("BTCUSDT", D("62400"))  # entrada executa, OCO armado
-    fake.set_price("BTCUSDT", D("59000"))  # stop executa
-    closed = await service.sync(position)  # sincroniza direto de ENTRY_SENT
+    fake.set_price("BTCUSDT", D("62400"))  # entry fills, OCO armed
+    fake.set_price("BTCUSDT", D("59000"))  # stop fills
+    closed = await service.sync(position)  # syncs straight from ENTRY_SENT
     assert closed.state is S.CLOSED
     assert closed.entry_price == D("62500")
     assert closed.exit_reason == ExitReason.STOP_LOSS
@@ -260,7 +260,7 @@ async def test_closed_verdict_without_exit_leg_is_a_bug(service: PositionService
         await service._on_closed(position, Verdict(VerdictKind.CLOSED, "x"))
 
 
-# ================================================================ re-proteção
+# ================================================================ re-protection
 async def test_expired_legs_are_reprotected(
     service: PositionService, fake: FakeBinance, store: Store
 ) -> None:
@@ -273,7 +273,7 @@ async def test_expired_legs_are_reprotected(
     assert protected.protection_seq == 1
     tp = fake.order_by_client_id(IDS1.take_profit_id)
     sl = fake.order_by_client_id(IDS1.stop_id)
-    # política resolvida sobre o preço de entrada real (63000), não o planejado (63100)
+    # policy resolved on the real entry price (63000), not the planned one (63100)
     assert tp is not None and tp.stop_price == D("64890")
     assert sl is not None and sl.stop_price == D("60480")
     assert [ol.list_client_order_id for ol in fake.open_lists()] == [IDS1.list_id]
@@ -334,7 +334,7 @@ async def test_reprotect_connection_error_keeps_unprotected(
     unprotected = await service.sync(position)
     assert unprotected.state is S.UNPROTECTED
     assert "protection.retry_later" in await _kinds(store)
-    retried = await service.sync(unprotected)  # próxima reconciliação tenta de novo, com novo seq
+    retried = await service.sync(unprotected)  # the next reconciliation tries again, with a new seq
     assert retried.state is S.PROTECTED
     assert retried.protection_seq == 2
 
@@ -345,7 +345,7 @@ async def test_reprotect_unknown_outcome_is_adopted_without_duplicate(
     position = await _open(service)
     fake.expire_list_legs(IDS0.list_id, "EXCHANGE_CANCELED")
     fake.inject(Fault("POST", "/api/v3/orderList/oco", "timeout_after"))
-    _fail_lookups(fake, "/api/v3/orderList", skip=1)  # a 1ª leitura é o snapshot da lista 0
+    _fail_lookups(fake, "/api/v3/orderList", skip=1)  # the 1st read is the snapshot of list 0
     unprotected = await service.sync(position)
     assert unprotected.state is S.UNPROTECTED
     adopted = await service.sync(unprotected)
@@ -365,7 +365,7 @@ async def test_reprotect_unknown_not_found_waits_then_retries(
     fake.inject(Fault("POST", "/api/v3/orderList/oco", "timeout_before"))
     _fail_lookups(fake, "/api/v3/orderList", skip=1)
     unprotected = await service.sync(position)
-    assert (await service.sync(unprotected)).state is S.UNPROTECTED  # aguarda a carência
+    assert (await service.sync(unprotected)).state is S.UNPROTECTED  # waits for the grace period
     retried = await _service(api, store, now=_later()).sync(unprotected)
     assert retried.state is S.PROTECTED
     assert retried.protection_seq == 2
@@ -374,13 +374,13 @@ async def test_reprotect_unknown_not_found_waits_then_retries(
 async def test_residual_balance_is_closed(service: PositionService, fake: FakeBinance) -> None:
     position = await _open(service)
     fake.expire_list_legs(IDS0.list_id, "EXCHANGE_CANCELED")
-    fake.free["BTC"] = D("0.00005")  # ~3 USDT: abaixo do notional mínimo
+    fake.free["BTC"] = D("0.00005")  # ~3 USDT: below the minimum notional
     closed = await service.sync(position)
     assert closed.state is S.CLOSED
     assert closed.exit_reason == ExitReason.RESIDUAL
 
 
-# ================================================================ ajuste
+# ================================================================ adjustment
 BREAK_EVEN = Protection(TrailingTakeProfit(D("66000"), 100), FixedStop(D("63300")))
 
 
@@ -391,7 +391,7 @@ async def test_adjust_protection_moves_stop(service: PositionService, fake: Fake
     assert adjusted.state is S.PROTECTED
     assert adjusted.protection_list_id == IDS1.list_id
     assert fake.order_by_client_id(IDS0.stop_id).status == "CANCELED"  # type: ignore[union-attr]
-    fake.set_price("BTCUSDT", D("63250"))  # stop de break-even (+0,48%) cobre as taxas
+    fake.set_price("BTCUSDT", D("63250"))  # break-even stop (+0.48%) covers the fees
     closed = await service.sync(adjusted)
     assert closed.exit_reason == ExitReason.STOP_LOSS
     assert closed.realized_pnl == D("631.8675") - D("630") - D("0.6318675")
@@ -420,7 +420,7 @@ async def test_adjust_when_protection_already_executed(
     service: PositionService, fake: FakeBinance
 ) -> None:
     position = await _open(service)
-    fake.set_price("BTCUSDT", D("60500"))  # stop executa na exchange
+    fake.set_price("BTCUSDT", D("60500"))  # the stop fills on the exchange
     fake.set_price("BTCUSDT", D("64500"))
     closed = await service.adjust_protection(position, BREAK_EVEN)
     assert closed.state is S.CLOSED
@@ -471,7 +471,7 @@ async def test_adjusting_waits_within_grace_then_reprotects(
     assert recovered.protection_seq == 2
 
 
-# ================================================================ encerramento por decisão
+# ================================================================ closed by decision
 async def test_close_position_sells_and_records_pnl(
     service: PositionService, fake: FakeBinance
 ) -> None:
@@ -502,7 +502,7 @@ async def test_close_sell_rejected_reprotects(
     position = await _open(service)
     fake.inject(Fault("POST", "/api/v3/order", "reject", code=-2010, message="rejeitado"))
     result = await service.close_position(position)
-    assert result.state is S.PROTECTED  # a proteção foi cancelada e recriada
+    assert result.state is S.PROTECTED  # the protection was canceled and recreated
     assert "exit.failed" in await _kinds(store)
     assert len(fake.open_lists()) == 1
 
@@ -564,14 +564,14 @@ async def test_failsafe_exit_confirmed_on_sync(
     fake.expire_list_legs(IDS0.list_id, "EXCHANGE_CANCELED")
     fake.set_price("BTCUSDT", D("60000"))
     fake.inject(Fault("POST", "/api/v3/order", "timeout_after"))
-    _fail_lookups(fake, "/api/v3/order", skip=3)  # 3 leituras de ordens do snapshot
+    _fail_lookups(fake, "/api/v3/order", skip=3)  # 3 order reads of the snapshot
     exiting = await service.sync(position)
     assert exiting.state is S.EXITING
     closed = await service.sync(exiting)
     assert closed.exit_reason == ExitReason.FAILSAFE
 
 
-# ================================================================ cache de regras
+# ================================================================ rules cache
 async def test_rules_cache_expires(api: BinanceSpotApi, fake: FakeBinance) -> None:
     ticks = iter([0.0, 10.0, 5000.0, 5000.0])
     cache = RulesCache(api, ttl_s=3600, clock=lambda: next(ticks))
@@ -581,11 +581,11 @@ async def test_rules_cache_expires(api: BinanceSpotApi, fake: FakeBinance) -> No
     assert len(fake.calls("GET", "/api/v3/exchangeInfo")) == 2
 
 
-# ================================================================ caminhos adicionais
+# ================================================================ additional paths
 async def test_fok_entry_not_filled_is_rejected(
     service: PositionService, fake: FakeBinance
 ) -> None:
-    position = await _open(service, price="62000")  # abaixo do mercado: FOK expira
+    position = await _open(service, price="62000")  # below the market: FOK expires
     assert position.state is S.REJECTED
     assert position.exit_reason == ExitReason.ENTRY_REJECTED
     assert fake.balance("USDT") == (D("10000"), D("0"))
@@ -596,7 +596,7 @@ async def test_reprotect_with_limit_take_profit(
 ) -> None:
     position = await _open(service, policy=LIMIT_POLICY)
     fake.expire_list_legs(IDS0.list_id, "EXCHANGE_CANCELED")
-    fake.set_price("BTCUSDT", D("66500"))  # acima do alvo original (66150)
+    fake.set_price("BTCUSDT", D("66500"))  # above the original target (66150)
     protected = await service.sync(position)
     assert protected.state is S.PROTECTED
     tp = fake.order_by_client_id(IDS1.take_profit_id)
@@ -619,5 +619,5 @@ async def test_exiting_without_recorded_intent_is_recovered(
     service: PositionService, store: Store
 ) -> None:
     position = await _open(service)
-    crashed = await store.update_position(position.id, state=S.EXITING)  # morreu antes da intenção
+    crashed = await store.update_position(position.id, state=S.EXITING)  # died before the intent
     assert (await service.sync(crashed)).state is S.PROTECTED

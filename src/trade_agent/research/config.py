@@ -1,4 +1,4 @@
-"""Configuração do analista (``config/research.yaml``), validada por schema."""
+"""Analyst configuration (``config/research.yaml``), validated by schema."""
 
 from decimal import Decimal
 from pathlib import Path
@@ -24,7 +24,7 @@ class ModelsConfig(_Strict):
 
 
 class ModelPrice(_Strict):
-    """US$ por milhão de tokens."""
+    """US$ per million tokens."""
 
     input: Decimal = Field(gt=0)
     output: Decimal = Field(gt=0)
@@ -39,7 +39,7 @@ class PricingConfig(_Strict):
 
 class BudgetConfig(_Strict):
     daily_usd: Decimal = Field(default=Decimal(5), gt=0)
-    """Teto diário (UTC) de gasto com o LLM; ao atingir, o analista não é chamado."""
+    """Daily (UTC) cap on LLM spending; once reached, the analyst is not called."""
 
 
 class WebResearchConfig(_Strict):
@@ -47,14 +47,14 @@ class WebResearchConfig(_Strict):
     max_searches: int = Field(default=5, ge=1, le=20)
     max_fetches: int = Field(default=3, ge=0, le=20)
     max_continuations: int = Field(default=3, ge=0, le=10)
-    """Retomadas após ``pause_turn`` (laço de ferramentas do servidor)."""
+    """Resumptions after ``pause_turn`` (the server's tool loop)."""
 
 
 class SourcesConfig(_Strict):
     rss_feeds: dict[str, str] = Field(default_factory=dict)
-    """Nome da fonte → URL do feed RSS/Atom."""
+    """Source name → RSS/Atom feed URL."""
     binance_catalogs: dict[int, str] = Field(default_factory=dict)
-    """Catálogos de anúncios da Binance (id → rótulo)."""
+    """Binance announcement catalogs (id → label)."""
     fear_greed: bool = True
     derivatives: bool = True
     derivatives_max_symbols: int = Field(default=12, ge=0, le=50)
@@ -66,7 +66,7 @@ class DigestConfig(_Strict):
     max_items: int = Field(default=60, ge=1, le=300)
     summary_chars: int = Field(default=280, ge=0, le=2000)
     min_relevance: float = Field(default=0.3, ge=0, le=1)
-    """Relevância mínima (triagem) para a notícia entrar no digest."""
+    """Minimum relevance (triage) for a news item to make it into the digest."""
 
 
 class SafetyConfig(_Strict):
@@ -75,7 +75,7 @@ class SafetyConfig(_Strict):
     max_text_chars: int = Field(default=400, ge=20)
     max_list_items: int = Field(default=5, ge=1)
     max_view_age_hours: float = Field(default=8, gt=0)
-    """Leitura mais antiga que isso é tratada como falha (degradação)."""
+    """A reading older than this is treated as a failure (degradation)."""
 
 
 class ResearchConfig(_Strict):
@@ -87,7 +87,7 @@ class ResearchConfig(_Strict):
     digest: DigestConfig = DigestConfig()
     safety: SafetyConfig = SafetyConfig()
     asset_names: dict[str, list[str]] = Field(default_factory=dict)
-    """Nomes usados para marcar os ativos citados nas notícias (além do código)."""
+    """Names used to tag the assets mentioned in the news (besides the code)."""
 
     @model_validator(mode="after")
     def _priced_models(self) -> "ResearchConfig":

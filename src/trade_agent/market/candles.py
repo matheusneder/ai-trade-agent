@@ -1,6 +1,6 @@
-"""Candles (klines) em ``pandas.DataFrame`` para análise técnica.
+"""Candles (klines) as a ``pandas.DataFrame`` for technical analysis.
 
-A análise usa ``float64`` (exigido pela TA-Lib); preços de ordens continuam em ``Decimal``.
+The analysis uses ``float64`` (required by TA-Lib); order prices stay in ``Decimal``.
 """
 
 from collections.abc import Sequence
@@ -22,7 +22,7 @@ INTERVAL_MS = {
 
 
 def to_frame(raw: Sequence[Sequence[Any]]) -> pd.DataFrame:
-    """Converte a resposta de ``/api/v3/klines`` em DataFrame indexado pela abertura (UTC)."""
+    """Converts the ``/api/v3/klines`` response into a DataFrame indexed by open time (UTC)."""
     rows = [
         (
             int(k[0]),
@@ -43,14 +43,14 @@ def to_frame(raw: Sequence[Sequence[Any]]) -> pd.DataFrame:
 
 
 def closed_only(frame: pd.DataFrame, now_ms: int) -> pd.DataFrame:
-    """Remove o candle ainda aberto (``close_time`` no futuro)."""
+    """Drops the candle that is still open (``close_time`` in the future)."""
     return frame[frame["close_time"] < now_ms]
 
 
 async def fetch_candles(
     api: BinanceSpotApi, symbol: str, interval: str, *, limit: int, now_ms: int
 ) -> pd.DataFrame:
-    """Busca os últimos candles **fechados** do símbolo."""
+    """Fetches the symbol's latest **closed** candles."""
     if interval not in INTERVAL_MS:
         raise ValueError(f"intervalo não suportado: {interval}")
     raw = await api.klines(symbol, interval, limit=min(limit + 1, 1000))

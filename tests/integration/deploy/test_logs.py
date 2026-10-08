@@ -1,8 +1,8 @@
-"""Logs dos contêineres: Alloy → Loki → Grafana, com as configurações versionadas em deploy/.
+"""Container logs: Alloy → Loki → Grafana, with the configurations versioned in deploy/.
 
-O pipeline roda de verdade: um Alloy com o ``loki.process`` de produção lê amostras de log de
-cada serviço e envia a um Loki com o ``loki.yaml`` de produção. Depois, cada consulta LogQL do
-dashboard "Logs" roda contra esse Loki.
+The pipeline runs for real: an Alloy with the production ``loki.process`` reads log samples
+of each service and sends them to a Loki with the production ``loki.yaml``. Then every LogQL
+query of the "Logs" dashboard runs against that Loki.
 """
 
 import difflib
@@ -35,7 +35,7 @@ from tests.support.logs import (
 
 PROXY_TEMPLATE = DEPLOY / "docker-proxy" / "haproxy.cfg.template"
 UPSTREAM_TEMPLATE = "/usr/local/etc/haproxy/haproxy.cfg.template"
-RENDERED = "/tmp/haproxy.cfg"  # noqa: S108 - dentro do contêiner: a imagem gera a config ali
+RENDERED = "/tmp/haproxy.cfg"  # noqa: S108 - inside the container: the image generates the config there
 TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
 SAMPLES = {
     "agent": (
@@ -81,7 +81,7 @@ SAMPLES = {
     "container-metrics": (
         "container-metrics.log",
         [
-            # um contêiner que sumiu (docker run --rm, recriação): inofensivo, fica de fora
+            # a container that went away (docker run --rm, recreation): harmless, left out
             '{"level":"error","ts":"2026-10-01T17:05:41.120Z","caller":"docker@v0.161.0/'
             'docker.go:417","msg":"Could not inspect updated container","error":"Error '
             'response from daemon: No such container: 5f10dc58071"}',
@@ -94,7 +94,7 @@ SAMPLES = {
         [
             'ts=2026-10-01T02:06:49.342Z level=warn msg="could not transfer logs" '
             "component_id=loki.source.docker.trade_agent component=tailer",
-            # falha do próprio envio ao SigNoz: vai só para o Loki (veja SIGNOZ_SELF)
+            # failure of the sending to SigNoz itself: goes only to Loki (see SIGNOZ_SELF)
             'ts=2026-10-01T11:45:59.974Z level=error msg="Exporting failed. Rejecting data." '
             'component_id=otelcol.exporter.otlphttp.signoz error="sending queue is full"',
         ],
@@ -103,22 +103,22 @@ SAMPLES = {
 EXPECTED = {
     ("agent", "info"): 1,
     ("agent", "debug"): 1,
-    ("agent", "error"): 2,  # traceback (uma entrada só) + runtime.task_failed
+    ("agent", "error"): 2,  # traceback (a single entry) + runtime.task_failed
     ("agent", "warning"): 1,
     ("postgres", "info"): 1,
     ("postgres", "error"): 1,
     ("postgres", "warning"): 1,
     ("grafana", "error"): 1,
     ("grafana", "info"): 1,
-    ("docker-proxy", None): 1,  # sem nível: aparece com o filtro de nível "All" (.*)
+    ("docker-proxy", None): 1,  # no level: shows up with the "All" level filter (.*)
     ("jaeger", "warn"): 1,
-    ("container-metrics", "error"): 1,  # só o erro real; o do contêiner que sumiu é descartado
+    ("container-metrics", "error"): 1,  # only the real error; the vanished container's is dropped
     ("alloy", "warn"): 1,
     ("alloy", "error"): 1,
 }
 SIGNOZ_SELF = ("alloy", "error")
-"""Um erro do Alloy ao enviar ao SigNoz não vai na cópia OTLP: cada linha dessas viraria mais um
-envio para a fila cheia, e a fila não esvaziaria mais (milhões de linhas por hora)."""
+"""An Alloy error while sending to SigNoz does not go into the OTLP copy: each such line would
+become one more send to the full queue, and the queue would never drain (millions per hour)."""
 COPIES = {key: n for key, n in EXPECTED.items() if key != SIGNOZ_SELF}
 VARIABLES = {"$service": ".+", "$level": ".*", "$busca": "", "$__auto": "1m", "$__range": "1h"}
 
@@ -136,7 +136,7 @@ def loki(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         (samples / name).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     files = {service: name for service, (name, _) in SAMPLES.items()}
     for url in loki_with_alloy(samples, files):
-        deadline = time.monotonic() + 60  # o multiline libera o último bloco em até 3 s
+        deadline = time.monotonic() + 60  # multiline releases the last block within 3 s
         while _by_service_and_level(url) != EXPECTED and time.monotonic() < deadline:
             time.sleep(1)
         yield url
@@ -170,40 +170,40 @@ def test_trace_id_is_queryable_metadata(loki: str) -> None:
     ((_, line),) = stream["values"]
     assert '"event": "risk.snapshot"' in line
     assert stream["stream"]["trace_id"] == TRACE_ID
-    assert label_values(loki, "trace_id") == []  # metadado, não rótulo: sem cardinalidade alta
+    assert label_values(loki, "trace_id") == []  # metadata, not a label: no high cardinality
 
 
 def test_otlp_copy_for_signoz_keeps_service_severity_and_trace(loki: str) -> None:
-    """A cópia OTLP (em produção, para o SigNoz; no teste, na entrada OTLP do Loki)."""
+    """The OTLP copy (to SigNoz in production; to Loki's OTLP input in the test)."""
     copies = '{service_namespace="trade-agent"}'
     expr = f"sum by (service_name, severity_text) (count_over_time({copies}[1h]))"
     deadline = time.monotonic() + 30
     while sum(counts(loki, expr).values()) < sum(COPIES.values()):
         assert time.monotonic() < deadline
         time.sleep(1)
-    time.sleep(2)  # o que ainda viesse (o erro do próprio envio) já teria chegado: sai em lotes
+    time.sleep(2)  # anything else (the send's own error) would be here by now: batched
     by_severity = {
         (dict(k)["service_name"], dict(k).get("severity_text")): v
         for k, v in counts(loki, expr).items()
     }
-    assert by_severity == COPIES  # mesmo serviço e nível da cópia do Loki
+    assert by_severity == COPIES  # same service and level as the Loki copy
     (stream,) = query(loki, f'{copies} | trace_id="{TRACE_ID}"')
     metadata = stream["stream"]
     assert (metadata["service_name"], metadata["span_id"]) == ("agent", "b7ad6b7169203331")
     assert (metadata["severity_number"], metadata["event"]) == ("5", "risk.snapshot")
-    assert metadata["equity"] == "1000"  # campos do JSON viram atributos pesquisáveis
+    assert metadata["equity"] == "1000"  # JSON fields become searchable attributes
     assert "loki_attribute_labels" not in metadata
     (traceback,) = query(loki, f'{copies} |~ "^Traceback"')
     assert traceback["stream"]["severity_number"] == "17"  # ERROR
 
 
 def test_vanished_container_noise_is_dropped(loki: str) -> None:
-    """O ``docker_stats`` registra como erro cada contêiner que some antes de ser inspecionado
-    (o laboratório cria e remove dezenas por hora): ruído, fora do Loki e da cópia do SigNoz."""
+    """``docker_stats`` logs as an error every container that vanishes before being inspected
+    (the lab creates and removes dozens per hour): noise, kept out of Loki and the SigNoz copy."""
     assert query(loki, '{service="container-metrics"} |= "No such container"') == []
     assert query(loki, '{service_name="container-metrics"} |= "No such container"') == []
     (kept,) = query(loki, '{service="container-metrics"}')
-    assert "connection refused" in kept["values"][0][1]  # os erros reais continuam
+    assert "connection refused" in kept["values"][0][1]  # the real errors remain
 
 
 def test_python_traceback_becomes_one_error_entry(loki: str) -> None:
@@ -221,7 +221,7 @@ def test_dashboard_log_queries_run_on_loki(loki: str, target: dict[str, Any], ki
         expr = expr.replace(variable, value)
     assert "$" not in expr
     result = query(loki, expr, instant=target["queryType"] == "instant")
-    assert result  # as amostras alimentam todos os painéis
+    assert result  # the samples feed every panel
     if kind == "logs":
         assert {s["stream"]["service"] for s in result} <= set(SAMPLES)
 
@@ -238,12 +238,12 @@ def test_dashboard_variables_list_loki_labels(loki: str) -> None:
     assert all(p["datasource"] == LOKI for p in board["panels"])
 
 
-# ============================================================================ configuração
+# ============================================================================ configuration
 def test_loki_keeps_30_days_and_is_not_published() -> None:
     config = yaml.safe_load(LOKI_CONFIG.read_text(encoding="utf-8"))
     assert config["limits_config"]["retention_period"] == "720h"
     assert config["compactor"]["retention_enabled"] is True
-    assert config["auth_enabled"] is False  # por isso sem porta publicada
+    assert config["auth_enabled"] is False  # hence no published port
     (schema,) = config["schema_config"]["configs"]
     assert (schema["store"], schema["schema"]) == ("tsdb", "v13")
     loki = COMPOSE["services"]["loki"]
@@ -266,7 +266,7 @@ def test_docker_api_is_read_only_and_reachable_only_by_the_collectors() -> None:
         f"./docker-proxy/{PROXY_TEMPLATE.name}:{UPSTREAM_TEMPLATE}:ro",
     ]
     enabled = {k for k, v in proxy["environment"].items() if v == "1"}
-    assert enabled == {"CONTAINERS", "NETWORKS"}  # POST, EXEC etc. ficam no padrão (0)
+    assert enabled == {"CONTAINERS", "NETWORKS"}  # POST, EXEC etc. stay at the default (0)
     socket_users = [
         name
         for name, service in services.items()
@@ -278,16 +278,16 @@ def test_docker_api_is_read_only_and_reachable_only_by_the_collectors() -> None:
 def test_alloy_config_matches_compose_and_loki() -> None:
     text = ALLOY_CONFIG.read_text(encoding="utf-8")
     hosts = re.findall(r'\bhost\s+=\s+"([^"]+)"', text)
-    assert hosts == ["tcp://docker-proxy:2375"] * 2  # descoberta e leitura dos logs
+    assert hosts == ["tcp://docker-proxy:2375"] * 2  # discovery and reading of the logs
     assert "unix:///var/run/docker.sock" not in text
     assert f"com.docker.compose.project={PROJECT}" in text
     port = yaml.safe_load(LOKI_CONFIG.read_text(encoding="utf-8"))["server"]["http_listen_port"]
     blocks = alloy_blocks()
     assert f'url = "http://loki:{port}/loki/api/v1/push"' in blocks["loki.write.loki"]
     assert f'endpoint = "{SIGNOZ_OTLP}"' in blocks["otelcol.exporter.otlphttp.signoz"]
-    # os logs vão para o Loki e para o SigNoz; os bastidores do SigNoz ficam de fora
+    # the logs go to Loki and to SigNoz; SigNoz's internals are left out
     assert "loki.write.loki.receiver, loki.process.signoz.receiver" in text
-    # para o SigNoz, em lotes (não um envio por linha de log)
+    # to SigNoz, in batches (not one send per log line)
     chain = [
         ("loki.process.signoz", "otelcol.receiver.loki.signoz.receiver"),
         ("otelcol.receiver.loki.signoz", "otelcol.processor.transform.signoz.input"),
@@ -296,8 +296,8 @@ def test_alloy_config_matches_compose_and_loki() -> None:
     ]
     for block, target in chain:
         assert target in blocks[block], block
-    # o descarte precisa ser na lista de alvos: em relabel_rules, o contêiner continuaria sendo
-    # lido, com os logs sem rótulo (recusados pelo Loki, aceitos pela cópia OTLP do SigNoz)
+    # the drop must be in the target list: in relabel_rules, the container would still be read,
+    # with unlabeled logs (refused by Loki, accepted by SigNoz's OTLP copy)
     collected = blocks["discovery.relabel.collected"]
     assert "targets = discovery.docker.trade_agent.targets" in collected
     assert (
@@ -317,11 +317,12 @@ def test_alloy_config_matches_compose_and_loki() -> None:
 
 
 def test_read_positions_survive_docker_restarts() -> None:
-    """O Alloy guarda a posição de leitura de cada contêiner pelos rótulos do alvo descoberto.
+    """Alloy keeps each container's read position by the labels of the discovered target.
 
-    Rede, IP e porta mudam quando o Docker reinicia. Com esses rótulos na chave, o Alloy não
-    achava a posição e relia o log inteiro de cada contêiner: o Loki recusava o que era velho, e a
-    rajada enchia a fila do SigNoz. Só ficam os rótulos estáveis enquanto o contêiner existe.
+    Network, IP and port change when Docker restarts. With those labels in the key, Alloy
+    did not find the position and re-read each container's whole log: Loki refused the old
+    lines, and the burst filled SigNoz's queue. Only labels stable for the container's life
+    remain.
     """
     blocks = alloy_blocks()
     keep = re.search(
@@ -330,7 +331,7 @@ def test_read_positions_survive_docker_restarts() -> None:
     assert keep is not None
     needed = re.findall(
         r'source_labels\s+=\s+\["([^"]+)"\]', blocks["discovery.relabel.trade_agent"]
-    )  # os rótulos que viram "service"
+    )  # the labels that become "service"
     for label in ["__meta_docker_container_id", "__meta_docker_container_name", *needed]:
         assert re.fullmatch(keep.group(1), label), label
     volatile = [
@@ -348,15 +349,16 @@ def test_read_positions_survive_docker_restarts() -> None:
 
 
 def test_docker_proxy_streams_logs_without_the_idle_cut() -> None:
-    """O template do proxy é o da imagem mais um backend para ``docker logs --follow``.
+    """The proxy template is the image's own plus a backend for ``docker logs --follow``.
 
-    No padrão (``timeout server 10m``), o log de um contêiner quieto era cortado a cada 10 min; ao
-    reconectar, o Alloy relia as linhas do último segundo lido (duplicadas no SigNoz).
+    With the default (``timeout server 10m``), the log of a quiet container was cut every
+    10 min; on reconnecting, Alloy re-read the lines of the last second read (duplicated in
+    SigNoz).
     """
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível")
     ours = PROXY_TEMPLATE.read_text(encoding="utf-8")
-    upstream = subprocess.run(  # noqa: S603 - comando fixo, sem entrada externa
+    upstream = subprocess.run(  # noqa: S603 - fixed command, no external input
         ["docker", "run", "--rm", "--entrypoint", "cat", image("docker-proxy"),  # noqa: S607
          UPSTREAM_TEMPLATE],
         capture_output=True, check=True,
@@ -367,7 +369,7 @@ def test_docker_proxy_streams_logs_without_the_idle_cut() -> None:
         if line.startswith(("+ ", "- "))
     ]
     added = [line[2:].strip() for line in changes if line.startswith("+ ")]
-    assert len(added) == len(changes)  # nada do original removido ou alterado
+    assert len(added) == len(changes)  # nothing of the original removed or changed
     rule = (
         r"use_backend docker-logs if { path,url_dec -m reg -i "
         r"^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/logs }"
@@ -383,14 +385,14 @@ def test_docker_proxy_streams_logs_without_the_idle_cut() -> None:
     assert logs.search("/containers/trade-agent-agent-1/logs")
     assert not logs.search("/v1.47/containers/json")
     assert not logs.search("/v1.47/containers/0b24ad795107/json")
-    checked = subprocess.run(  # noqa: S603 - comando fixo, sem entrada externa
+    checked = subprocess.run(  # noqa: S603 - fixed command, no external input
         ["docker", "run", "--rm", "-v", f"{PROXY_TEMPLATE}:{UPSTREAM_TEMPLATE}:ro",  # noqa: S607
          image("docker-proxy"), "haproxy", "-c", "-f", RENDERED],
         capture_output=True, check=False,
     )  # fmt: skip
     output = (checked.stdout + checked.stderr).decode("utf-8")
     assert checked.returncode == 0, output
-    assert "docker-logs" not in output  # sem aviso para o backend novo (timeouts definidos)
+    assert "docker-logs" not in output  # no warning for the new backend (timeouts defined)
 
 
 def test_every_service_rotates_its_logs() -> None:
@@ -413,7 +415,7 @@ def test_grafana_datasource_points_to_the_loki_service() -> None:
 def test_alloy_config_is_canonically_formatted() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível")
-    done = subprocess.run(  # noqa: S603 - comando fixo, sem entrada externa
+    done = subprocess.run(  # noqa: S603 - fixed command, no external input
         ["docker", "run", "--rm", "-v", f"{ALLOY_CONFIG}:/etc/alloy/config.alloy:ro",  # noqa: S607
          image("alloy"), "fmt", "/etc/alloy/config.alloy"],
         capture_output=True, check=True,

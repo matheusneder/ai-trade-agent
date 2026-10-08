@@ -1,10 +1,9 @@
-"""Ciclo de vida do agente.
+"""Agent lifecycle.
 
-*Lock* exclusivo, migrações, recuperação na partida, reconciliação periódica, nova medição
-periódica do relógio, *heartbeat*, reação aos eventos do User Data Stream e as tarefas de
-fundo montadas pela aplicação:
-periódicas (risco, coleta de notícias), no fechamento do candle (ciclo de decisão por
-perfil) e serviços de longa duração (comandos do Telegram), supervisionados.
+Exclusive *lock*, migrations, startup recovery, periodic reconciliation, periodic clock
+re-measurement, *heartbeat*, reaction to User Data Stream events and the background tasks
+the application builds: periodic ones (risk, news collection), at the candle close (decision
+cycle per profile) and long-running services (Telegram commands), supervised.
 """
 
 import asyncio
@@ -39,13 +38,13 @@ type Service = Callable[[asyncio.Event], Awaitable[None]]
 
 
 def job_name(action: Action) -> str:
-    """Nome curto da tarefa (``check_risk``, ``reconcile``, ``decide_conservador``)."""
+    """Short task name (``check_risk``, ``reconcile``, ``decide_conservador``)."""
     qualname = getattr(action, "__qualname__", type(action).__name__)
     return str(qualname).rsplit(".", 1)[-1].lstrip("_")
 
 
 def affected_decision(event: UserEvent) -> str | None:
-    """Decisão do agente afetada por um evento de ordem/lista (``None`` para terceiros)."""
+    """Agent decision affected by an order/list event (``None`` for third parties)."""
     if isinstance(event, ExecutionReport):
         client_id = event.client_order_id
     elif isinstance(event, ListStatusEvent):
@@ -95,7 +94,7 @@ class AgentRuntime:
         self._clock = clock
 
     async def run(self, stop: asyncio.Event) -> None:
-        """Executa até ``stop``; levanta ``AlreadyRunningError`` se houver outra instância."""
+        """Runs until ``stop``; raises ``AlreadyRunningError`` if another instance exists."""
         async with self.db.exclusive_lock():
             with tracing.span("runtime", "agent.start"):
                 await upgrade_to_head(self.db.engine)
@@ -108,15 +107,15 @@ class AgentRuntime:
                 )
                 tracing.annotate(clock_offset_ms=offset, positions=report.positions)
                 log.info("agent.started", positions=report.positions, clock_offset_ms=offset)
-            # a reconciliação acabou de rodar; as demais tarefas rodam já na partida
-            # (sem esperar um intervalo inteiro sem risco, telemetria ou notícias)
+            # reconciliation has just run; the other tasks already run at startup
+            # (without waiting a whole interval with no risk, telemetry or news)
             jobs: list[tuple[float, Action, bool, bool]] = [
                 (self._reconcile_interval_s, self._reconcile, False, True),
-                # o relógio local pode pular com o agente rodando (NTP religado, VM que
-                # acordou): sem nova medição, as requisições assinadas esperariam um -1021
+                # the local clock may jump while the agent runs (NTP turned back on, a VM that
+                # woke up): without a new measurement, signed requests would wait for a -1021
                 (self._clock_sync_interval_s, self.api.rest.sync_time, False, True),
             ]
-            if self._heartbeat is not None:  # um ping por minuto: sem trace
+            if self._heartbeat is not None:  # one ping per minute: no trace
                 jobs.append((self._heartbeat_interval_s, self._heartbeat, True, False))
             jobs += [(interval, action, True, True) for interval, action in self._periodic]
             periodic = [
@@ -151,7 +150,7 @@ class AgentRuntime:
             try:
                 await stop.wait()
             finally:
-                stop.set()  # as tarefas periódicas terminam o ciclo atual e saem
+                stop.set()  # the periodic tasks finish the current cycle and exit
                 if consumer is not None:
                     consumer.cancel()
                 await asyncio.gather(
@@ -174,7 +173,7 @@ class AgentRuntime:
         return guarded
 
     async def _supervise(self, service: Service, stop: asyncio.Event) -> None:
-        """Mantém um serviço de longa duração vivo: falhas são registradas e ele reinicia."""
+        """Keeps a long-running service alive: failures are recorded and it restarts."""
         while not stop.is_set():
             try:
                 await service(stop)
@@ -205,7 +204,7 @@ class AgentRuntime:
                 await self._guarded(action, trace=trace)
 
     async def _guarded(self, action: Action, *, trace: bool = True) -> None:
-        """Executa uma tarefa de fundo (a raiz de um trace) sem deixar a falha propagar."""
+        """Runs a background task (the root of a trace) without letting a failure propagate."""
         name = job_name(action)
         started = time.monotonic()
         scope = (
@@ -219,7 +218,7 @@ class AgentRuntime:
                 log.debug(
                     "runtime.job", job=name, elapsed_ms=round((time.monotonic() - started) * 1000)
                 )
-            except Exception as exc:  # as tarefas de fundo nunca podem morrer
+            except Exception as exc:  # background tasks must never die
                 tracing.fail(span, exc)
                 log.error("runtime.task_failed", job=name, error=repr(exc))
                 with contextlib.suppress(Exception):

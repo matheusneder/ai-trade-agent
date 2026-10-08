@@ -1,4 +1,4 @@
-"""Perfis de alocação (``config/profiles.yaml``), validados por schema (doc 03, §8)."""
+"""Allocation profiles (``config/profiles.yaml``), validated by schema (doc 03, §8)."""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -24,7 +24,7 @@ class _Strict(BaseModel):
 class AccountConfig(_Strict):
     quote_asset: str = "USDT"
     managed_capital: Decimal = Field(gt=0)
-    """Teto de capital (moeda de cotação) que o agente pode usar; o resto da conta é ignorado."""
+    """Capital cap (quote asset) the agent may use; the rest of the account is ignored."""
     one_position_per_asset: bool = True
 
 
@@ -33,7 +33,7 @@ class AllocationConfig(_Strict):
     max_position_pct: Fraction
     cash_reserve_pct: Fraction
     risk_per_trade_pct: Percent
-    """Percentual do capital do perfil perdido se o stop executar."""
+    """Percentage of the profile's capital lost if the stop fills."""
 
 
 class EntryConfig(_Strict):
@@ -84,7 +84,7 @@ class ProtectionConfig(_Strict):
         return value
 
     def policy(self, stop_pct: Decimal) -> ProtectionPolicy:
-        """Política concreta; ``stop_pct`` vem do sinal (ATR), limitado por ``max_pct``."""
+        """Concrete policy; ``stop_pct`` comes from the signal (ATR), capped by ``max_pct``."""
         if self.stop.mode is StopMode.FIXED:
             return ProtectionPolicy(
                 take_profit_mode=self.take_profit.mode,
@@ -102,7 +102,7 @@ class ProtectionConfig(_Strict):
         )
 
     def stop_distance_pct(self, signal_stop_pct: Decimal) -> Decimal:
-        """Distância do stop usada no dimensionamento (percentual)."""
+        """Stop distance used for sizing (percentage)."""
         if self.stop.mode is StopMode.FIXED:
             return min(signal_stop_pct, self.stop.max_pct or signal_stop_pct)
         return Decimal(self.stop.trailing_delta_bps or 0) / 100
@@ -119,13 +119,13 @@ class LlmConfig(_Strict):
     on_failure: Literal["ta_only", "ta_only_reduced", "pause_entries"] = "ta_only_reduced"
 
 
-# Parâmetros de sinal definidos em ``protection.stop``: não podem ser ajustados em ``signals``.
+# Signal parameters defined in ``protection.stop``: they cannot be adjusted in ``signals``.
 STOP_SIGNAL_PARAMS = frozenset({"atr_stop_mult", "max_stop_pct"})
 
 
 class ProfileConfig(_Strict):
     code: str = Field(pattern=r"^[a-z0-9]{1,12}$")
-    """Código curto usado nos IDs de ordem (``ta1-{code}-...``)."""
+    """Short code used in the order IDs (``ta1-{code}-...``)."""
     enabled: bool = True
     capital_share: Fraction
     timeframe: Timeframe
@@ -136,7 +136,7 @@ class ProfileConfig(_Strict):
     exits: ExitConfig = ExitConfig()
     llm: LlmConfig = LlmConfig()
     signals: dict[str, float | bool] = Field(default_factory=dict)
-    """Ajustes dos parâmetros de sinal (ver ``SignalParams``)."""
+    """Adjustments of the signal parameters (see ``SignalParams``)."""
 
     @field_validator("signals")
     @classmethod
@@ -150,8 +150,8 @@ class ProfileConfig(_Strict):
         return value
 
     def signal_params(self) -> SignalParams:
-        """Parâmetros de sinal do perfil. Com stop fixo, o múltiplo do ATR e o teto do stop
-        vêm de ``protection.stop`` (fonte única para o agente e o laboratório)."""
+        """The profile's signal parameters. With a fixed stop, the ATR multiple and the stop cap
+        come from ``protection.stop`` (single source for the agent and the lab)."""
         overrides: dict[str, Any] = dict(self.signals)
         stop = self.protection.stop
         if stop.mode is StopMode.FIXED:

@@ -110,9 +110,9 @@ def test_eval_writes_report(env_file: Path, tmp_path: Path) -> None:
     (written,) = output.glob("analyst-*.md")
     assert written.read_text(encoding="utf-8") == out
     assert fake.requests[0]["model"] == "claude-opus-5"
-    assert "tools" not in fake.requests[0]  # avaliação sem busca web
+    assert "tools" not in fake.requests[0]  # evaluation without web search
 
-    fake.reply_json(VIEW)  # não veta ZEPH: reprovado
+    fake.reply_json(VIEW)  # does not veto ZEPH: failed
     code, out, _ = _run(
         ["eval", "--case", "syn-delistagem", "--output", str(output)], env_file, _deps(fake)
     )

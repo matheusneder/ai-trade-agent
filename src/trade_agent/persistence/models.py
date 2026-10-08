@@ -1,4 +1,4 @@
-"""Tabelas do banco (ver doc 03, §11.1). Alterações exigem uma nova migração Alembic."""
+"""Database tables (see doc 03, §11.1). Changes require a new Alembic migration."""
 
 from datetime import datetime
 from decimal import Decimal
@@ -35,7 +35,7 @@ Amount = Numeric(38, 18)
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
-    type_annotation_map = {  # noqa: RUF012 - API declarativa do SQLAlchemy
+    type_annotation_map = {  # noqa: RUF012 - SQLAlchemy declarative API
         Decimal: Amount,
         datetime: DateTime(timezone=True),
         dict[str, Any]: JSONB,
@@ -77,7 +77,7 @@ class PositionRecord(_Timestamps, Base):
 
 
 class IntentRecord(_Timestamps, Base):
-    """Intenção gravada **antes** de qualquer envio à exchange."""
+    """Intent recorded **before** anything is sent to the exchange."""
 
     __tablename__ = "intents"
 
@@ -92,7 +92,7 @@ class IntentRecord(_Timestamps, Base):
 
 
 class ExchangeOrderRecord(Base):
-    """Espelho das ordens do agente na Binance."""
+    """Mirror of the agent's orders on Binance."""
 
     __tablename__ = "exchange_orders"
     __table_args__ = (
@@ -138,7 +138,7 @@ class FillRecord(Base):
 
 
 class EventRecord(Base):
-    """Trilha de auditoria: alertas, mudanças de estado, comandos, anomalias."""
+    """Audit trail: alerts, state changes, commands, anomalies."""
 
     __tablename__ = "events"
     __table_args__ = (Index("ix_events_created_at", "created_at"),)
@@ -159,9 +159,9 @@ class CheckpointRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
-# ============================================================================ analista (Fase 4)
+# ============================================================================ analyst (Phase 4)
 class NewsItemRecord(Base):
-    """Notícia coletada (conteúdo externo, não confiável) e a sua triagem."""
+    """Collected news item (external, untrusted content) and its triage."""
 
     __tablename__ = "news_items"
 
@@ -180,7 +180,7 @@ class NewsItemRecord(Base):
 
 
 class ResearchReportRecord(Base):
-    """Resultado de um ciclo de pesquisa (leitura saneada, ajustes, fontes e custo)."""
+    """Result of a research cycle (sanitized reading, adjustments, sources and cost)."""
 
     __tablename__ = "research_reports"
 
@@ -200,7 +200,7 @@ class ResearchReportRecord(Base):
 
 
 class TelemetrySnapshotRecord(Base):
-    """Foto periódica do agente para os dashboards (Fase 6)."""
+    """Periodic snapshot of the agent for the dashboards (Phase 6)."""
 
     __tablename__ = "telemetry_snapshots"
 
@@ -221,13 +221,13 @@ class TelemetrySnapshotRecord(Base):
     quote_deviation: Mapped[float | None] = mapped_column(Float)
     fear_greed: Mapped[int | None] = mapped_column(Integer)
     states: Mapped[dict[str, Any]]
-    """Estado operacional por escopo (``global`` e perfis)."""
+    """Operating state per scope (``global`` and the profiles)."""
     profiles: Mapped[dict[str, Any]]
-    """Por perfil: PnL realizado no dia e perdas seguidas."""
+    """Per profile: realized PnL for the day and consecutive losses."""
 
 
 class LlmUsageRecord(Base):
-    """Uma chamada à API Claude: tokens, cache, buscas e custo (disjuntor de orçamento)."""
+    """A call to the Claude API: tokens, cache, searches and cost (budget circuit breaker)."""
 
     __tablename__ = "llm_usage"
 

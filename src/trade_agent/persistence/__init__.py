@@ -1,1 +1,1 @@
-"""Persistência em PostgreSQL (SQLAlchemy 2 assíncrono + Alembic)."""
+"""PostgreSQL persistence (asynchronous SQLAlchemy 2 + Alembic)."""

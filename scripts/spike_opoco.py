@@ -1,20 +1,21 @@
-"""Spike OPOCO: valida OPOCO/OCO com trailing no Spot Testnet ou no Demo Mode.
+"""OPOCO spike: validates OPOCO/OCO with trailing on the Spot Testnet or in Demo Mode.
 
-Cenários (resultados em doc/01-requisitos-e-binance.md, §3):
+Scenarios (results in doc/01-requirements-and-binance.md, §3):
 
-A. OPOCO: compra LIMIT FOK "marketable" + OCO de venda com TAKE_PROFIT (ativação + trailing)
-   acima e STOP_LOSS fixo abaixo. Inclui reenvio do mesmo listClientOrderId com a lista aberta.
-B. OPOCO: compra FOK + LIMIT_MAKER acima e STOP_LOSS somente com trailingDelta abaixo.
-C. OPOCO com compra FOK não executável: a lista deve expirar sem armar as pendentes.
-   Em seguida, reutiliza o mesmo listClientOrderId (lista já encerrada).
-D. Compra a mercado + OCO avulso (orderList/oco) com trailing TP, consulta e cancelamento.
+A. OPOCO: "marketable" LIMIT FOK buy + sell OCO with TAKE_PROFIT (activation + trailing)
+   above and a fixed STOP_LOSS below. Includes resending the same listClientOrderId with
+   the list open.
+B. OPOCO: FOK buy + LIMIT_MAKER above and a trailingDelta-only STOP_LOSS below.
+C. OPOCO with a non-executable FOK buy: the list must expire without arming the pending
+   legs. Then it reuses the same listClientOrderId (list already finished).
+D. Market buy + standalone OCO (orderList/oco) with trailing TP, lookup and cancellation.
 
-Durante todos os cenários, assina o User Data Stream via WebSocket API
-(``userDataStream.subscribe.signature``) e registra os eventos.
+Throughout all the scenarios, it subscribes to the User Data Stream over the WebSocket API
+(``userDataStream.subscribe.signature``) and records the events.
 
-Uso:  uv run python scripts/spike_opoco.py --env-file .env [--symbol BTCUSDT]
+Usage:  uv run python scripts/spike_opoco.py --env-file .env [--symbol BTCUSDT]
 
-O script RECUSA o ambiente ``prod``. Ordens são enviadas apenas no Testnet/Demo.
+The script REFUSES the ``prod`` environment. Orders are sent only to Testnet/Demo.
 """
 
 import argparse
@@ -41,7 +42,7 @@ from trade_agent.exchange.serialization import ws_signature_payload
 OUT_DIR = Path("var/spike")
 
 
-# ----------------------------------------------------------------------------- utilidades
+# ----------------------------------------------------------------------------- utilities
 def quantize(value: Decimal, step: Decimal, *, up: bool) -> Decimal:
     units = (value / step).to_integral_value(rounding=ROUND_CEILING if up else ROUND_FLOOR)
     return (units * step).normalize()
@@ -135,7 +136,7 @@ class Spike:
         return (await self._balance(asset))[0]
 
     async def holding(self, asset: str) -> Decimal:
-        """Saldo total (livre + travado): o OCO pendente trava o ativo recebido."""
+        """Total balance (free + locked): the pending OCO locks the received asset."""
         free, locked = await self._balance(asset)
         return free + locked
 
@@ -181,7 +182,7 @@ class Spike:
             )
         return result
 
-    # ------------------------------------------------------------------------- cenários
+    # ------------------------------------------------------------------------- scenarios
     async def scenario_a(self, base: str) -> None:
         print("Cenário A — OPOCO FOK + TAKE_PROFIT(ativação+trailing) / STOP_LOSS fixo")
         before = await self.free(base)
@@ -235,7 +236,7 @@ class Spike:
             tp.get("trailingDelta"),
         )
         self.r.check("A", "SL armado (NEW)", sl.get("status") == "NEW", sl.get("status"))
-        # o recebido fica travado pelo OCO pendente: medir pelo saldo total, não pelo livre
+        # the pending OCO locks the received asset: measure the total, not the free balance
         received = await self.holding(base) - held_before
         pending = Decimal(tp.get("origQty", "0"))
         self.r.check(
@@ -245,7 +246,7 @@ class Spike:
             {"pending": str(pending), "received": str(received)},
         )
 
-        # Idempotência: mesmo listClientOrderId com a lista ainda aberta.
+        # Idempotency: the same listClientOrderId with the list still open.
         try:
             await self.call("A:duplicate", "POST", "/api/v3/orderList/opoco", params, trading=True)
             self.r.check("A", "listClientOrderId duplicado (aberta) rejeitado", False, "aceito!")

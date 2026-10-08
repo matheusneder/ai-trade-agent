@@ -1,7 +1,7 @@
-"""Sinais técnicos: funções puras sobre DataFrames OHLCV.
+"""Technical signals: pure functions over OHLCV DataFrames.
 
-Este pacote também é importado pela estratégia "casca" do laboratório Freqtrade
-(``lab/freqtrade``), por isso depende apenas de numpy, pandas e TA-Lib.
+This package is also imported by the lab's "shell" Freqtrade strategy
+(``lab/freqtrade``), so it depends only on numpy, pandas and TA-Lib.
 """
 
 from trade_agent.signals.features import FeatureParams, compute_features

@@ -1,10 +1,10 @@
-# Implantação local/VPS. Uso (a partir da raiz do repositório):
+# Local/VPS deployment. Usage (from the repository root):
 #   docker compose -f deploy/docker-compose.yml up -d
 #
-# Os serviços ficam em stack.yml. Este arquivo só o inclui com as variáveis do .env da raiz,
-# que passa a ser obrigatório. Sem isso, o Compose procura o .env na pasta deste arquivo
-# (deploy/), não o acha e usa os valores padrão: o Grafana subia com a senha padrão do
-# usuário grafana_ro (o banco a recusava) e sem o token do Telegram.
+# The services live in stack.yml. This file only includes it with the variables of the root
+# .env, which becomes mandatory. Without this, Compose looks for the .env in this file's
+# folder (deploy/), does not find it and uses the default values: Grafana used to start with
+# the grafana_ro user's default password (the database refused it) and without the Telegram token.
 name: trade-agent
 
 include:

@@ -1,28 +1,28 @@
-# Condições de parada (doc 03, §10.3). Ações: pause (volta após o cooldown ou manual),
-# halt (volta só com /resume) e flatten (vende tudo e termina em halt).
-# Cada gatilho age uma vez por ocorrência: só volta a agir se a condição passar e voltar,
-# ou se piorar mais um limite inteiro (ex.: 4 → 8 perdas seguidas).
-# O teto de gasto com o LLM fica em config/research.yaml (budget.daily_usd): ao atingi-lo,
-# cada perfil degrada conforme llm.on_failure.
+# Stop conditions (doc 03, §10.3). Actions: pause (returns after the cooldown or manually),
+# halt (returns only with /resume) and flatten (sells everything and ends in halt).
+# Each trigger acts once per occurrence: it only acts again if the condition clears and
+# comes back, or if it gets one full limit worse (e.g. 4 → 8 consecutive losses).
+# The cap on LLM spending lives in config/research.yaml (budget.daily_usd): once it is
+# reached, each profile degrades according to llm.on_failure.
 
 global:
-  max_daily_loss_pct:      {value: 3,   action: pause, cooldown: 24h}   # sobre o capital gerido
-  max_drawdown_pct:        {value: 15,  action: halt}                   # a partir do pico
+  max_daily_loss_pct:      {value: 3,   action: pause, cooldown: 24h}   # of the managed capital
+  max_drawdown_pct:        {value: 15,  action: halt}                   # from the peak
   max_consecutive_losses:  {value: 4,   action: pause, cooldown: 12h}
   btc_move_1h_pct:         {value: -6,  action: pause, cooldown: 4h}
-  quote_depeg_pct:         {value: 1.5, action: flatten}                # USDT fora da paridade
+  quote_depeg_pct:         {value: 1.5, action: flatten}                # USDT off its peg
   fear_greed_below:        {value: 10,  action: pause, cooldown: 24h}
   api_error_rate_5m:       {value: 0.2, action: pause, cooldown: 30m}
-  reconcile_mismatch:      {action: pause}                              # até diagnóstico (órfãs; erros só em 2 reconciliações seguidas)
-  profit_target_pct:       null                                         # ex.: {value: 30, action: halt}
-  trading_window_utc:      null                                         # ex.: ["00:00-23:59"]
+  reconcile_mismatch:      {action: pause}                              # until diagnosed (orphans; errors only in 2 reconciliations in a row)
+  profit_target_pct:       null                                         # e.g. {value: 30, action: halt}
+  trading_window_utc:      null                                         # e.g. ["00:00-23:59"]
 
-# Limites de um perfil de config/profiles.yaml (pausam só ele), ex.:
+# Limits of a profile from config/profiles.yaml (they pause only that profile), e.g.:
 #   momentum_alpha:
 #     max_daily_loss_pct:  {value: 2, action: pause, cooldown: 24h}
 per_profile: {}
 
 pre_trade:
-  min_reward_risk: 1.5       # ativação do take-profit ÷ stop, após taxas de ida e volta
+  min_reward_risk: 1.5       # take-profit activation ÷ stop, after round-trip fees
   round_trip_fee_pct: 0.2
   risk_tolerance_pct: 5

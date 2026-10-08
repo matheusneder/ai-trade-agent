@@ -75,7 +75,7 @@ async def test_collect_all_sources_isolating_failures() -> None:
     assert "503" in result.errors["rss:down"]
     assert sorted((i.source, i.assets) for i in result.items) == [
         ("binance", ("ZEPH",)),
-        ("feed", ("SOL",)),  # duplicata removida
+        ("feed", ("SOL",)),  # duplicate removed
     ]
     metrics = result.metrics
     assert metrics.fear_greed is not None and metrics.fear_greed.value == 30

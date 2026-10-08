@@ -1,4 +1,4 @@
-"""Reconciliador e runtime (Binance simulada + PostgreSQL)."""
+"""Reconciler and runtime (simulated Binance + PostgreSQL)."""
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
@@ -56,7 +56,7 @@ async def test_reconcile_all_syncs_positions_and_stores_checkpoint(
 ) -> None:
     first = await _open(service, "aaaaaaaaaa")
     second = await _open(service, "bbbbbbbbbb")
-    fake.set_price("BTCUSDT", D("60000"))  # os dois stops executam
+    fake.set_price("BTCUSDT", D("60000"))  # both stops fill
     reconciler = Reconciler(api, service, store)
     report = await reconciler.reconcile_all()
     assert report.positions == 2
@@ -114,7 +114,7 @@ async def test_reconcile_detects_orphans_and_reports_errors(
         },
     )
     fake.free["BTC"] += D("0.0002")
-    await api.place_order_list(  # lista de terceiros: ignorada
+    await api.place_order_list(  # third-party list: ignored
         "oco",
         {
             "symbol": "BTCUSDT",
@@ -215,14 +215,14 @@ async def test_runtime_recovers_at_startup_and_reacts_to_events(
 ) -> None:
     await _open(service, "aaaaaaaaaa")
     await _open(service, "bbbbbbbbbb")
-    fake.set_price("BTCUSDT", D("60000"))  # executado "com o agente desligado"
+    fake.set_price("BTCUSDT", D("60000"))  # filled "with the agent off"
     stop = asyncio.Event()
     beats: list[int] = []
 
     async def heartbeat() -> None:
         beats.append(1)
         if len(beats) == 2:
-            raise RuntimeError("heartbeat indisponível")  # falha em tarefa de fundo não derruba
+            raise RuntimeError("heartbeat indisponível")  # a failing task does not stop it
 
     async def events() -> AsyncIterator[UserEvent]:
         yield StreamConnected(0, reconnected=False)
@@ -247,7 +247,7 @@ async def test_runtime_recovers_at_startup_and_reacts_to_events(
     await asyncio.wait_for(runtime.run(stop), timeout=10)
     assert await store.active_positions() == []
     kinds = [e.kind for e in reversed(await store.recent_events(200))]
-    # a recuperação de partida encerra as posições antes de o agente se declarar iniciado
+    # startup recovery closes the positions before the agent declares itself started
     assert kinds.index("position.closed") < kinds.index("agent.started")
     assert kinds[-1] == "agent.stopped"
     assert "runtime.task_failed" in kinds
@@ -285,7 +285,7 @@ async def test_guarded_swallows_even_event_recording_failures(
         raise ValueError("x")
 
     monkeypatch.setattr(store, "record_event", broken)
-    await runtime._guarded(failing)  # não levanta
+    await runtime._guarded(failing)  # does not raise
 
 
 async def test_reconciler_confirms_protection_before_service_adopts_it(
@@ -299,7 +299,7 @@ async def test_reconciler_confirms_protection_before_service_adopts_it(
     fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))
     await service.sync(await store.get_position(position_id))
     report = await Reconciler(api, service, store).reconcile_all()
-    assert report.intents_confirmed == 1  # resolvida antes do sync da posição
+    assert report.intents_confirmed == 1  # resolved before the position sync
     adopted = await store.get_position(position_id)
     assert adopted.state is S.PROTECTED
     assert adopted.protection_list_id == order_ids("mod", "aaaaaaaaaa", 1).list_id

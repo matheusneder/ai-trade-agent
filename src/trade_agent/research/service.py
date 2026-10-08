@@ -1,8 +1,8 @@
-"""Serviço do analista: coleta de notícias e ciclo de pesquisa com relatório persistido.
+"""Analyst service: news collection and the research cycle with a persisted report.
 
-Todo ciclo gera um registro em ``research_reports``, inclusive quando falha (orçamento
-esgotado, erro da API, saída inválida): o chamador então degrada para TA pura conforme o
-perfil (``research.reading``).
+Every cycle produces a record in ``research_reports``, even when it fails (budget
+exhausted, API error, invalid output): the caller then degrades to pure TA according to the
+profile (``research.reading``).
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -70,7 +70,7 @@ class ResearchService:
         self._config = config
         self._clock = clock
         self.metrics = MarketMetrics()
-        """Métricas da última coleta (usadas no próximo ciclo de pesquisa)."""
+        """Metrics of the latest collection (used in the next research cycle)."""
 
     @tracing.traced("research", "research.ingest")
     async def ingest(
@@ -104,7 +104,7 @@ class ResearchService:
             await self._store.set_triage(await analyst.triage(pending, known_assets))
         except BudgetExceededError:
             raise
-        except LlmError as exc:  # segue com as notícias sem triagem
+        except LlmError as exc:  # goes on with the untriaged news
             notes.append(f"triagem indisponível: {exc}")
             return news
         return await self._store.recent_news(since)

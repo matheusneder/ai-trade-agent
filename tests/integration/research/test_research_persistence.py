@@ -159,11 +159,11 @@ async def test_ingest_cycle_and_latest_view(db: Database) -> None:
     triage_request, analyst_request = fake.requests
     assert triage_request["model"] == "claude-sonnet-5"
     content = analyst_request["messages"][0]["content"]
-    assert "Solana validators" in content and "Bitcoin steady" not in content  # irrelevante
+    assert "Solana validators" in content and "Bitcoin steady" not in content  # irrelevant
     assert "BTC 24h: +1.00%" in content
 
     again = await service.run_cycle(trigger="scheduled", candidates=CANDIDATES, web=False)
-    assert again.ok and len(fake.requests) == 3  # nada pendente de triagem
+    assert again.ok and len(fake.requests) == 3  # nothing waiting for triage
 
 
 async def test_cycle_failures_are_recorded(db: Database) -> None:
@@ -174,16 +174,16 @@ async def test_cycle_failures_are_recorded(db: Database) -> None:
 
         await store.add_news([NewsItem("rss", "Solana news", NOW - timedelta(hours=1))])
         fake = FakeClaude()
-        fake.fail(500)  # triagem indisponível...
-        fake.reply_json(VIEW)  # ...mas a leitura sai
+        fake.fail(500)  # triage unavailable...
+        fake.reply_json(VIEW)  # ...but the reading comes out
         degraded = await _service(db, fake, http).run_cycle(
             trigger="t", candidates=CANDIDATES, web=False
         )
         assert degraded.ok
         assert degraded.notes[0].startswith("triagem indisponível")
 
-        fake.fail(500)  # triagem de novo pendente e falha
-        fake.reply([{"type": "text", "text": "{}"}])  # leitura fora do schema
+        fake.fail(500)  # triage pending again, and it fails
+        fake.reply([{"type": "text", "text": "{}"}])  # reading outside the schema
         invalid = await _service(db, fake, http).run_cycle(
             trigger="t", candidates=CANDIDATES, web=False
         )

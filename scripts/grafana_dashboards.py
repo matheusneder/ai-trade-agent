@@ -1,8 +1,8 @@
-"""Gera os dashboards do Grafana (doc 03, §12.1) em ``deploy/grafana/dashboards``.
+"""Generates the Grafana dashboards (doc 03, §12.1) in ``deploy/grafana/dashboards``.
 
-Dashboards como código: edite aqui e rode ``uv run python -m scripts.grafana_dashboards``.
-Um teste garante que os JSON versionados estão em dia com este gerador e que todas as
-consultas executam: SQL no schema do banco e LogQL num Loki com a configuração de produção.
+Dashboards as code: edit here and run ``uv run python -m scripts.grafana_dashboards``.
+A test makes sure the versioned JSON files are in sync with this generator and that every
+query runs: SQL on the database schema and LogQL on a Loki with the production configuration.
 """
 
 import json
@@ -67,7 +67,7 @@ def logql(
     w: int = 12,
     h: int = 8,
 ) -> dict[str, Any]:
-    """Painel sobre o Loki: série temporal, ``stat``/``table`` (consulta instantânea) ou ``logs``."""
+    """Panel over Loki: time series, ``stat``/``table`` (instant query) or ``logs``."""
     target: dict[str, Any] = {
         "refId": "A",
         "datasource": LOKI,
@@ -104,7 +104,7 @@ def label_variable(name: str, label: str, all_value: str) -> dict[str, Any]:
         "type": "query",
         "datasource": LOKI,
         "query": f"label_values({name})",
-        "refresh": 2,  # ao mudar o período
+        "refresh": 2,  # when the period changes
         "multi": True,
         "includeAll": True,
         "allValue": all_value,
@@ -204,7 +204,7 @@ def build() -> dict[str, dict[str, Any]]:
         logql("Logs", FILTERED, kind="logs", w=24, h=18),
     ], since="now-6h", variables=[
         label_variable("service", "Serviço", ".+"),
-        label_variable("level", "Nível", ".*"),  # ".*" inclui linhas sem nível
+        label_variable("level", "Nível", ".*"),  # ".*" includes lines without a level
         search,
     ])  # fmt: skip
     return {

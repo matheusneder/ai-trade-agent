@@ -47,7 +47,7 @@ async def test_fetch_candles_drops_open_candle() -> None:
             await fetch_candles(api, "BTCUSDT", "2h", limit=10, now_ms=0)
 
 
-# ============================================================================ universo
+# ============================================================================ universe
 def _ticker(symbol: str, volume: str) -> Ticker24h:
     return Ticker24h.model_validate(
         {
@@ -125,7 +125,7 @@ def test_prefilter_reasons_and_ranking() -> None:
         "WIDEUSDT": "spread alto",
         "NOBOOKUSDT": "spread alto",
     }
-    assert "BTCBRL" not in excluded  # outra moeda de cotação: fora do escopo
+    assert "BTCBRL" not in excluded  # another quote asset: out of scope
 
 
 def test_select_universe_assigns_tiers_and_history() -> None:

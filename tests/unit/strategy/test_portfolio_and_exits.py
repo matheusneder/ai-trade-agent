@@ -61,8 +61,8 @@ def _plan(profile: ProfileConfig = CONSERVATIVE, **kw: object):  # type: ignore[
 def test_sizing_by_risk_per_trade() -> None:
     result = _plan(candidates=[_candidate("AAAUSDT")])
     [idea] = result.ideas
-    # risco 0,5% de 1000 = 5; stop 2% → notional 250; limite por posição 25% = 250
-    assert idea.entry.quantity == D("2.496")  # 250 / 100,15 = 2,4962…, arredondado ao step
+    # risk 0.5% of 1000 = 5; stop 2% → notional 250; per-position cap 25% = 250
+    assert idea.entry.quantity == D("2.496")  # 250 / 100.15 = 2.4962…, rounded to the step
     assert idea.entry.limit_price == D("100.15")
     assert idea.entry.mode is EntryMode.LIMIT_FOK
     assert idea.policy.stop_pct == D("2")
@@ -88,7 +88,7 @@ def test_ranking_limits_and_rejections() -> None:
         _candidate("VETOUSDT", opinion=MarketOpinion(D("0.9"), D("0.9"), veto=True)),
     ]
     result = _plan(holdings=holdings, candidates=candidates)
-    assert [i.symbol for i in result.ideas] == ["BESTUSDT", "GOODUSDT"]  # 3 vagas − 1 ocupada
+    assert [i.symbol for i in result.ideas] == ["BESTUSDT", "GOODUSDT"]  # 3 slots − 1 taken
     reasons = dict(result.rejections)
     assert reasons == {
         "SMALLUSDT": "tamanho abaixo do mínimo (orçamento/tier/risco)",
@@ -113,20 +113,20 @@ def test_budget_and_tier_room_cap_the_size() -> None:
     holdings = [Holding("conservador", "HELDUSDT", Tier.LARGE, D("150"))]
     result = _plan(holdings=holdings, candidates=[_candidate("AAAUSDT", Tier.LARGE, stop_pct=0.01)])
     [idea] = result.ideas
-    assert idea.notional <= D("50")  # tier large: 20% de 1000 = 200 − 150 em uso
+    assert idea.notional <= D("50")  # large tier: 20% of 1000 = 200 − 150 in use
 
 
 def test_exposure_multiplier_scales_the_size_not_the_slots() -> None:
-    """A cautela do analista reduz o tamanho de cada posição, e não o número de vagas (D-030):
-    nas duas, ela contava duas vezes, e com 2 vagas qualquer leitura abaixo de 1,0 deixava 1."""
+    """The analyst's caution reduces the size of each position, not the number of slots (D-030):
+    applied to both, it counted twice, and with 2 slots any reading below 1.0 left only 1."""
     candidates = [_candidate("AAAUSDT", score=0.9), _candidate("BBBUSDT", score=0.8)]
     result = _plan(candidates=candidates, exposure_multiplier=D("0.5"))
-    assert [i.symbol for i in result.ideas] == ["AAAUSDT", "BBBUSDT"]  # as 3 vagas continuam
-    assert result.ideas[0].notional == pytest.approx(D("125"), rel=D("0.01"))  # 250 × 0,5
+    assert [i.symbol for i in result.ideas] == ["AAAUSDT", "BBBUSDT"]  # the 3 slots remain
+    assert result.ideas[0].notional == pytest.approx(D("125"), rel=D("0.01"))  # 250 × 0.5
 
 
 def test_exposure_multiplier_also_scales_a_capped_size() -> None:
-    """Com o tamanho limitado pelo tier (e não pelo risco), a cautela continua valendo."""
+    """With the size capped by the tier (and not by the risk), caution still applies."""
     holdings = [Holding("conservador", "HELDUSDT", Tier.LARGE, D("150"))]
     candidate = _candidate("AAAUSDT", Tier.LARGE, stop_pct=0.01)
     full = _plan(holdings=holdings, candidates=[candidate])
@@ -135,7 +135,7 @@ def test_exposure_multiplier_also_scales_a_capped_size() -> None:
 
 
 def test_zero_exposure_opens_nothing() -> None:
-    """Leitura que zera a exposição, ou on_failure: pause_entries sem leitura válida."""
+    """A reading that zeroes the exposure, or on_failure: pause_entries with no valid reading."""
     result = _plan(candidates=[_candidate("AAAUSDT")], exposure_multiplier=D(0))
     assert result.ideas == () and dict(result.rejections) == {"AAAUSDT": "exposição zero"}
 
@@ -144,7 +144,7 @@ def test_llm_opinion_blends_score_when_confident() -> None:
     confident = _candidate("AAAUSDT", score=0.7, opinion=MarketOpinion(D("-1"), D("0.9")))
     doubtful = _candidate("BBBUSDT", score=0.7, opinion=MarketOpinion(D("-1"), D("0.1")))
     assert confident.final_score(CONSERVATIVE) == D("0.8") * D("0.7") + D("0.2") * D("-0.9")
-    assert doubtful.final_score(CONSERVATIVE) == D("0.7")  # confiança abaixo do mínimo
+    assert doubtful.final_score(CONSERVATIVE) == D("0.7")  # confidence below the minimum
     result = _plan(candidates=[confident, doubtful])
     assert [i.symbol for i in result.ideas] == ["BBBUSDT"]
 
@@ -158,7 +158,7 @@ def test_maker_entry_uses_bid() -> None:
     assert idea.entry.mode is EntryMode.LIMIT_MAKER_GTC
 
 
-# ============================================================================ saídas
+# ============================================================================ exits
 def _signal(score: float) -> Signal:
     return Signal(score=score, setup=None, stop_pct=0.02, atr_pct=0.01, close=100.0)
 
@@ -224,7 +224,7 @@ def test_break_even_after_one_r() -> None:
     assert protection.stop == FixedStop(D("100.3"))
     assert protection.take_profit == TrailingTakeProfit(
         D("104") * D("1.003"), 100
-    )  # ativação já passou
+    )  # activation already passed
 
 
 def test_break_even_keeps_activation_when_still_ahead() -> None:
@@ -246,6 +246,6 @@ def test_break_even_not_applicable() -> None:
     assert break_even_protection(_position(entry=None), CONSERVATIVE, D("200")) is None
     assert break_even_protection(_position(stop_pct=None), CONSERVATIVE, D("200")) is None
     tiny_fee = break_even_protection(_position(), CONSERVATIVE, D("104"), fee_buffer=D("0.05"))
-    assert tiny_fee is None  # stop proposto acima do preço atual
+    assert tiny_fee is None  # proposed stop above the current price
     negative = break_even_protection(_position(), CONSERVATIVE, D("104"), fee_buffer=D("-0.05"))
-    assert negative is None  # não piora o stop existente
+    assert negative is None  # does not worsen the existing stop

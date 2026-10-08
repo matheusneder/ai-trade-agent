@@ -1,12 +1,12 @@
-"""Operações de execução com semântica de segurança.
+"""Execution operations with safety semantics.
 
-* **Envio idempotente:** diante de resultado desconhecido (timeout, 5xx), a ordem é
-  *consultada* pelo ID de cliente; nunca é reenviada às cegas. A Binance aceita repetir um
-  ``listClientOrderId`` depois que a lista anterior terminou, então reenviar poderia duplicar
-  uma posição.
-* **Troca de proteção:** a Binance não substitui uma *order list* de forma atômica. O OCO
-  antigo é cancelado e o novo é criado em seguida. Se o novo for rejeitado, a posição é
-  vendida a mercado (*fail-safe*), para nunca ficar sem proteção.
+* **Idempotent sending:** on an unknown outcome (timeout, 5xx), the order is *looked up*
+  by its client ID; it is never resent blindly. Binance accepts a repeated
+  ``listClientOrderId`` after the previous list has finished, so resending could
+  duplicate a position.
+* **Protection swap:** Binance does not replace an *order list* atomically. The old OCO
+  is canceled and the new one is created right after. If the new one is rejected, the
+  position is sold at market (*fail-safe*), so it is never left unprotected.
 """
 
 import asyncio
@@ -34,7 +34,7 @@ type Sleep = Callable[[float], Awaitable[None]]
 
 
 class OrderOutcomeUnknownError(Exception):
-    """Não foi possível confirmar se a ordem foi aceita; a reconciliação deve decidir."""
+    """It was not possible to confirm whether the order was accepted; reconciliation decides."""
 
     def __init__(self, client_id: str) -> None:
         super().__init__(f"resultado desconhecido para {client_id}")
@@ -43,20 +43,20 @@ class OrderOutcomeUnknownError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ProtectionReplacement:
-    """Resultado da troca de proteção de uma posição."""
+    """Outcome of swapping a position's protection."""
 
     protection: OrderList | None
-    """Novo OCO ativo; ``None`` quando o *fail-safe* vendeu a posição."""
+    """New active OCO; ``None`` when the *fail-safe* sold the position."""
 
     fallback_exit: Order | None = None
-    """Venda a mercado executada pelo *fail-safe*, se houve."""
+    """Market sell executed by the *fail-safe*, if any."""
 
     already_closed: bool = False
-    """A proteção anterior já havia encerrado a posição; nada foi enviado."""
+    """The previous protection had already closed the position; nothing was sent."""
 
 
 class ExecutionGateway:
-    """Envio de ordens com confirmação de resultado desconhecido e *fail-safe*."""
+    """Order sending with confirmation of unknown outcomes and a *fail-safe*."""
 
     def __init__(
         self,
@@ -73,7 +73,7 @@ class ExecutionGateway:
         self._connection_retries = connection_retries
         self._sleep = sleep
 
-    # ------------------------------------------------------------------ envio idempotente
+    # ------------------------------------------------------------------ idempotent sending
     @tracing.traced("execution", "order_list.submit")
     async def submit_order_list(
         self, kind: OrderListKind, params: Mapping[str, ParamValue]
@@ -114,7 +114,7 @@ class ExecutionGateway:
             try:
                 result = await send()
             except BinanceConnectionError:
-                # A requisição não saiu da máquina: reenviar é seguro.
+                # The request never left the machine: resending is safe.
                 if attempt >= self._connection_retries:
                     raise
                 attempt += 1
@@ -147,10 +147,10 @@ class ExecutionGateway:
                 return found
         raise OrderOutcomeUnknownError(client_id)
 
-    # ------------------------------------------------------------------ cancelamento
+    # ------------------------------------------------------------------ cancellation
     @tracing.traced("execution", "order_list.cancel")
     async def cancel_order_list(self, symbol: str, list_client_order_id: str) -> OrderList | None:
-        """Cancela a lista; ``None`` se ela já não estava ativa (executada/expirada)."""
+        """Cancels the list; ``None`` if it was no longer active (filled/expired)."""
         log.debug("order_list.cancel", symbol=symbol, list_id=list_client_order_id)
         try:
             return await self.api.cancel_order_list(
@@ -162,7 +162,7 @@ class ExecutionGateway:
                 return None
             raise
 
-    # ------------------------------------------------------------------ proteção e saída
+    # ------------------------------------------------------------------ protection and exit
     @tracing.traced("execution", "protection.replace")
     async def replace_protection(
         self,
@@ -171,10 +171,10 @@ class ExecutionGateway:
         new_oco_params: Mapping[str, ParamValue],
         fallback_sell_params: Mapping[str, ParamValue],
     ) -> ProtectionReplacement:
-        """Cancela o OCO atual e cria o novo; vende a mercado se o novo for rejeitado.
+        """Cancels the current OCO and creates the new one; sells at market if it is rejected.
 
-        Se o OCO atual já tinha terminado (TP/SL executado na Binance), nada é enviado e o
-        resultado indica ``already_closed``.
+        If the current OCO had already finished (TP/SL filled on Binance), nothing is sent
+        and the result reports ``already_closed``.
         """
         log.debug(
             "protection.replace",
@@ -205,9 +205,9 @@ class ExecutionGateway:
         protection_list_id: str | None,
         sell_params: Mapping[str, ParamValue],
     ) -> Order | None:
-        """Encerra a posição: cancela a proteção (se houver) e vende a mercado.
+        """Closes the position: cancels the protection (if any) and sells at market.
 
-        Retorna ``None`` se a proteção já havia encerrado a posição na Binance.
+        Returns ``None`` if the protection had already closed the position on Binance.
         """
         log.debug("position.close_submit", symbol=symbol, list_id=protection_list_id)
         if protection_list_id is not None:

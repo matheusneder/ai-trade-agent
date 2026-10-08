@@ -1,7 +1,7 @@
-"""Modelos tipados das respostas da Binance Spot usadas pelo agente.
+"""Typed models of the Binance Spot responses the agent uses.
 
-Os modelos aceitam campos extras (a API adiciona campos com frequência) e convertem
-preços e quantidades para :class:`~decimal.Decimal`.
+The models accept extra fields (the API adds fields often) and convert prices and
+quantities to :class:`~decimal.Decimal`.
 """
 
 from decimal import Decimal
@@ -44,7 +44,7 @@ class OrderStatus(StrEnum):
 
     @property
     def is_final(self) -> bool:
-        """Estado terminal: a ordem não muda mais."""
+        """Terminal state: the order no longer changes."""
         return self in _FINAL_ORDER_STATUSES
 
 
@@ -77,7 +77,7 @@ class _Model(BaseModel):
 
 
 class Order(_Model):
-    """Ordem (``GET /api/v3/order`` e ``orderReports`` de respostas de envio)."""
+    """Order (``GET /api/v3/order`` and the ``orderReports`` of send responses)."""
 
     symbol: str
     order_id: int = Field(alias="orderId")
@@ -85,8 +85,8 @@ class Order(_Model):
     client_order_id: str = Field(alias="clientOrderId")
     price: Decimal = Decimal(0)
     orig_qty: Decimal = Field(default=Decimal(0), alias="origQty")
-    """Ausente nas pernas pendentes de OPO/OPOCO na resposta do envio: a quantidade só é
-    definida quando a entrada executa (visto no Spot Testnet em 28/09/2026)."""
+    """Missing from the pending legs of OPO/OPOCO in the send response: the quantity is only
+    set when the entry fills (seen on the Spot Testnet on 2026-09-28)."""
     executed_qty: Decimal = Field(default=Decimal(0), alias="executedQty")
     cummulative_quote_qty: Decimal = Field(default=Decimal(0), alias="cummulativeQuoteQty")
     status: OrderStatus
@@ -106,7 +106,7 @@ class OrderRef(_Model):
 
 
 class OrderList(_Model):
-    """Lista de ordens (OCO, OTO, OTOCO, OPO, OPOCO)."""
+    """Order list (OCO, OTO, OTOCO, OPO, OPOCO)."""
 
     order_list_id: int = Field(alias="orderListId")
     contingency_type: str = Field(alias="contingencyType")
@@ -139,7 +139,7 @@ class Account(_Model):
     update_time: int | None = Field(default=None, alias="updateTime")
 
     def balance(self, asset: str) -> Balance:
-        """Saldo do ativo (zero se ausente)."""
+        """Balance of the asset (zero if missing)."""
         for item in self.balances:
             if item.asset == asset:
                 return item
@@ -155,7 +155,7 @@ class BookTicker(_Model):
 
 
 class Ticker24h(_Model):
-    """Estatísticas de 24 h (``GET /api/v3/ticker/24hr``)."""
+    """24 h statistics (``GET /api/v3/ticker/24hr``)."""
 
     symbol: str
     last_price: Decimal = Field(alias="lastPrice")
@@ -166,7 +166,7 @@ class Ticker24h(_Model):
 
 
 class Trade(_Model):
-    """Execução da conta (``GET /api/v3/myTrades``)."""
+    """Account trade (``GET /api/v3/myTrades``)."""
 
     symbol: str
     id: int
@@ -188,7 +188,7 @@ class CommissionComponent(_Model):
 
 
 class CommissionRates(_Model):
-    """Taxas da conta para um símbolo (``GET /api/v3/account/commission``)."""
+    """Account fees for a symbol (``GET /api/v3/account/commission``)."""
 
     symbol: str
     standard: CommissionComponent = Field(alias="standardCommission")
@@ -201,10 +201,10 @@ class CommissionRates(_Model):
 
     @property
     def maker_rate(self) -> Decimal:
-        """Taxa total de ordens *maker* (padrão + especial + imposto), sem desconto BNB."""
+        """Total fee of *maker* orders (standard + special + tax), without the BNB discount."""
         return self._total("maker")
 
     @property
     def taker_rate(self) -> Decimal:
-        """Taxa total de ordens *taker* (padrão + especial + imposto), sem desconto BNB."""
+        """Total fee of *taker* orders (standard + special + tax), without the BNB discount."""
         return self._total("taker")

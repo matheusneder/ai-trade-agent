@@ -1,6 +1,6 @@
-"""CLI de operação manual (Fase 1): consultas e ordens protegidas no Testnet/Demo.
+"""Manual operation CLI (Phase 1): queries and protected orders on Testnet/Demo.
 
-Exemplos::
+Examples::
 
     trade-agent info BTCUSDT
     trade-agent account
@@ -8,10 +8,10 @@ Exemplos::
     trade-agent open BTCUSDT --quote 20 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
     trade-agent protect BTCUSDT --qty 0.0003 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
     trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
-    trade-agent run          # agente: recuperação na partida + reconciliação contínua
-    trade-agent research ... # analista de mercado (ver trade_agent.research.commands)
+    trade-agent run          # agent: startup recovery + continuous reconciliation
+    trade-agent research ... # market analyst (see trade_agent.research.commands)
 
-Ordens exigem ``TA_TRADING_ENABLED=true``; em produção exigem também ``--confirm-prod``.
+Orders require ``TA_TRADING_ENABLED=true``; in production they also require ``--confirm-prod``.
 """
 
 import argparse
@@ -127,7 +127,7 @@ def _emit(out: TextIO, payload: Any) -> None:
 
 
 async def run(args: argparse.Namespace, api: BinanceSpotApi, out: TextIO) -> int:
-    """Executa o subcomando com uma API já conectada."""
+    """Runs the subcommand with an already connected API."""
     gateway = ExecutionGateway(api)
     if args.command == "info":
         rules = (await api.exchange_info([args.symbol]))[args.symbol]

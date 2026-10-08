@@ -1,31 +1,32 @@
 # AI Trade Agent
 
-Agente autônomo de trade de criptomoedas na **Binance Spot**. Ele decide com base em análise técnica e em pesquisa de mercado (LLM) e protege cada posição com ordens nativas da Binance (OPOCO/OCO com trailing). A proteção continua valendo mesmo com o agente desligado.
+Autonomous cryptocurrency trading agent for **Binance Spot**. It decides based on technical analysis and market research (LLM) and protects every position with native Binance orders (OPOCO/OCO with trailing). The protection keeps working even with the agent turned off.
 
-- Documentação: [`doc/`](doc/README.md) (arquitetura, operação e laboratório)
-- Estado atual: *paper trading* no Demo Mode desde 29/09/2026; o que falta para produção está em [`doc/04-estado-e-go-live.md`](doc/04-estado-e-go-live.md)
+- Documentation: [`doc/`](doc/README.md) (architecture, operation and lab)
+- Current status: *paper trading* in Demo Mode since 2026-09-29; what is missing for production is in [`doc/04-status-and-go-live.md`](doc/04-status-and-go-live.md)
+- Language: code, comments and documentation are in English; the agent's interface for its operator (Telegram messages, Grafana and SigNoz dashboards, log messages, the analyst's prompts) is in Portuguese.
 
-> ⚠️ Software experimental. Não constitui recomendação de investimento. Use Testnet/Demo e, em produção, apenas capital que você aceita perder.
+> ⚠️ Experimental software. It does not constitute investment advice. Use Testnet/Demo and, in production, only capital you accept losing.
 
-## Requisitos
+## Requirements
 
-- Python 3.12+ (desenvolvimento em 3.14)
-- [uv](https://docs.astral.sh/uv/) (`pip install --user uv`; neste README os comandos usam `uv`, e `python -m uv` também funciona)
-- Docker (testes de integração com PostgreSQL e implantação)
+- Python 3.12+ (developed on 3.14)
+- [uv](https://docs.astral.sh/uv/) (`pip install --user uv`; this README's commands use `uv`, and `python -m uv` works too)
+- Docker (integration tests with PostgreSQL and deployment)
 
-## Primeiros passos
+## Getting started
 
 ```bash
-uv sync                      # cria .venv e instala dependências (incluindo dev)
-cp .env.example .env         # preencha com as chaves de Testnet/Demo
-uv run pytest                # testes unitários e de integração (sem rede externa)
-uv run pytest -m live        # testes contra Binance Testnet/Demo (exigem chaves no .env)
+uv sync                      # creates .venv and installs the dependencies (dev included)
+cp .env.example .env         # fill it in with the Testnet/Demo keys
+uv run pytest                # unit and integration tests (no external network)
+uv run pytest -m live        # tests against Binance Testnet/Demo (need keys in the .env)
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-## Chaves da Binance (Testnet / Demo)
+## Binance keys (Testnet / Demo)
 
-1. Gere um par de chaves Ed25519 localmente e guarde a chave privada **fora do git** (a pasta `secrets/` é ignorada):
+1. Generate an Ed25519 key pair locally and keep the private key **out of git** (the `secrets/` folder is ignored):
 
    ```bash
    mkdir -p secrets
@@ -33,111 +34,111 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
    openssl pkey -in secrets/binance-testnet-ed25519.pem -pubout
    ```
 
-2. Cadastre a **chave pública** em:
-   - Spot Testnet: https://testnet.binance.vision (login via GitHub → *Generate Ed25519 Key*)
+2. Register the **public key** at:
+   - Spot Testnet: https://testnet.binance.vision (log in with GitHub → *Generate Ed25519 Key*)
    - Demo Mode: https://demo.binance.com → *API Management*
-3. Preencha `TA_BINANCE_API_KEY` e `TA_BINANCE_PRIVATE_KEY_PATH` no `.env`.
-4. Para permitir o envio de ordens, defina `TA_TRADING_ENABLED=true`. Sem isso, o cliente bloqueia qualquer ordem.
+3. Fill in `TA_BINANCE_API_KEY` and `TA_BINANCE_PRIVATE_KEY_PATH` in the `.env`.
+4. To allow sending orders, set `TA_TRADING_ENABLED=true`. Without it, the client blocks every order.
 
-Nunca habilite permissão de saque nas chaves de API.
+Never enable the withdrawal permission on the API keys.
 
-## Spike OPOCO
+## OPOCO spike
 
-Valida num ambiente novo (Testnet ou Demo) os tipos de ordem dos quais a arquitetura depende:
+Validates, in a new environment (Testnet or Demo), the order types the architecture depends on:
 
 ```bash
-uv run python scripts/spike_opoco.py --env-file .env           # usa BTCUSDT por padrão
+uv run python scripts/spike_opoco.py --env-file .env           # uses BTCUSDT by default
 uv run python scripts/spike_opoco.py --env-file .env --symbol ETHUSDT
 ```
 
-O script recusa o ambiente `prod`. Os resultados brutos ficam em `var/spike/`.
+The script refuses the `prod` environment. The raw results go to `var/spike/`.
 
-Resultado no Spot Testnet (19/19, 28/09/2026) e achados sobre a API: [`doc/01-requisitos-e-binance.md`](doc/01-requisitos-e-binance.md) (§3).
+Result on the Spot Testnet (19/19, 2026-09-28) and findings about the API: [`doc/01-requirements-and-binance.md`](doc/01-requirements-and-binance.md) (§3).
 
-## CLI de operação manual
+## Manual operation CLI
 
-Consultas e ordens protegidas (Testnet/Demo). O envio de ordens exige `TA_TRADING_ENABLED=true`; em produção, também `--confirm-prod`.
+Queries and protected orders (Testnet/Demo). Sending orders requires `TA_TRADING_ENABLED=true`; in production, also `--confirm-prod`.
 
 ```bash
 uv run trade-agent info BTCUSDT
 uv run trade-agent account
 uv run trade-agent lists
-# compra de 20 USDT: OPOCO com TP em trailing (+3%, recuo 1%) e stop fixo (-4%)
+# 20 USDT buy: OPOCO with a trailing TP (+3%, 1% pullback) and a fixed stop (-4%)
 uv run trade-agent open BTCUSDT --quote 20 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
-# proteger um saldo existente com OCO
+# protect an existing balance with an OCO
 uv run trade-agent protect BTCUSDT --qty 0.0003 --tp-pct 3 --tp-trailing-bips 100 --stop-pct 4
-# encerrar: cancela a proteção e vende a mercado
+# close: cancels the protection and sells at market
 uv run trade-agent close BTCUSDT --qty 0.0003 --list-id ta1-man-0a1b2c3d4e-0-L
 ```
 
-## Executar o agente
+## Running the agent
 
-O agente precisa de PostgreSQL e das chaves no `.env`. Na partida, ele aplica as migrações, sincroniza o relógio e reconcilia todas as posições com a Binance. Depois disso:
+The agent needs PostgreSQL and the keys in the `.env`. At startup, it applies the migrations, syncs the clock and reconciles every position with Binance. After that, it:
 
-- reconcilia a cada 5 minutos e reage aos eventos do User Data Stream;
-- avalia as condições de parada a cada minuto (`config/stop_conditions.yaml`);
-- coleta notícias a cada 15 minutos;
-- monta o universo e roda o ciclo de decisão de cada perfil habilitado no fechamento do candle (os perfis atuais usam 4h).
+- reconciles every 5 minutes and reacts to User Data Stream events;
+- evaluates the stop conditions every minute (`config/stop_conditions.yaml`);
+- collects news every 15 minutes;
+- builds the universe and runs the decision cycle of each enabled profile at the candle close (the current profiles use 4h).
 
-Use o **Demo Mode** (`TA_BINANCE_ENV=demo`) para rodar o agente: o Spot Testnet tem só ~20 dias de histórico, e o universo fica vazio (ver [`doc/runbook.md`](doc/runbook.md)). Com `TA_TRADING_ENABLED=false` (padrão), o agente roda em **simulação**: decide e registra as entradas e saídas como eventos, sem enviar ordens. Com o Telegram configurado (`TA_TELEGRAM_BOT_TOKEN` e `TA_TELEGRAM_CHAT_ID`), ele envia alertas e aceita `/status`, `/pause`, `/resume`, `/halt` e `/flatten` (este com código de confirmação).
+Use **Demo Mode** (`TA_BINANCE_ENV=demo`) to run the agent: the Spot Testnet has only ~20 days of history, and the universe ends up empty (see [`doc/runbook.md`](doc/runbook.md)). With `TA_TRADING_ENABLED=false` (the default), the agent runs in **simulation**: it decides and records the entries and exits as events, without sending orders. With Telegram configured (`TA_TELEGRAM_BOT_TOKEN` and `TA_TELEGRAM_CHAT_ID`), it sends alerts and accepts `/status`, `/pause`, `/resume`, `/halt` and `/flatten` (the latter with a confirmation code).
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d postgres   # banco local
-uv run trade-agent run                                        # ou: docker compose ... up -d agent
+docker compose -f deploy/docker-compose.yml up -d postgres   # local database
+uv run trade-agent run                                        # or: docker compose ... up -d agent
 ```
 
-Só pode haver uma instância ativa por banco (*advisory lock*). Migrações manuais com Alembic:
+There can be only one active instance per database (*advisory lock*). Manual migrations with Alembic:
 
 ```bash
 uv run alembic -x url=postgresql+asyncpg://trade_agent:trade_agent_dev@localhost:5432/trade_agent upgrade head
 ```
 
-## Laboratório de backtest (Freqtrade via Docker)
+## Backtesting lab (Freqtrade through Docker)
 
-A estratégia "casca" do Freqtrade importa o mesmo pacote de sinais usado em produção (`trade_agent.signals`). A configuração e os parâmetros são gerados a partir de `config/profiles.yaml`.
+Freqtrade's "shell" strategy imports the same signals package used in production (`trade_agent.signals`). The configuration and the parameters are generated from `config/profiles.yaml`.
 
 ```bash
-# walk-forward otimizado: hyperopt nos 12 meses anteriores a cada janela trimestral de validação
+# optimized walk-forward: hyperopt on the 12 months before each quarterly validation window
 uv run python -m lab.walk_forward --profile swing_trend --optimize --download
-# com os parâmetros atuais do perfil, sem otimizar
+# with the profile's current parameters, no optimization
 uv run python -m lab.walk_forward --profile momentum_alpha
 ```
 
-Para comparar outra versão do código (A/B), aponte `TA_LAB_SRC` para a pasta `src/` dessa versão (ex.: um `git worktree`).
+To compare another version of the code (A/B), point `TA_LAB_SRC` to that version's `src/` folder (e.g. a `git worktree`).
 
-As janelas vão de 2023-01-01 a 2026-09-01 por padrão (`--start`, `--end`). Os relatórios ficam em `var/lab/`, e o resumo comentado da calibração em uso está em [`doc/lab-resultados.md`](doc/lab-resultados.md).
+The windows go from 2023-01-01 to 2026-09-01 by default (`--start`, `--end`). The reports go to `var/lab/`, and the annotated summary of the calibration in use is in [`doc/lab-results.md`](doc/lab-results.md).
 
-## Analista de mercado
+## Market analyst
 
-Coleta notícias e métricas públicas, faz a triagem com `claude-sonnet-5` e produz uma leitura de mercado (`MarketView`) com `claude-opus-5`. As regras de segurança são aplicadas por código: o LLM só pode vetar ativos e reduzir a exposição. Modelos, fontes, orçamento (US$ 5/dia) e limites ficam em `config/research.yaml`; a chave vai no `.env` (`ANTHROPIC_API_KEY`).
-
-```bash
-uv run trade-agent research ingest                     # coleta notícias e métricas (PostgreSQL)
-uv run trade-agent research run --assets BTC,ETH,SOL   # um ciclo de pesquisa
-uv run trade-agent research show                       # última leitura válida
-uv run trade-agent research eval                       # avaliação com 31 casos rotulados (~US$ 0,60)
-```
-
-## Observabilidade
-
-O agente grava uma foto de telemetria a cada 5 minutos (`telemetry_snapshots`) e envia um heartbeat a cada minuto para a URL de `TA_HEALTHCHECK_URL` (ex.: Healthchecks.io). O Grafana sobe junto no compose, com 6 dashboards (visão geral, posições, performance, decisões e pesquisa, saúde técnica e logs) e alertas no Telegram. Acesse em `http://127.0.0.1:3000` (admin / `GRAFANA_ADMIN_PASSWORD`). Os logs de todos os contêineres vão para o Loki (coletados pelo Grafana Alloy, guardados por 30 dias). Os traces do agente (OpenTelemetry) vão para o Jaeger (7 dias), com cada componente como serviço, e aparecem no Grafana em *Explore* → *Traces*; logs e traces se ligam nos dois sentidos pelo `trace_id`. O grafo de dependências também está no Grafana (fonte Jaeger, *Dependency graph*). A interface do próprio Jaeger só abre no host em desenvolvimento, com `DEV_JAEGER_UI=1` (runbook, §1.2). Em paralelo, o SigNoz (`http://127.0.0.1:8080`) reúne traces, logs e métricas: as do agente (patrimônio, drawdown, estado do risco, custo do LLM...) e as de cada contêiner, com 4 dashboards (operação, saúde técnica, LLM e contêineres) gerados por `scripts/signoz_dashboards.py`. Procedimentos de incidente: [`doc/runbook.md`](doc/runbook.md).
+Collects public news and metrics, triages them with `claude-sonnet-5` and produces a market reading (`MarketView`) with `claude-opus-5`. The safety rules are enforced by code: the LLM can only veto assets and reduce exposure. Models, sources, budget (US$ 5/day) and limits live in `config/research.yaml`; the key goes in the `.env` (`ANTHROPIC_API_KEY`).
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d postgres grafana   # lê o .env da raiz
-uv run python -m scripts.grafana_dashboards   # regenera os dashboards após editar o gerador
+uv run trade-agent research ingest                     # collects news and metrics (PostgreSQL)
+uv run trade-agent research run --assets BTC,ETH,SOL   # one research cycle
+uv run trade-agent research show                       # latest valid reading
+uv run trade-agent research eval                       # evaluation with 31 labeled cases (~US$ 0.60)
 ```
 
-## Estrutura
+## Observability
+
+The agent records a telemetry snapshot every 5 minutes (`telemetry_snapshots`) and sends a heartbeat every minute to the `TA_HEALTHCHECK_URL` URL (e.g. Healthchecks.io). Grafana comes up with the compose, with 6 dashboards (overview, positions, performance, decisions and research, technical health and logs) and alerts on Telegram. Open it at `http://127.0.0.1:3000` (admin / `GRAFANA_ADMIN_PASSWORD`). The logs of every container go to Loki (collected by Grafana Alloy, kept for 30 days). The agent's traces (OpenTelemetry) go to Jaeger (7 days), with each component as a service, and show up in Grafana under *Explore* → *Traces*; logs and traces link both ways through the `trace_id`. The dependency graph is also in Grafana (Jaeger source, *Dependency graph*). Jaeger's own UI only opens on the host in development, with `DEV_JAEGER_UI=1` (runbook, §1.2). Alongside, SigNoz (`http://127.0.0.1:8080`) gathers traces, logs and metrics: the agent's (equity, drawdown, risk state, LLM cost...) and each container's, with 4 dashboards (operation, technical health, LLM and containers) generated by `scripts/signoz_dashboards.py`. Incident procedures: [`doc/runbook.md`](doc/runbook.md).
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d postgres grafana   # reads the root .env
+uv run python -m scripts.grafana_dashboards   # regenerates the dashboards after editing the generator
+```
+
+## Layout
 
 ```text
-src/trade_agent/      código da aplicação (ver doc/03-arquitetura.md §4)
-tests/unit/           testes unitários
-tests/integration/    testes de integração (Binance simulada, Postgres em contêiner)
-tests/live/           testes contra Testnet/Demo (marcador `live`)
-scripts/              spike OPOCO e geradores dos dashboards do Grafana e do SigNoz
-lab/                  laboratório de backtest (Freqtrade via Docker, walk-forward)
-config/               perfis de alocação (profiles.yaml) e analista (research.yaml)
-evals/                casos rotulados para avaliar o analista LLM
-deploy/               docker-compose e provisionamento
-doc/                  arquitetura, plano e decisões
+src/trade_agent/      application code (see doc/03-architecture.md §4)
+tests/unit/           unit tests
+tests/integration/    integration tests (simulated Binance, Postgres in a container)
+tests/live/           tests against Testnet/Demo (`live` marker)
+scripts/              OPOCO spike and the Grafana and SigNoz dashboard generators
+lab/                  backtesting lab (Freqtrade through Docker, walk-forward)
+config/               allocation profiles (profiles.yaml) and analyst (research.yaml)
+evals/                labeled cases to evaluate the LLM analyst
+deploy/               docker-compose and provisioning
+doc/                  architecture, plan and decisions
 ```

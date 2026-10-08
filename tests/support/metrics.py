@@ -1,4 +1,4 @@
-"""Métricas em memória: o mesmo ``AgentMetrics`` de produção, lido sob demanda."""
+"""In-memory metrics: the same production ``AgentMetrics``, read on demand."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,7 +14,7 @@ class Measured:
         self._reader = reader
 
     def points(self) -> dict[str, list[tuple[dict[str, Any], float]]]:
-        """{métrica: [(atributos, valor)]} da coleta atual."""
+        """{metric: [(attributes, value)]} of the current collection."""
         found: dict[str, list[tuple[dict[str, Any], float]]] = {}
         data = self._reader.get_metrics_data()
         for resource in data.resource_metrics if data else []:

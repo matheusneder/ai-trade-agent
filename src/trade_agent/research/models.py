@@ -1,11 +1,11 @@
-"""Contratos do analista: itens de notícia, métricas de mercado e ``MarketView`` (doc 03, §7.2).
+"""Analyst contracts: news items, market metrics and ``MarketView`` (doc 03, §7.2).
 
-Há dois níveis de modelo para a saída do LLM:
+There are two levels of model for the LLM output:
 
-* ``*Draft``: o formato pedido ao modelo (*structured outputs*), **sem** restrições
-  numéricas. Valores fora da faixa não invalidam a resposta inteira; quem os trunca é o
-  código (``research.safety``), como manda a regra de segurança;
-* ``MarketView``/``AssetView``: a leitura já saneada, com faixas garantidas.
+* ``*Draft``: the format requested from the model (*structured outputs*), **without**
+  numeric constraints. Out-of-range values do not invalidate the whole answer; the code
+  truncates them (``research.safety``), as the safety rule requires;
+* ``MarketView``/``AssetView``: the already sanitized reading, with guaranteed ranges.
 """
 
 import hashlib
@@ -46,10 +46,10 @@ class Severity(StrEnum):
     CRITICAL = "critical"
 
 
-# ============================================================================ entradas
+# ============================================================================ inputs
 @dataclass(frozen=True, slots=True)
 class NewsItem:
-    """Notícia ou anúncio coletado (conteúdo externo: **dado não confiável**)."""
+    """Collected news item or announcement (external content: **untrusted data**)."""
 
     source: str
     title: str
@@ -60,7 +60,7 @@ class NewsItem:
 
     @property
     def dedupe_key(self) -> str:
-        """Chave de deduplicação: fonte + URL (ou título normalizado, sem URL)."""
+        """Deduplication key: source + URL (or the normalized title, without a URL)."""
         basis = self.url or " ".join(self.title.lower().split())
         return hashlib.sha256(f"{self.source}|{basis}".encode()).hexdigest()[:32]
 
@@ -74,17 +74,17 @@ class FearGreed:
 
 @dataclass(frozen=True, slots=True)
 class DerivativesSnapshot:
-    """Termômetro de alavancagem por símbolo (Binance Futures USDⓈ-M)."""
+    """Leverage gauge per symbol (Binance Futures USDⓈ-M)."""
 
     funding_rate: dict[str, float] = field(default_factory=dict)
-    """Última taxa de *funding* (fração por período de 8h)."""
+    """Latest *funding* rate (fraction per 8 h period)."""
     open_interest_change_24h: dict[str, float] = field(default_factory=dict)
-    """Variação do *open interest* em USDT nas últimas 24h (fração)."""
+    """Change of the *open interest* in USDT over the last 24 h (fraction)."""
 
 
 @dataclass(frozen=True, slots=True)
 class MarketMetrics:
-    """Métricas calculadas pelo próprio agente (**dado confiável**)."""
+    """Metrics computed by the agent itself (**trusted data**)."""
 
     fear_greed: FearGreed | None = None
     derivatives: DerivativesSnapshot = field(default_factory=DerivativesSnapshot)
@@ -93,7 +93,7 @@ class MarketMetrics:
 
 @dataclass(frozen=True, slots=True)
 class CandidateContext:
-    """Candidato do TA ou posição em carteira apresentado ao analista."""
+    """TA candidate or portfolio position presented to the analyst."""
 
     asset: str
     symbol: str
@@ -105,7 +105,7 @@ class CandidateContext:
 
 @dataclass(frozen=True, slots=True)
 class StoredNews:
-    """Notícia gravada (com id para a triagem) e a classificação, se já triada."""
+    """Recorded news item (with an id for the triage) and its classification, if triaged."""
 
     id: int
     item: NewsItem
@@ -122,7 +122,7 @@ class Triage:
     assets: tuple[str, ...]
 
 
-# ============================================================================ saída do LLM
+# ============================================================================ LLM output
 class _Wire(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -159,7 +159,7 @@ class TriageDraft(_Wire):
     items: list[TriageDraftItem]
 
 
-# ============================================================================ leitura saneada
+# ============================================================================ sanitized reading
 class AssetView(BaseModel):
     model_config = ConfigDict(frozen=True)
 

@@ -1,23 +1,23 @@
-"""Score técnico e setups de entrada (vetorizados, para live e backtest).
+"""Technical score and entry setups (vectorized, for live and backtest).
 
-Score ∈ [-1, 1], soma de componentes simples e auditáveis:
+Score ∈ [-1, 1], a sum of simple, auditable components:
 
-======================  ===============================================
-tendência (±0,35)       EMA rápida vs lenta e preço vs EMA lenta
-momento (±0,20)         histograma MACD
-força (±0,15)           ADX ≥ mínimo, no sentido da tendência
-força relativa (±0,20)  ROC da razão preço/benchmark (ex.: BTC)
-volume (±0,10)          volume acima da média em candle de alta/baixa
-esticado (−0,15)        RSI acima do nível de sobrecompra
-======================  ===============================================
+==========================  ===============================================
+trend (±0.35)               fast EMA vs slow EMA and price vs slow EMA
+momentum (±0.20)            MACD histogram
+strength (±0.15)            ADX ≥ minimum, in the direction of the trend
+relative strength (±0.20)   ROC of the price/benchmark ratio (e.g. BTC)
+volume (±0.10)              volume above average on an up/down candle
+stretched (−0.15)           RSI above the overbought level
+==========================  ===============================================
 
-Setups (apenas compra, mercado Spot), ambos a favor da tendência e só com o regime de
-mercado em alta (benchmark acima da EMA lenta; desligável por ``use_regime_filter``):
+Setups (buy only, Spot market), both with the trend and only while the market regime is
+up (benchmark above the slow EMA; can be turned off with ``use_regime_filter``):
 
-* ``trend_pullback``: tendência de alta com ADX ≥ mínimo, RSI saindo de um recuo
-  (anterior ≤ limite e subindo) em candle de alta;
-* ``breakout``: fechamento acima da máxima dos N candles anteriores, com volume
-  relativo ≥ mínimo.
+* ``trend_pullback``: uptrend with ADX ≥ minimum, RSI coming out of a pullback
+  (previous ≤ limit and rising) on an up candle;
+* ``breakout``: close above the high of the previous N candles, with relative volume
+  ≥ minimum.
 """
 
 from dataclasses import dataclass
@@ -43,12 +43,12 @@ class SignalParams:
 
 @dataclass(frozen=True)
 class Signal:
-    """Leitura do último candle fechado."""
+    """Reading of the last closed candle."""
 
     score: float
     setup: str | None
     stop_pct: float
-    """Distância sugerida do stop (fração do preço), a partir do ATR."""
+    """Suggested stop distance (fraction of the price), from the ATR."""
     atr_pct: float
     close: float
 
@@ -89,7 +89,7 @@ def score_frame(features: pd.DataFrame, params: SignalParams | None = None) -> p
 
 
 def setup_frame(features: pd.DataFrame, params: SignalParams | None = None) -> pd.Series:
-    """Nome do setup em cada candle (``""`` quando não há setup)."""
+    """Setup name on each candle (``""`` when there is no setup)."""
     p = params or SignalParams()
     rsi = _col(features, "rsi")
     trend = _uptrend(features)
@@ -120,7 +120,7 @@ def stop_pct_frame(features: pd.DataFrame, params: SignalParams | None = None) -
 def entry_mask(
     features: pd.DataFrame, min_score: float, params: SignalParams | None = None
 ) -> pd.Series:
-    """Candles com setup e score mínimo (sinal de entrada)."""
+    """Candles with a setup and the minimum score (entry signal)."""
     has_setup = setup_frame(features, params) != ""
     return (has_setup & (score_frame(features, params) >= min_score)).rename("entry")
 
@@ -128,12 +128,12 @@ def entry_mask(
 def exit_mask(
     features: pd.DataFrame, exit_score: float, params: SignalParams | None = None
 ) -> pd.Series:
-    """Candles em que o score caiu ao nível de saída (rotação)."""
+    """Candles where the score fell to the exit level (rotation)."""
     return (score_frame(features, params) <= exit_score).rename("exit")
 
 
 def evaluate(features: pd.DataFrame, params: SignalParams | None = None) -> Signal:
-    """Sinal do último candle fechado (NaN → neutro)."""
+    """Signal of the last closed candle (NaN → neutral)."""
     if features.empty:
         raise ValueError("sem candles para avaliar")
     last = features.index[-1]

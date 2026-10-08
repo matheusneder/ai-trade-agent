@@ -1,4 +1,4 @@
-"""PostgreSQL em contêiner (testcontainers) para os testes de integração."""
+"""PostgreSQL in a container (testcontainers) for the integration tests."""
 
 import asyncio
 import shutil

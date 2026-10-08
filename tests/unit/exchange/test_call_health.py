@@ -12,12 +12,12 @@ def test_error_rate_window_and_minimum_calls() -> None:
     health = CallHealth(window_s=60, clock=lambda: now[0])
     for ok in (True, False, True, False):
         health.record(ok=ok)
-    assert health.error_rate() == 0.0  # menos de 5 chamadas
+    assert health.error_rate() == 0.0  # fewer than 5 calls
     health.record(ok=False)
     assert health.error_rate() == pytest.approx(0.6)
     now[0] = 61
     health.record(ok=True)
-    assert health.error_rate(min_calls=1) == 0.0  # antigas saíram da janela
+    assert health.error_rate(min_calls=1) == 0.0  # old ones left the window
 
 
 @pytest.mark.parametrize(

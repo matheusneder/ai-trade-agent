@@ -1,4 +1,4 @@
-"""telemetria
+"""telemetry
 
 Revision ID: 0003
 Revises: 0002

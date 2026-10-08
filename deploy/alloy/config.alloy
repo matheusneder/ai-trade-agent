@@ -1,7 +1,7 @@
-// Coleta os logs dos contêineres do projeto trade-agent e os envia ao Loki.
-// A API do Docker é lida pelo proxy somente leitura (serviço docker-proxy), nunca pelo socket.
-// Rótulos no Loki: service (serviço do compose) e level. No agente, os campos `event` e
-// `trace_id` do structlog vão como metadado estruturado: {service="agent"} | event="risk.snapshot".
+// Collects the logs of the trade-agent project's containers and sends them to Loki.
+// The Docker API is read through the read-only proxy (docker-proxy service), never the socket.
+// Labels in Loki: service (the compose service) and level. In the agent, structlog's `event`
+// and `trace_id` fields go as structured metadata: {service="agent"} | event="risk.snapshot".
 
 logging {
 	level  = "warn"
@@ -12,16 +12,17 @@ discovery.docker "trade_agent" {
 	host             = "tcp://docker-proxy:2375"
 	refresh_interval = "15s"
 
-	// só os contêineres deste projeto (o filtro roda na própria API do Docker)
+	// only this project's containers (the filter runs in the Docker API itself)
 	filter {
 		name   = "label"
 		values = ["com.docker.compose.project=trade-agent"]
 	}
 }
 
-// Os bastidores do SigNoz (ClickHouse, keeper, migrações...) registram cada consulta: ficam
-// fora (veja com `docker compose logs <serviço>`). O descarte é na lista de alvos: um "drop"
-// em relabel_rules não tira o contêiner da coleta, só apaga os rótulos dos logs dele.
+// SigNoz's internals (ClickHouse, keeper, migrations...) log every query: they are left
+// out (see them with `docker compose logs <service>`). The drop is in the target list: a
+// "drop" in relabel_rules does not remove the container from collection, it only erases
+// the labels of its logs.
 discovery.relabel "collected" {
 	targets = discovery.docker.trade_agent.targets
 
@@ -31,9 +32,9 @@ discovery.relabel "collected" {
 		action        = "drop"
 	}
 
-	// A posição de leitura de cada contêiner é guardada pelos rótulos do alvo. Rede, IP e porta
-	// mudam quando o Docker reinicia: com eles, o Alloy não achava a posição e relia o log
-	// inteiro. Só ficam os rótulos estáveis enquanto o contêiner existe.
+	// Each container's read position is kept by the target's labels. Network, IP and port
+	// change when Docker restarts: with them, Alloy did not find the position and re-read the
+	// whole log. Only the labels that are stable while the container exists remain.
 	rule {
 		regex  = "__meta_docker_container_(id|name|label_com_docker_compose_service)"
 		action = "labelkeep"
@@ -59,8 +60,8 @@ loki.source.docker "trade_agent" {
 loki.process "trade_agent" {
 	forward_to = [loki.write.loki.receiver, loki.process.signoz.receiver]
 
-	// Agente: um JSON do structlog por linha. Um traceback do Python (texto, várias linhas)
-	// vira um único registro, que começa em "Traceback".
+	// Agent: one structlog JSON per line. A Python traceback (text, several lines)
+	// becomes a single record, starting at "Traceback".
 	stage.match {
 		selector = "{service=\"agent\"}"
 
@@ -78,22 +79,22 @@ loki.process "trade_agent" {
 			values = {level = ""}
 		}
 
-		// trace_id liga o log ao trace no Jaeger: {service="agent"} | trace_id="..."
+		// trace_id links the log to the trace in Jaeger: {service="agent"} | trace_id="..."
 		stage.structured_metadata {
 			values = {event = "", trace_id = ""}
 		}
 	}
 
-	// container-metrics: o docker_stats tenta inspecionar cada contêiner que muda de estado e,
-	// se ele já sumiu (docker run --rm do laboratório, recriação pelo compose), registra
-	// "No such container" como erro: dezenas por hora, inofensivos. Ficam de fora.
+	// container-metrics: docker_stats tries to inspect every container that changes state and,
+	// if it already vanished (the lab's docker run --rm, a recreation by compose), logs
+	// "No such container" as an error: dozens per hour, harmless. They are left out.
 	stage.match {
 		selector            = "{service=\"container-metrics\"} |= \"Could not inspect updated container\" |= \"No such container\""
 		action              = "drop"
 		drop_counter_reason = "container_gone"
 	}
 
-	// Jaeger e container-metrics (OpenTelemetry Collector): JSON com "level".
+	// Jaeger and container-metrics (OpenTelemetry Collector): JSON with "level".
 	stage.match {
 		selector = "{service=~\"jaeger|container-metrics\"}"
 
@@ -114,7 +115,7 @@ loki.process "trade_agent" {
 		}
 	}
 
-	// Grafana, Loki e Alloy registram em logfmt (level=info ...).
+	// Grafana, Loki and Alloy log in logfmt (level=info ...).
 	stage.match {
 		selector = "{service=~\"grafana|loki|alloy\"}"
 
@@ -159,13 +160,13 @@ loki.write "loki" {
 	}
 }
 
-// Cópia dos mesmos logs para o SigNoz (OTLP), em paralelo ao Loki. Cada entrada do Loki vira
-// um registro com recurso próprio; os rótulos (service, level) e os metadados (event,
-// trace_id) chegam como atributos.
+// A copy of the same logs to SigNoz (OTLP), alongside Loki. Each Loki entry becomes a
+// record with its own resource; the labels (service, level) and the metadata (event,
+// trace_id) arrive as attributes.
 //
-// Os avisos do próprio Alloy sobre esse envio (fila cheia, SigNoz fora do ar) ficam só no Loki:
-// cada linha dessas seria mais um envio para a fila cheia, que assim não esvaziaria nunca (o
-// Alloy chegou a registrar milhões de linhas por hora ao subir antes do SigNoz).
+// Alloy's own warnings about this sending (full queue, SigNoz down) stay only in Loki:
+// each such line would be one more send to the full queue, which would then never drain
+// (Alloy once logged millions of lines per hour when it came up before SigNoz).
 loki.process "signoz" {
 	forward_to = [otelcol.receiver.loki.signoz.receiver]
 
@@ -197,7 +198,7 @@ otelcol.processor.transform "signoz" {
 			`set(severity_number, SEVERITY_NUMBER_WARN) where severity_text == "warn" or severity_text == "warning"`,
 			`set(severity_number, SEVERITY_NUMBER_ERROR) where severity_text == "error"`,
 			`set(severity_number, SEVERITY_NUMBER_FATAL) where severity_text == "critical" or severity_text == "fatal"`,
-			// JSON (agente, Jaeger): cada campo vira atributo pesquisável; trace_id liga ao trace
+			// JSON (agent, Jaeger): each field becomes a searchable attribute; trace_id links to the trace
 			`merge_maps(cache, ParseJSON(body), "upsert") where IsMatch(body, "^\\{")`,
 			`flatten(cache)`,
 			`merge_maps(attributes, cache, "insert")`,
@@ -211,7 +212,7 @@ otelcol.processor.transform "signoz" {
 	}
 }
 
-// Em lotes: sem isso, cada linha de log era um envio (e um lugar na fila).
+// In batches: without this, each log line was one send (and one place in the queue).
 otelcol.processor.batch "signoz" {
 	output {
 		logs = [otelcol.exporter.otlphttp.signoz.input]

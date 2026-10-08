@@ -1,14 +1,14 @@
-"""Montagem e validação das ordens do agente (OPOCO de entrada, OCO de proteção, saída).
+"""Building and validation of the agent's orders (entry OPOCO, protection OCO, exit).
 
-Os construtores arredondam preços e quantidades de forma **conservadora** e validam
-todas as regras do símbolo antes de qualquer envio, levantando
-:class:`~trade_agent.exchange.rules.OrderValidationError` com a lista de violações.
+The builders round prices and quantities **conservatively** and validate every rule of
+the symbol before anything is sent, raising
+:class:`~trade_agent.exchange.rules.OrderValidationError` with the list of violations.
 
-Arredondamentos:
+Rounding:
 
-* entrada FOK (compra "marketable"): preço para cima; entrada maker: para baixo;
-* ativação/alvo do take-profit: para cima; preço de stop: para baixo;
-* quantidades: sempre para baixo.
+* FOK entry ("marketable" buy): price up; maker entry: down;
+* take-profit activation/target: up; stop price: down;
+* quantities: always down.
 """
 
 from dataclasses import dataclass
@@ -22,20 +22,20 @@ from trade_agent.execution.ids import OrderIdSet
 
 BIPS = Decimal(10_000)
 DEFAULT_FEE_BUFFER = Decimal("0.002")
-"""Margem para a comissão descontada da quantidade recebida (validação de notional)."""
+"""Margin for the fee deducted from the received quantity (notional validation)."""
 
 
 class EntryMode(StrEnum):
     LIMIT_FOK = "limit_fok"
-    """Compra LIMIT FOK a preço executável: tudo ou nada, sem parcial desprotegida."""
+    """LIMIT FOK buy at an executable price: all or nothing, no unprotected partial fill."""
 
     LIMIT_MAKER_GTC = "limit_maker_gtc"
-    """Compra LIMIT_MAKER no livro (taxa menor; exige timeout e tratamento de parcial)."""
+    """LIMIT_MAKER buy on the book (lower fee; needs a timeout and partial-fill handling)."""
 
 
 @dataclass(frozen=True, slots=True)
 class TrailingTakeProfit:
-    """``TAKE_PROFIT`` de venda: ativa em ``activation_price`` e segue o topo."""
+    """Sell ``TAKE_PROFIT``: activates at ``activation_price`` and follows the top."""
 
     activation_price: Decimal
     trailing_delta_bips: int
@@ -43,21 +43,21 @@ class TrailingTakeProfit:
 
 @dataclass(frozen=True, slots=True)
 class LimitTakeProfit:
-    """``LIMIT_MAKER`` de venda no alvo fixo."""
+    """Sell ``LIMIT_MAKER`` at the fixed target."""
 
     price: Decimal
 
 
 @dataclass(frozen=True, slots=True)
 class FixedStop:
-    """``STOP_LOSS`` de venda (a mercado) no preço de stop."""
+    """Sell ``STOP_LOSS`` (at market) at the stop price."""
 
     stop_price: Decimal
 
 
 @dataclass(frozen=True, slots=True)
 class TrailingStop:
-    """``STOP_LOSS`` de venda com trailing desde a colocação (sem preço fixo)."""
+    """Sell ``STOP_LOSS`` trailing from placement (no fixed price)."""
 
     trailing_delta_bips: int
 
@@ -72,7 +72,7 @@ class Protection:
     stop: StopLoss
 
     def effective_stop_price(self, reference: Decimal) -> Decimal:
-        """Preço em que o stop dispararia a partir de ``reference`` (sem nova alta)."""
+        """Price at which the stop would trigger from ``reference`` (with no new high)."""
         if isinstance(self.stop, FixedStop):
             return self.stop.stop_price
         return reference * (1 - Decimal(self.stop.trailing_delta_bips) / BIPS)
@@ -178,7 +178,7 @@ def build_opoco(
     *,
     fee_buffer: Decimal = DEFAULT_FEE_BUFFER,
 ) -> Params:
-    """Parâmetros de ``POST /api/v3/orderList/opoco`` (compra + OCO de venda armado)."""
+    """Parameters of ``POST /api/v3/orderList/opoco`` (buy + armed sell OCO)."""
     problems: list[str] = []
     _check_symbol(rules, problems, opo=True)
     fok = entry.mode is EntryMode.LIMIT_FOK
@@ -222,7 +222,7 @@ def build_oco(
     *,
     reference_price: Decimal,
 ) -> Params:
-    """Parâmetros de ``POST /api/v3/orderList/oco`` para proteger uma posição existente."""
+    """Parameters of ``POST /api/v3/orderList/oco`` to protect an existing position."""
     problems: list[str] = []
     _check_symbol(rules, problems, opo=False)
     qty = rules.round_qty(quantity)
@@ -253,7 +253,7 @@ def build_market_sell(
     *,
     reference_price: Decimal,
 ) -> Params:
-    """Parâmetros de ``POST /api/v3/order`` para venda a mercado (saída/fail-safe)."""
+    """Parameters of ``POST /api/v3/order`` for a market sell (exit/fail-safe)."""
     qty = rules.round_qty(quantity, market=True)
     problems = rules.qty_violations(qty, market=True)
     problems += rules.notional_violations(reference_price, qty, market=True, label="venda")
@@ -286,11 +286,11 @@ PCT = Decimal(100)
 
 @dataclass(frozen=True, slots=True)
 class ProtectionPolicy:
-    """Proteção expressa em percentuais relativos ao preço de entrada (usada pelos perfis).
+    """Protection expressed as percentages relative to the entry price (used by the profiles).
 
-    * take-profit ``trailing``: ativa em ``+take_profit_pct`` e segue o topo com
-      ``take_profit_trailing_bips``; ``limit``: alvo fixo em ``+take_profit_pct``;
-    * stop ``fixed``: ``-stop_pct``; ``trailing``: ``stop_trailing_bips`` desde a entrada.
+    * take-profit ``trailing``: activates at ``+take_profit_pct`` and follows the top with
+      ``take_profit_trailing_bips``; ``limit``: fixed target at ``+take_profit_pct``;
+    * stop ``fixed``: ``-stop_pct``; ``trailing``: ``stop_trailing_bips`` from the entry.
     """
 
     take_profit_mode: TakeProfitMode
@@ -312,10 +312,10 @@ class ProtectionPolicy:
             raise ValueError("stop trailing exige stop_trailing_bips")
 
     def resolve(self, reference: Decimal) -> Protection:
-        """Converte a política em preços concretos a partir de ``reference``."""
+        """Converts the policy into concrete prices from ``reference``."""
         target = reference * (1 + self.take_profit_pct / PCT)
         take_profit: TakeProfit
-        # Os campos opcionais usados abaixo foram validados em __post_init__.
+        # The optional fields used below were validated in __post_init__.
         if self.take_profit_mode is TakeProfitMode.TRAILING:
             take_profit = TrailingTakeProfit(target, self.take_profit_trailing_bips or 0)
         else:

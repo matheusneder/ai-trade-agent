@@ -118,7 +118,7 @@ def test_bullish_sentiment_requires_distinct_sources() -> None:
     strong_sol = strong.view.asset("SOL")
     assert strong_sol is not None and strong_sol.sentiment == 0.9
     veto = _safe(_draft(_asset(sentiment=-0.9, veto=True))).view.asset("SOL")
-    assert veto is not None and veto.veto  # veto vale sem fonte
+    assert veto is not None and veto.veto  # a veto holds without a source
     assert distinct_hosts(["https://www.x.example/a", "https://x.example/b", "mailto:x"]) == 1
 
 

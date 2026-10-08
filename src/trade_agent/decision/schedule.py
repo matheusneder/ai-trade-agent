@@ -1,4 +1,4 @@
-"""Agendamento no fechamento do candle (mesma cadência validada no laboratório)."""
+"""Scheduling at the candle close (the same cadence validated in the lab)."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -12,7 +12,7 @@ log = structlog.get_logger(__name__)
 
 
 def next_candle_close(timeframe: str, now: datetime) -> datetime:
-    """Próximo fechamento de candle do ``timeframe`` (UTC), estritamente após ``now``."""
+    """Next candle close of the ``timeframe`` (UTC), strictly after ``now``."""
     interval_ms = INTERVAL_MS[timeframe]
     now_ms = int(now.timestamp() * 1000)
     close_ms = (now_ms // interval_ms + 1) * interval_ms
@@ -27,10 +27,10 @@ async def run_on_candle_close(
     delay: timedelta = timedelta(seconds=20),
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> None:
-    """Executa ``action`` logo após cada fechamento (``delay`` para o candle consolidar)."""
+    """Runs ``action`` right after each close (``delay`` lets the candle settle)."""
     while not stop.is_set():
         now = clock()
-        # a partir de (now - delay): acordar entre o fechamento e o atraso não pula o ciclo
+        # from (now - delay): waking up between the close and the delay does not skip the cycle
         target = next_candle_close(timeframe, now - delay) + delay
         wait_s = (target - now).total_seconds()
         log.debug(

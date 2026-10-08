@@ -1,6 +1,6 @@
 #!/bin/sh
-# Cria o usuário somente leitura do Grafana na PRIMEIRA inicialização do volume do Postgres.
-# Em um volume já existente, rode os mesmos comandos manualmente (ver doc/runbook.md).
+# Creates Grafana's read-only user on the FIRST initialization of the Postgres volume.
+# On an existing volume, run the same commands manually (see doc/runbook.md).
 set -e
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL

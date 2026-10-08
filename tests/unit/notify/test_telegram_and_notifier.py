@@ -92,13 +92,13 @@ async def test_notifiers() -> None:
         )
         async with httpx.AsyncClient() as http:
             notifier = TelegramNotifier(_bot(http), 42, min_severity=Severity.HIGH)
-            await notifier.notify(Severity.INFO, "ignorado")  # abaixo do mínimo
+            await notifier.notify(Severity.INFO, "ignorado")  # below the minimum
             await notifier.notify(Severity.CRITICAL, "urgente")
             with capture_logs() as logs:
-                await notifier.notify(Severity.HIGH, "não chega")  # falha não propaga
+                await notifier.notify(Severity.HIGH, "não chega")  # a failure does not propagate
     assert len(send.calls) == 2
     assert json.loads(send.calls[0].request.content)["text"] == "🚨 urgente"
     events = [e["event"] for e in logs]
     assert events == ["telegram.call", "alert.telegram_failed"]
     assert logs[0]["method"] == "sendMessage" and logs[0]["status"] == 500
-    assert "TOKEN123" not in str(logs)  # a URL da API (com o token) nunca vai para o log
+    assert "TOKEN123" not in str(logs)  # the API URL (with the token) never goes to the log

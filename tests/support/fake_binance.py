@@ -1,18 +1,18 @@
-"""Binance Spot simulada, em memória, para testes de integração.
+"""Simulated Binance Spot, in memory, for integration tests.
 
-Implementa (de forma simplificada, mas com semântica fiel ao que o agente usa):
+Implements (in a simplified way, but with semantics faithful to what the agent uses):
 
-* endpoints públicos: ``time``, ``exchangeInfo``, ``ticker/bookTicker``, ``avgPrice``;
-* conta: ``account``, ``account/commission``, ``myTrades``;
-* ordens: ``order`` (MARKET, LIMIT GTC/IOC/FOK, LIMIT_MAKER), ``openOrders``;
-* listas: ``orderList/opoco``, ``orderList/oco``, ``orderList`` (GET/DELETE),
+* public endpoints: ``time``, ``exchangeInfo``, ``ticker/bookTicker``, ``avgPrice``;
+* account: ``account``, ``account/commission``, ``myTrades``;
+* orders: ``order`` (MARKET, LIMIT GTC/IOC/FOK, LIMIT_MAKER), ``openOrders``;
+* lists: ``orderList/opoco``, ``orderList/oco``, ``orderList`` (GET/DELETE),
   ``openOrderList``;
-* verificação de assinatura HMAC, ``timestamp``/``recvWindow`` e chave de API;
-* motor de gatilhos: ``set_price`` dispara stops, take-profits (com ativação e
-  trailing), LIMIT_MAKER e entradas GTC, cancelando a perna irmã do OCO;
-* injeção de falhas (timeout antes/depois de executar, 5xx, rejeição, conexão).
+* HMAC signature, ``timestamp``/``recvWindow`` and API key checks;
+* trigger engine: ``set_price`` fires stops, take-profits (with activation and trailing),
+  LIMIT_MAKER and GTC entries, canceling the sibling leg of the OCO;
+* fault injection (timeout before/after executing, 5xx, rejection, connection).
 
-Simplificações: livro sem profundidade (execução no último preço), sem ``PERCENT_PRICE``.
+Simplifications: a book without depth (fills at the last price), no ``PERCENT_PRICE``.
 """
 
 import hashlib
@@ -47,7 +47,7 @@ class Fault:
     code: int = -1013
     message: str = "Rejeitado pela falha injetada."
     skip: int = 0
-    """Quantas requisições correspondentes deixar passar antes de aplicar a falha."""
+    """How many matching requests to let through before applying the fault."""
 
 
 @dataclass
@@ -67,9 +67,9 @@ class FakeOrder:
     cumulative_quote: Decimal = ZERO
     order_list_id: int = -1
     expiry_reason: str | None = None
-    pending: bool = False  # ordem pendente de uma lista OTO/OPO ainda não armada
+    pending: bool = False  # pending order of an OTO/OPO list not armed yet
     time: int = 0
-    # trailing: ``tracking`` indica que o rastreamento começou; ``extreme`` é o topo
+    # trailing: ``tracking`` says tracking has started; ``extreme`` is the top
     tracking: bool = False
     extreme: Decimal | None = None
 
@@ -138,7 +138,7 @@ class FakeBinance:
         self,
         *,
         api_key: str = "fake-key",
-        secret: str = "fake-secret",  # noqa: S107 - segredo fictício do simulador
+        secret: str = "fake-secret",  # noqa: S107 - the simulator's fake secret
         prices: Mapping[str, Decimal] | None = None,
         balances: Mapping[str, Decimal] | None = None,
         commission_rate: Decimal = DEFAULT_COMMISSION,
@@ -156,7 +156,7 @@ class FakeBinance:
         self.lists: dict[int, FakeOrderList] = {}
         self.trades: list[dict[str, Any]] = []
         self.faults: deque[Fault] = deque()
-        # dados de mercado configuráveis pelos testes
+        # market data the tests can configure
         self.volumes: dict[str, Decimal] = {}
         self.spreads_bps: dict[str, Decimal] = {}
         self.candles: dict[tuple[str, str], list[list[Any]]] = {}
@@ -167,7 +167,7 @@ class FakeBinance:
         self._trade_ids = itertools.count(1)
         self.transport = httpx.MockTransport(self._handle)
 
-    # ================================================================== utilidades de teste
+    # ================================================================== test utilities
     def inject(self, fault: Fault) -> None:
         self.faults.append(fault)
 
@@ -191,7 +191,7 @@ class FakeBinance:
         return [r for r in self.requests if r.method == method and r.url.path == path]
 
     def set_price(self, symbol: str, price: Decimal) -> None:
-        """Novo último preço: processa gatilhos de todas as ordens abertas do símbolo."""
+        """New last price: processes the triggers of every open order of the symbol."""
         self.prices[symbol] = price
         for order in list(self.orders.values()):
             if order.symbol == symbol and order.is_open:
@@ -281,7 +281,7 @@ class FakeBinance:
         self._authenticate(request)
         return handler(params)
 
-    # ================================================================== públicos
+    # ================================================================== public
     def _time(self, _: dict[str, str]) -> Any:
         return {"serverTime": self.clock()}
 
@@ -296,7 +296,7 @@ class FakeBinance:
         return {**info, "symbols": [self.symbols[s] for s in wanted]}
 
     def _book(self, symbol: str) -> dict[str, Any]:
-        # preços de referência (ex.: USDCUSDT) podem existir sem regras de negociação
+        # reference prices (e.g. USDCUSDT) may exist without trading rules
         price = self.prices[symbol] if symbol in self.prices else self._price(symbol)
         half = price * self.spreads_bps.get(symbol, D(0)) / BIPS / 2
         return {
@@ -337,7 +337,7 @@ class FakeBinance:
     def _avg_price(self, params: dict[str, str]) -> Any:
         return {"mins": 5, "price": str(self._price(params["symbol"])), "closeTime": self.clock()}
 
-    # ================================================================== conta
+    # ================================================================== account
     def _account(self, _: dict[str, str]) -> Any:
         assets = sorted(set(self.free) | set(self.locked))
         return {
@@ -370,7 +370,7 @@ class FakeBinance:
             trades = [t for t in trades if t["id"] >= int(params["fromId"])]
         return trades[: int(params.get("limit", "500"))]
 
-    # ================================================================== helpers de mercado
+    # ================================================================== market helpers
     def _price(self, symbol: str) -> Decimal:
         if symbol not in self.symbols:
             raise BinanceApiFault(400, -1121, "Invalid symbol.")
@@ -422,7 +422,7 @@ class FakeBinance:
             raise _reject("Duplicate order sent.")
 
     def _fill(self, order: FakeOrder, price: Decimal, *, maker: bool, from_locked: bool) -> Decimal:
-        """Executa a ordem inteira; retorna a quantidade líquida recebida (compras)."""
+        """Fills the whole order; returns the net quantity received (buys)."""
         base, quote = self._assets(order.symbol)
         qty = order.orig_qty
         quote_amount = qty * price
@@ -474,7 +474,7 @@ class FakeBinance:
         )
         return received
 
-    # ================================================================== ordens simples
+    # ================================================================== simple orders
     def _new_order(self, params: dict[str, str]) -> Any:
         symbol = params["symbol"]
         price_now = self._price(symbol)
@@ -561,7 +561,7 @@ class FakeBinance:
             if o.is_open and (symbol is None or o.symbol == symbol)
         ]
 
-    # ================================================================== listas
+    # ================================================================== lists
     def _ensure_unique_list_id(self, list_client_id: str) -> None:
         existing = self.list_by_client_id(list_client_id)
         if existing is not None and existing.status == "EXECUTING":
@@ -588,8 +588,8 @@ class FakeBinance:
 
     @staticmethod
     def _report(order_list: FakeOrderList, order: FakeOrder) -> dict[str, Any]:
-        """Como na Binance real: na resposta do envio de uma lista OPO, as pernas pendentes
-        vêm ``PENDING_NEW`` e **sem** ``origQty`` (definida só quando a entrada executa)."""
+        """As on the real Binance: in the response to sending an OPO list, the pending legs
+        come back ``PENDING_NEW`` and **without** ``origQty`` (set only when the entry fills)."""
         report = order.as_json()
         if order_list.opo and order.order_id in order_list.pending_ids:
             report.pop("origQty")
@@ -744,7 +744,7 @@ class FakeBinance:
         return self._list_json(order_list, reports=True)
 
     def _activate_pending(self, order_list: FakeOrderList, received: Decimal) -> None:
-        """Arma o OCO pendente com a quantidade recebida (semântica OPO)."""
+        """Arms the pending OCO with the received quantity (OPO semantics)."""
         base, _ = self._assets(order_list.symbol)
         step = D(self._filters(order_list.symbol)["LOT_SIZE"]["stepSize"])
         qty = (received // step) * step
@@ -805,7 +805,7 @@ class FakeBinance:
     def _open_lists(self, _: dict[str, str]) -> Any:
         return [self._list_json(ol, reports=False) for ol in self.open_lists()]
 
-    # ================================================================== motor de gatilhos
+    # ================================================================== trigger engine
     def _evaluate(self, order: FakeOrder, price: Decimal) -> None:
         if order.order_list_id != -1:
             order_list = self.lists[order.order_list_id]
@@ -857,9 +857,9 @@ class FakeBinance:
                 other.expiry_reason = "OCO_TRIGGER"
         order_list.status = order_list.status_type = "ALL_DONE"
 
-    # ================================================================== cenários especiais
+    # ================================================================== special scenarios
     def expire_list_legs(self, list_client_order_id: str, reason: str) -> None:
-        """Expira as pernas ativas de uma lista sem execução (ex.: *price range rule*)."""
+        """Expires the active legs of a list without a fill (e.g. *price range rule*)."""
         order_list = self.list_by_client_id(list_client_order_id)
         assert order_list is not None
         base, _ = self._assets(order_list.symbol)
@@ -874,7 +874,7 @@ class FakeBinance:
         order_list.status = order_list.status_type = "ALL_DONE"
 
     def partially_fill(self, client_order_id: str, qty: Decimal) -> None:
-        """Executa parcialmente uma ordem no livro (entrada maker ou perna LIMIT_MAKER)."""
+        """Partially fills an order on the book (maker entry or LIMIT_MAKER leg)."""
         order = self.order_by_client_id(client_order_id)
         assert order is not None and order.is_open
         base, quote = self._assets(order.symbol)

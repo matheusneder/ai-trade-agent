@@ -41,22 +41,22 @@ def test_build_opoco_fok_with_trailing_tp_and_fixed_stop() -> None:
         "workingType": "LIMIT",
         "workingSide": "BUY",
         "workingClientOrderId": "ta1-mod-7f3a9c2b1d-0-E",
-        "workingPrice": D("63000.01"),  # FOK: arredonda para cima
-        "workingQuantity": D("0.00123"),  # quantidade: para baixo
+        "workingPrice": D("63000.01"),  # FOK: rounds up
+        "workingQuantity": D("0.00123"),  # quantity: down
         "workingTimeInForce": "FOK",
         "pendingSide": "SELL",
         "pendingAboveType": "TAKE_PROFIT",
-        "pendingAboveStopPrice": D("65000.01"),  # ativação: para cima
+        "pendingAboveStopPrice": D("65000.01"),  # activation: up
         "pendingAboveTrailingDelta": 100,
         "pendingAboveClientOrderId": "ta1-mod-7f3a9c2b1d-0-TP",
         "pendingBelowType": "STOP_LOSS",
-        "pendingBelowStopPrice": D("60000.00"),  # stop: para baixo
+        "pendingBelowStopPrice": D("60000.00"),  # stop: down
         "pendingBelowClientOrderId": "ta1-mod-7f3a9c2b1d-0-SL",
         "newOrderRespType": "FULL",
     }
     query = encode_params(params)
     assert "workingTimeInForce=FOK" in query
-    assert "E-" not in query  # nada de notação científica
+    assert "E-" not in query  # no scientific notation
 
 
 def test_build_opoco_maker_with_limit_tp_and_trailing_stop() -> None:
@@ -64,7 +64,7 @@ def test_build_opoco_maker_with_limit_tp_and_trailing_stop() -> None:
     protection = Protection(LimitTakeProfit(D("66000")), TrailingStop(300))
     params = build_opoco(entry, protection, IDS, BTC)
     assert params["workingType"] == "LIMIT_MAKER"
-    assert params["workingPrice"] == D("62999.99")  # maker: arredonda para baixo
+    assert params["workingPrice"] == D("62999.99")  # maker: rounds down
     assert params["workingTimeInForce"] is None
     assert params["pendingAboveType"] == "LIMIT_MAKER"
     assert params["pendingAbovePrice"] == D("66000")
@@ -125,7 +125,7 @@ def test_trailing_stop_effective_price_drives_notional_check() -> None:
     protection = Protection(TRAILING_TP, TrailingStop(1000))
     assert protection.effective_stop_price(D("100")) == D("90")
     assert PROTECTION.effective_stop_price(D("100")) == FIXED_SL.stop_price
-    tiny = EntryOrder("BTCUSDT", D("0.00008"), D("63000"))  # ~5,04 USDT de entrada
+    tiny = EntryOrder("BTCUSDT", D("0.00008"), D("63000"))  # ~5.04 USDT entry
     with pytest.raises(OrderValidationError, match="perna de stop"):
         build_opoco(tiny, protection, IDS, BTC)
 

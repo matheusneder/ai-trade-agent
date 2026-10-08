@@ -1,13 +1,13 @@
-"""Serviço de posições: abrir, sincronizar com a exchange, re-proteger, ajustar e encerrar.
+"""Position service: open, sync with the exchange, re-protect, adjust and close.
 
-Toda ação que altera a exchange segue o padrão **intenção → envio → confirmação**:
+Every action that changes the exchange follows the **intent → send → confirmation** pattern:
 
-1. a intenção é gravada (com o ID de cliente determinístico) antes do envio;
-2. o envio passa pelo :class:`~trade_agent.execution.gateway.ExecutionGateway`
-   (confirmação de status desconhecido, sem reenvio às cegas);
-3. o resultado atualiza a intenção e a posição.
+1. the intent is recorded (with the deterministic client ID) before sending;
+2. sending goes through :class:`~trade_agent.execution.gateway.ExecutionGateway`
+   (confirmation of unknown outcomes, no blind resends);
+3. the result updates the intent and the position.
 
-O estado da posição é sempre **derivado da exchange** (:func:`sync`), nunca presumido.
+The position's state is always **derived from the exchange** (:func:`sync`), never assumed.
 """
 
 import time
@@ -61,7 +61,7 @@ _SEND_FAILURES = (BinanceAPIError, BinanceConnectionError, TradingDisabledError)
 
 
 class RulesCache:
-    """Regras de símbolo com expiração (evita consultar ``exchangeInfo`` a cada ordem)."""
+    """Symbol rules with expiry (avoids querying ``exchangeInfo`` for every order)."""
 
     def __init__(
         self,
@@ -87,10 +87,10 @@ class RulesCache:
 @dataclass(frozen=True, slots=True)
 class ServiceConfig:
     intent_grace: timedelta = timedelta(seconds=60)
-    """Tempo antes de concluir que uma intenção sem registro na exchange nunca foi aceita."""
+    """Time before concluding that an intent with no record on the exchange was never accepted."""
 
     trigger_buffer_bips: int = 10
-    """Distância mínima acima do preço atual para ativação/alvo ao re-proteger."""
+    """Minimum distance above the current price for activation/target when re-protecting."""
 
 
 class PositionService:
@@ -111,7 +111,7 @@ class PositionService:
         self.config = config or ServiceConfig()
         self._now = now
 
-    # ================================================================== abrir
+    # ================================================================== open
     @tracing.traced("execution", "position.open")
     async def open_position(
         self,
@@ -121,7 +121,7 @@ class PositionService:
         policy: ProtectionPolicy,
         decision_id: str | None = None,
     ) -> Position:
-        """Grava a intenção, envia o OPOCO e sincroniza o estado resultante."""
+        """Records the intent, sends the OPOCO and syncs the resulting state."""
         tracing.annotate(symbol=entry.symbol, profile=profile)
         rules = await self.rules.get(entry.symbol)
         decision = decision_id or new_decision_id()
@@ -160,10 +160,10 @@ class PositionService:
         await self.store.set_intent_status(ids.list_id, IntentStatus.CONFIRMED)
         return await self.sync(await self.store.get_position(position.id))
 
-    # ================================================================== sincronizar
+    # ================================================================== sync
     @tracing.traced("execution", "position.sync")
     async def sync(self, position: Position) -> Position:
-        """Deriva o estado da posição a partir da exchange e age se necessário."""
+        """Derives the position's state from the exchange and acts if needed."""
         tracing.annotate(symbol=position.symbol, position=position.id, state=position.state)
         if position.state.is_terminal:
             return position
@@ -315,7 +315,7 @@ class PositionService:
         )
         return position
 
-    # ================================================================== re-proteção
+    # ================================================================== re-protection
     async def _on_unprotected(self, position: Position, verdict: Verdict) -> Position:
         position = await self.store.update_position(position.id, state=S.UNPROTECTED)
         await self._event(
@@ -324,9 +324,10 @@ class PositionService:
         return await self.reprotect(position, verdict.held_qty)
 
     async def _pending_protection(self, position: Position) -> Position | None:
-        """Adota uma re-proteção enviada cujo resultado não chegou a ser registrado.
+        """Adopts a re-protection that was sent but whose outcome was never recorded.
 
-        Evita criar um segundo OCO quando o anterior foi aceito mas a resposta se perdeu.
+        Avoids creating a second OCO when the previous one was accepted but the response was
+        lost.
         """
         intent = await self._latest_intent(position, IntentKind.PROTECT)
         if (
@@ -354,7 +355,7 @@ class PositionService:
         return await self._apply(position, assess(snapshot), snapshot)
 
     def _for_current_price(self, protection: Protection, bid: Decimal) -> Protection | None:
-        """Ajusta a proteção original ao preço atual; ``None`` se o stop já foi atravessado."""
+        """Adjusts the original protection to the current price; ``None`` if the stop is crossed."""
         if isinstance(protection.stop, FixedStop) and bid <= protection.stop.stop_price:
             return None
         floor = bid * (1 + Decimal(self.config.trigger_buffer_bips) / BIPS)
@@ -369,7 +370,7 @@ class PositionService:
 
     @tracing.traced("execution", "position.reprotect")
     async def reprotect(self, position: Position, held_qty: Decimal | None) -> Position:
-        """Cria um novo OCO para o saldo sem proteção (ou vende, se o stop já foi atravessado)."""
+        """Creates a new OCO for the unprotected balance (or sells, if the stop was crossed)."""
         tracing.annotate(symbol=position.symbol, position=position.id)
         rules = await self.rules.get(position.symbol)
         free = (await self.api.account()).balance(position.base_asset).free
@@ -448,7 +449,7 @@ class PositionService:
             await self.store.set_intent_status(client_id, IntentStatus.FAILED, str(exc))
             await self._event("exit.failed", Severity.CRITICAL, position, {"error": str(exc)})
             return await self._sync_exiting(position)
-        if order is None:  # a proteção já havia encerrado a posição: nada foi enviado
+        if order is None:  # the protection had already closed the position: nothing was sent
             await self.store.set_intent_status(
                 client_id, IntentStatus.FAILED, "proteção já havia encerrado a posição"
             )
@@ -456,12 +457,12 @@ class PositionService:
         await self.store.set_intent_status(client_id, IntentStatus.CONFIRMED)
         return await self._finalize_exit(position, order, reason)
 
-    # ================================================================== encerrar
+    # ================================================================== close
     @tracing.traced("execution", "position.close")
     async def close_position(
         self, position: Position, reason: ExitReason = ExitReason.DECISION
     ) -> Position:
-        """Cancela a proteção e vende a mercado."""
+        """Cancels the protection and sells at market."""
         tracing.annotate(symbol=position.symbol, position=position.id, reason=reason)
         rules = await self.rules.get(position.symbol)
         bid = (await self.api.book_ticker(position.symbol)).bid_price
@@ -504,10 +505,10 @@ class PositionService:
             return await self._on_protected(position, verdict)
         return await self._on_unprotected(position, verdict)
 
-    # ================================================================== ajustar
+    # ================================================================== adjust
     @tracing.traced("execution", "position.adjust_protection")
     async def adjust_protection(self, position: Position, protection: Protection) -> Position:
-        """Troca o OCO da posição (ex.: stop no *break-even*)."""
+        """Swaps the position's OCO (e.g. stop at *break-even*)."""
         tracing.annotate(symbol=position.symbol, position=position.id)
         if position.state is not S.PROTECTED or position.protected_qty is None:
             raise ValueError(f"posição {position.id} não está protegida ({position.state})")
@@ -578,9 +579,9 @@ class PositionService:
         snapshot = await self._snapshot(position.symbol, position.protection_list_id)
         return await self._apply(position, assess(snapshot), snapshot)
 
-    # ================================================================== utilidades
+    # ================================================================== utilities
     async def _next_seq(self, position: Position) -> int:
-        """Próximo ``seq`` livre: nunca reutiliza IDs de tentativas anteriores."""
+        """Next free ``seq``: never reuses IDs from earlier attempts."""
         intents = await self.store.intents_for(position.id)
         parsed = (parse_client_id(intent.client_id) for intent in intents)
         return max([position.protection_seq, *(p.seq for p in parsed if p)]) + 1

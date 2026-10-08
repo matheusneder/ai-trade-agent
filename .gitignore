@@ -1,4 +1,4 @@
-# Segredos e configuração local
+# Secrets and local configuration
 .env
 .env.*
 !.env.example
@@ -13,7 +13,7 @@ __pycache__/
 build/
 dist/
 
-# Ferramentas
+# Tools
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -23,19 +23,19 @@ dist/
 htmlcov/
 coverage.xml
 
-# Artefatos locais de execução (spike, logs)
+# Local run artifacts (spike, logs)
 var/
 
-# IDEs / SO
+# IDEs / OS
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
 
-# Claude Code (configuração local)
+# Claude Code (local configuration)
 .claude/settings.local.json
 
-# Laboratório (dados e resultados gerados)
+# Lab (generated data and results)
 lab/freqtrade/user_data/data/
 lab/freqtrade/user_data/backtest_results/
 lab/freqtrade/user_data/hyperopt_results/

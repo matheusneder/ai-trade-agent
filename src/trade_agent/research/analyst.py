@@ -1,5 +1,5 @@
-"""Orquestração do analista: triagem (modelo menor), pesquisa web opcional e leitura
-estruturada (modelo principal), seguida das regras de segurança."""
+"""Analyst orchestration: triage (smaller model), optional web research and the structured
+reading (main model), followed by the safety rules."""
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ class Analysis:
     adjustments: tuple[str, ...]
     findings: ResearchFindings | None
     notes: tuple[str, ...]
-    """Falhas não fatais (ex.: pesquisa web indisponível; seguiu sem ela)."""
+    """Non-fatal failures (e.g. web research unavailable; it went on without it)."""
 
 
 class MarketAnalyst:
@@ -50,7 +50,7 @@ class MarketAnalyst:
     async def triage(
         self, news: Sequence[StoredNews], known_assets: Iterable[str]
     ) -> dict[int, Triage]:
-        """Classifica as notícias com o modelo de triagem (ids desconhecidos são ignorados)."""
+        """Classifies the news with the triage model (unknown ids are ignored)."""
         if not news:
             return {}
         known = {a.upper() for a in known_assets}

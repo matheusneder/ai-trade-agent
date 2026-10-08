@@ -1,7 +1,7 @@
-"""Spans de cada componente contra Binance simulada, PostgreSQL, Claude falso e Telegram.
+"""Spans of each component against simulated Binance, PostgreSQL, fake Claude and Telegram.
 
-Além da hierarquia (quem é pai de quem), os testes garantem que nenhum segredo chega aos
-spans: assinatura e chave da Binance, token do Telegram, conteúdo do LLM, valores de SQL.
+Beyond the hierarchy (who is whose parent), the tests make sure no secret reaches the
+spans: Binance signature and key, Telegram token, LLM content, SQL values.
 """
 
 import asyncio
@@ -40,10 +40,10 @@ async def test_binance_calls_are_client_spans_without_secrets(
 ) -> None:
     with tracing.span("risk", "risk.snapshot"):
         await api.rest.sync_time()
-        await api.account()  # assinada: timestamp, recvWindow e signature na query
+        await api.account()  # signed: timestamp, recvWindow and signature in the query
         with pytest.raises(BinanceRejectedError):
             await api.klines("NAOEXISTE", "1m", limit=5)
-    *_, time_span = spans.named("GET /api/v3/time")  # uma por amostra do relógio
+    *_, time_span = spans.named("GET /api/v3/time")  # one per clock sample
     account = spans.one("GET /api/v3/account")
     rejected = spans.one("GET /api/v3/klines")
     for span in (*spans.named("GET /api/v3/time"), account, rejected):
@@ -58,7 +58,7 @@ async def test_binance_calls_are_client_spans_without_secrets(
     assert (rejected.attributes or {})["http.response.status_code"] == 400
     text_ = spans.attribute_text()
     assert "signature" not in text_ and "timestamp=" not in text_ and "recvWindow" not in text_
-    assert "fake-key" not in text_ and "NAOEXISTE" not in text_  # nem a query pública
+    assert "fake-key" not in text_ and "NAOEXISTE" not in text_  # not even the public query
 
 
 async def test_binance_connection_failures_are_marked(spans: Recorded) -> None:
@@ -88,7 +88,7 @@ async def test_sql_statements_are_children_of_the_task(
     job = spans.one("job check_risk")
     insert = spans.one("INSERT events")
     assert component(insert) == "db" and insert.kind is SpanKind.CLIENT
-    assert spans.parent(insert) == job  # o contexto atravessa o greenlet do SQLAlchemy
+    assert spans.parent(insert) == job  # the context crosses SQLAlchemy's greenlet
     attributes = insert.attributes or {}
     assert attributes["db.system.name"] == "postgresql"
     assert attributes["db.collection.name"] == "events"
@@ -156,13 +156,13 @@ async def test_telegram_commands_and_alerts(spans: Recorded, store: Store) -> No
             )
     assert len(send.calls) == 2
     command = spans.one("telegram.command")
-    assert spans.parent(command) is None  # cada comando é a raiz de um trace
+    assert spans.parent(command) is None  # each command is the root of a trace
     assert (command.attributes or {})["trade_agent.command"] == "/pause"
     assert (command.attributes or {})["trade_agent.authorized"] is True
     pause = spans.one("risk.pause")
     assert spans.parent(pause) == command
     assert (pause.attributes or {})["trade_agent.scope"] == "global"
-    assert not spans.named("telegram getUpdates")  # a espera por mensagens não vira trace
+    assert not spans.named("telegram getUpdates")  # the wait for messages is not traced
     reply, alert_call = spans.named("telegram sendMessage")
     assert spans.parent(reply) == command
     alert = spans.one("alert.send")
@@ -194,10 +194,10 @@ async def test_background_task_failures_mark_their_trace(
         await asyncio.sleep(0)
 
     await runtime._guarded(check_risk)
-    await runtime._guarded(ping, trace=False)  # heartbeat: sem trace
+    await runtime._guarded(ping, trace=False)  # heartbeat: no trace
     job = spans.one("job check_risk")
     assert component(job) == "runtime" and job.status.status_code is StatusCode.ERROR
     assert job.events[0].attributes is not None
     assert "falha no risco" in str(job.events[0].attributes["exception.message"])
     assert not spans.named("job ping")
-    assert json.dumps([s.name for s in spans.spans])  # nenhum span sem nome
+    assert json.dumps([s.name for s in spans.spans])  # no span without a name

@@ -1,9 +1,9 @@
-"""Relógio local fora do horário da Binance (Windows sem sincronização, VM que pula ao acordar).
+"""Local clock off Binance's time (Windows without sync, a VM that jumps when it wakes up).
 
-A Binance simulada valida ``timestamp``/``recvWindow`` como a real. O agente parte com o
-relógio local 15 s atrasado e mede esse desvio; se o relógio é corrigido com o agente rodando,
-o desvio medido na partida passa a errar 15 s, e as requisições assinadas seriam recusadas
-(``-1021``) até reiniciar o agente.
+The simulated Binance validates ``timestamp``/``recvWindow`` like the real one. The agent
+starts with the local clock 15 s behind and measures that offset; if the clock is corrected
+while the agent runs, the offset measured at startup becomes 15 s wrong, and signed
+requests would be refused (``-1021``) until the agent restarted.
 """
 
 import asyncio
@@ -21,7 +21,7 @@ from trade_agent.persistence.store import Store
 from trade_agent.reconcile.reconciler import Reconciler
 from trade_agent.runtime import AgentRuntime
 
-BEHIND_MS = 15_000  # o atraso medido no Windows com o serviço de horário parado
+BEHIND_MS = 15_000  # the lag measured on Windows with the time service stopped
 
 
 def _local_clock(fake: FakeBinance, skew: list[int]) -> Callable[[], int]:
@@ -30,7 +30,7 @@ def _local_clock(fake: FakeBinance, skew: list[int]) -> Callable[[], int]:
 
 async def _until(condition: Callable[[], bool], timeout_s: float = 10) -> None:
     async with asyncio.timeout(timeout_s):
-        while not condition():  # noqa: ASYNC110 - estado de outro componente, sem evento
+        while not condition():  # noqa: ASYNC110 - another component's state, no event
             await asyncio.sleep(0.005)
 
 
@@ -38,8 +38,8 @@ async def test_order_after_a_clock_correction_is_sent_once(fake: FakeBinance) ->
     skew = [-BEHIND_MS]
     async with fake_api(fake, clock=_local_clock(fake, skew)) as api:
         assert await api.rest.sync_time() == BEHIND_MS
-        await api.account()  # o desvio medido na partida vale
-        skew[0] = 0  # o Windows volta a sincronizar com o agente rodando
+        await api.account()  # the offset measured at startup holds
+        skew[0] = 0  # Windows syncs again with the agent running
         with capture_logs() as logs:
             order = await api.new_order(
                 {
@@ -52,7 +52,7 @@ async def test_order_after_a_clock_correction_is_sent_once(fake: FakeBinance) ->
             )
         assert api.rest.time_offset_ms == 0
     assert order.executed_qty == Decimal("0.001")
-    assert len(fake.orders) == 1  # recusada antes de executar: a nova tentativa não duplica
+    assert len(fake.orders) == 1  # refused before executing: the retry does not duplicate
     events = [e["event"] for e in logs]
     assert events.count("rest.timestamp_rejected") == 1
     assert "rest.clock_jumped" in events
@@ -69,7 +69,7 @@ async def test_runtime_remeasures_the_clock_without_waiting_for_a_rejection(
             api=api,
             store=store,
             reconciler=Reconciler(api, service, store),
-            reconcile_interval_s=3600,  # nenhuma requisição assinada depois da partida
+            reconcile_interval_s=3600,  # no signed request after startup
             clock_sync_interval_s=0.01,
         )
         stop = asyncio.Event()

@@ -1,16 +1,17 @@
-"""Estratégia "casca" do laboratório: backtest/hyperopt dos sinais do agente no Freqtrade.
+"""The lab's "shell" strategy: backtest/hyperopt of the agent's signals in Freqtrade.
 
-Importa o **mesmo** pacote de sinais usado em produção (``trade_agent.signals``, montado no
-contêiner via ``PYTHONPATH``) e replica a proteção nativa do agente:
+Imports the **same** signals package used in production (``trade_agent.signals``, mounted
+into the container through ``PYTHONPATH``) and replicates the agent's native protection:
 
-* stop fixo em ``entrada × (1 − stop_pct)``, com ``stop_pct`` do ATR limitado ao máximo do
-  perfil (perna ``STOP_LOSS`` do OCO);
-* *trailing take-profit*: ao atingir ``+tp_activation``, o stop passa a seguir o topo a
-  ``tp_trailing`` de distância (perna ``TAKE_PROFIT`` com ``trailingDelta``);
-* tamanho por risco: ``carteira × risco_por_trade / stop_pct``, limitado por posição.
+* fixed stop at ``entry × (1 − stop_pct)``, with ``stop_pct`` from the ATR capped at the
+  profile's maximum (the OCO's ``STOP_LOSS`` leg);
+* *trailing take-profit*: on reaching ``+tp_activation``, the stop starts following the top
+  at a ``tp_trailing`` distance (``TAKE_PROFIT`` leg with ``trailingDelta``);
+* risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position.
 
-Os parâmetros padrão são só um ponto de partida: ``lab/walk_forward.py`` gera o arquivo
-``trade_agent_strategy.json`` com os valores do perfil escolhido em ``config/profiles.yaml``.
+The default parameters are only a starting point: ``lab/walk_forward.py`` generates the
+``trade_agent_strategy.json`` file with the values of the profile chosen in
+``config/profiles.yaml``.
 """
 
 from datetime import datetime
@@ -39,8 +40,8 @@ class TradeAgentStrategy(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = "4h"
     can_short = False
-    minimal_roi = {"0": 100}  # noqa: RUF012 - sem ROI: saídas por stop, trailing TP e rotação
-    stoploss = -0.25  # rede de segurança; o stop real vem de custom_stoploss
+    minimal_roi = {"0": 100}  # noqa: RUF012 - no ROI: exits by stop, trailing TP and rotation
+    stoploss = -0.25  # safety net; the real stop comes from custom_stoploss
     use_custom_stoploss = True
     trailing_stop = False
     process_only_new_candles = True
@@ -48,7 +49,7 @@ class TradeAgentStrategy(IStrategy):
     startup_candle_count = FeatureParams().warmup
     benchmark_pair = "BTC/USDT"
 
-    # ------------------------------------------------------------------ entrada (space=buy)
+    # ------------------------------------------------------------------ entry (space=buy)
     min_score = DecimalParameter(0.2, 0.9, default=0.6, decimals=2, space="buy")
     adx_min = DecimalParameter(10, 35, default=20, decimals=0, space="buy")
     rsi_pullback_max = DecimalParameter(30, 55, default=45, decimals=0, space="buy")
@@ -60,8 +61,8 @@ class TradeAgentStrategy(IStrategy):
         0.05, 1.0, default=0.25, decimals=2, space="buy", optimize=False
     )
 
-    # ------------------------------------------------------------------ saída (space=sell)
-    # Os parâmetros com optimize=False definem o risco do perfil e nunca são otimizados.
+    # ------------------------------------------------------------------ exit (space=sell)
+    # Parameters with optimize=False define the profile's risk and are never optimized.
     atr_stop_mult = DecimalParameter(1.0, 4.0, default=2.0, decimals=1, space="sell")
     stop_max_pct = DecimalParameter(
         0.02, 0.10, default=0.04, decimals=3, space="sell", optimize=False
@@ -92,8 +93,8 @@ class TradeAgentStrategy(IStrategy):
         return features.reset_index()
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict[str, Any]) -> DataFrame:
-        # Score, setup e stop dependem de parâmetros otimizáveis: são calculados aqui porque o
-        # hyperopt executa populate_indicators uma única vez e este método a cada época.
+        # Score, setup and stop depend on optimizable parameters: they are computed here because
+        # hyperopt runs populate_indicators only once and this method on every epoch.
         params = self._signal_params()
         dataframe["score"] = score_frame(dataframe, params)
         dataframe["setup"] = setup_frame(dataframe, params)
@@ -131,7 +132,7 @@ class TradeAgentStrategy(IStrategy):
     ) -> float | None:
         max_rate = trade.max_rate or trade.open_rate
         if max_rate >= trade.open_rate * (1 + float(self.tp_activation.value)):
-            return -float(self.tp_trailing.value)  # trailing TP ativado: segue o topo
+            return -float(self.tp_trailing.value)  # trailing TP activated: follows the top
         stop_pct = self._entry_stop_pct(pair, trade)
         return stoploss_from_open(
             -stop_pct, current_profit, is_short=False, leverage=trade.leverage

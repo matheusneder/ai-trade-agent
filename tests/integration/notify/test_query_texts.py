@@ -1,4 +1,4 @@
-"""Textos de /pnl, /report e /config (PostgreSQL)."""
+"""Texts of /pnl, /report and /config (PostgreSQL)."""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -29,7 +29,7 @@ async def test_pnl_by_period_and_profile(store: Store) -> None:
     ]
     week = await pnl_text(store, PROFILES, ["SEMANA"], NOW)
     assert week.splitlines()[0] == "PnL realizado (semana): 4 USDT em 3 trades (2 com ganho)"
-    assert "• xyz: 1" in week  # código sem perfil configurado aparece como está
+    assert "• xyz: 1" in week  # a code with no configured profile shows up as it is
     month = await pnl_text(store, PROFILES, ["mes"], NOW)
     assert month.splitlines()[0] == "PnL realizado (mes): -5 USDT em 4 trades (2 com ganho)"
 

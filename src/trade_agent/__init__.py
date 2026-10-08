@@ -1,3 +1,3 @@
-"""Agente autônomo de trade de criptomoedas na Binance Spot."""
+"""Autonomous cryptocurrency trading agent for Binance Spot."""
 
 __version__ = "0.1.0"

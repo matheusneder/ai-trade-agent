@@ -1,6 +1,6 @@
-# Regras que independem do próprio agente estar vivo (doc 03, §12.2). As mudanças de
-# estado e os disjuntores já são avisados pelo agente; aqui ficam os sinais de que ele
-# parou ou de que algo ficou sem proteção.
+# Rules that do not depend on the agent itself being alive (doc 03, §12.2). State changes
+# and circuit breakers are already announced by the agent; these are the signs that it
+# stopped or that something was left unprotected.
 apiVersion: 1
 
 groups:

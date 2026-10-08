@@ -16,7 +16,7 @@ def test_every_environment_has_endpoints() -> None:
         assert endpoints.rest.startswith("https://")
         assert endpoints.ws_api.startswith("wss://")
         assert endpoints.ws_streams.startswith("wss://")
-    # as rotas /sapi (cronograma de delistagem) só existem na produção
+    # the /sapi routes (delisting schedule) only exist in production
     assert {env for env, endpoints in ENDPOINTS.items() if endpoints.sapi} == {
         BinanceEnvironment.PROD
     }

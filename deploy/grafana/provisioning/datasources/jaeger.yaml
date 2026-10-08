@@ -1,6 +1,6 @@
-# Traces do agente (Jaeger). Cada span abre os logs do mesmo trace no Loki ("Logs for this
-# span"): o agente grava trace_id em cada log. `$$` escapa o `$` da interpolação de variáveis
-# de ambiente do provisionamento.
+# Agent traces (Jaeger). Each span opens the logs of the same trace in Loki ("Logs for this
+# span"): the agent writes trace_id in every log. `$$` escapes the `$` of the provisioning's
+# environment variable interpolation.
 apiVersion: 1
 
 datasources:

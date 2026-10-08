@@ -1,7 +1,7 @@
-"""Testes de caos (plano, Fase 2): o processo "morre" em pontos críticos e reinicia.
+"""Chaos tests (plan, Phase 2): the process "dies" at critical points and restarts.
 
-Critério de saída: nenhum cenário resulta em ordem duplicada ou em posição sem proteção
-após a reconciliação de partida.
+Exit criterion: no scenario results in a duplicate order or an unprotected position after
+the startup reconciliation.
 """
 
 from collections.abc import Callable, Mapping
@@ -40,7 +40,7 @@ ENTRY = EntryOrder("BTCUSDT", quantity=D("0.01"), limit_price=D("63100"))
 
 
 class SimulatedCrash(BaseException):
-    """Morte do processo: não é capturada pelos ``except Exception`` do código."""
+    """Process death: it is not caught by the code's ``except Exception``."""
 
 
 async def _no_sleep(_: float) -> None:
@@ -70,7 +70,7 @@ class CrashingGateway(ExecutionGateway):
         fallback_sell_params: Mapping[str, ParamValue],
     ) -> ProtectionReplacement:
         await self.cancel_order_list(symbol, current_list_id)
-        raise SimulatedCrash  # morreu entre cancelar o OCO antigo e criar o novo
+        raise SimulatedCrash  # died between canceling the old OCO and creating the new one
 
 
 def _service(
@@ -86,7 +86,7 @@ def _service(
 
 
 async def _restart(api: BinanceSpotApi, store: Store, *, minutes: int = 0) -> Reconciler:
-    """Nova instância (serviços novos, mesmo banco), com relógio opcionalmente adiantado."""
+    """New instance (new services, same database), with an optionally advanced clock."""
     if not minutes:
         return Reconciler(api, _service(api, store), store)
 
@@ -105,11 +105,11 @@ async def test_crash_after_intent_before_send(
         )
     [planned] = await store.active_positions()
     assert planned.state is S.PLANNED
-    await (await _restart(api, store)).reconcile_all()  # dentro da carência: aguarda
+    await (await _restart(api, store)).reconcile_all()  # within the grace period: waits
     assert (await store.get_position(planned.id)).state is S.PLANNED
     await (await _restart(api, store, minutes=5)).reconcile_all()
     assert (await store.get_position(planned.id)).state is S.REJECTED
-    assert fake.lists == {}  # nunca enviado, nunca reenviado
+    assert fake.lists == {}  # never sent, never resent
 
 
 async def test_crash_after_send_before_recording(
@@ -125,7 +125,7 @@ async def test_crash_after_send_before_recording(
     assert report.intents_confirmed == 1
     recovered = await store.get_position(planned.id)
     assert recovered.state is S.PROTECTED
-    assert len(fake.lists) == 1  # sem duplicidade
+    assert len(fake.lists) == 1  # no duplication
     assert (await store.intents_for(planned.id))[0].status is IntentStatus.CONFIRMED
 
 
@@ -135,7 +135,7 @@ async def test_exit_executed_while_agent_offline(
     position = await _service(api, store).open_position(
         profile="mod", entry=ENTRY, policy=POLICY, decision_id=DECISION
     )
-    for price in ("65000", "67000", "66300"):  # trailing TP executa com o agente fora
+    for price in ("65000", "67000", "66300"):  # trailing TP fills with the agent down
         fake.set_price("BTCUSDT", D(price))
     await (await _restart(api, store)).reconcile_all()
     closed = await store.get_position(position.id)
@@ -156,7 +156,7 @@ async def test_crash_during_adjustment_is_reprotected(
         await _service(api, store, CrashingGateway(api, "adjust")).adjust_protection(
             position, break_even
         )
-    assert fake.open_lists() == []  # a posição está sem proteção na exchange
+    assert fake.open_lists() == []  # the position is unprotected on the exchange
     assert (await store.get_position(position.id)).state is S.ADJUSTING
     await (await _restart(api, store, minutes=5)).reconcile_all()
     recovered = await store.get_position(position.id)

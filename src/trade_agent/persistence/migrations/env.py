@@ -1,4 +1,4 @@
-"""Ambiente do Alembic (assíncrono; aceita conexão injetada via ``config.attributes``)."""
+"""Alembic environment (asynchronous; accepts a connection injected via ``config.attributes``)."""
 
 import asyncio
 import os
