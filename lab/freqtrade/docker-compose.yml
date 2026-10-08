@@ -1,4 +1,4 @@
-# Laboratório de backtest/hyperopt (Freqtrade oficial). Uso via lab/walk_forward.py ou:
+# Backtest/hyperopt lab (official Freqtrade). Use it through lab/walk_forward.py or:
 #   docker compose -f lab/freqtrade/docker-compose.yml run --rm freqtrade backtesting \
 #       --config user_data/config.swing_trend.json --timerange 20250101-20250401
 name: trade-agent-lab
@@ -9,8 +9,8 @@ services:
     working_dir: /freqtrade
     volumes:
       - ./user_data:/freqtrade/user_data
-      # mesmo pacote de sinais usado em produção; TA_LAB_SRC aponta para outra cópia
-      # (ex.: um git worktree de outro commit) em comparações A/B
+      # the same signals package used in production; TA_LAB_SRC points to another copy
+      # (e.g. a git worktree of another commit) for A/B comparisons
       - ${TA_LAB_SRC:-../../src}:/opt/trade_agent_src:ro
     environment:
       PYTHONPATH: /opt/trade_agent_src

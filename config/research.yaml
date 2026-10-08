@@ -1,14 +1,14 @@
-# Analista de mercado (doc 03, §7). A chave da API fica no .env (ANTHROPIC_API_KEY).
+# Market analyst (doc 03, §7). The API key lives in the .env (ANTHROPIC_API_KEY).
 
 models:
-  analyst: claude-opus-5     # ciclo de pesquisa (adaptive thinking)
-  triage: claude-sonnet-5    # pré-classificação de manchetes em volume
+  analyst: claude-opus-5     # research cycle (adaptive thinking)
+  triage: claude-sonnet-5    # pre-classification of headlines in volume
   effort: high
   max_tokens: 16000
   triage_max_tokens: 8000
   timeout_s: 300
 
-pricing:                     # US$ por milhão de tokens (platform.claude.com/docs/en/about-claude/pricing)
+pricing:                     # US$ per million tokens (platform.claude.com/docs/en/about-claude/pricing)
   models:
     claude-opus-5: {input: 5.00, output: 25.00}
     claude-sonnet-5: {input: 2.00, output: 10.00}
@@ -17,9 +17,9 @@ pricing:                     # US$ por milhão de tokens (platform.claude.com/do
   web_search_per_1000: 10.00
 
 budget:
-  daily_usd: 5               # disjuntor llm_daily_budget_usd (dia UTC)
+  daily_usd: 5               # llm_daily_budget_usd circuit breaker (UTC day)
 
-web:                         # etapa de pesquisa com web_search/web_fetch (servidor da Anthropic)
+web:                         # research step with web_search/web_fetch (Anthropic's server)
   enabled: true
   max_searches: 5
   max_fetches: 3
@@ -31,12 +31,12 @@ sources:
     cointelegraph: https://cointelegraph.com/rss
     theblock: https://www.theblock.co/rss.xml
     decrypt: https://decrypt.co/feed
-  binance_catalogs:          # anúncios públicos do site da Binance
+  binance_catalogs:          # public announcements on the Binance website
     48: listagens
     161: delistagens
     49: notícias da Binance
   fear_greed: true           # alternative.me
-  derivatives: true          # funding e open interest (Binance Futures, público)
+  derivatives: true          # funding and open interest (Binance Futures, public)
   derivatives_max_symbols: 12
   timeout_s: 15
 
@@ -47,13 +47,13 @@ digest:
   min_relevance: 0.3
 
 safety:
-  bullish_threshold: 0.5     # sentimento acima disso exige fontes
+  bullish_threshold: 0.5     # sentiment above this requires sources
   min_bullish_sources: 2
   max_text_chars: 400
   max_list_items: 5
   max_view_age_hours: 8
 
-asset_names:                 # nomes (minúsculos) usados para marcar os ativos citados
+asset_names:                 # names (lowercase) used to tag the assets mentioned
   BTC: [bitcoin]
   ETH: [ethereum, ether]
   SOL: [solana]

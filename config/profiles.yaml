@@ -1,81 +1,81 @@
-# Perfis de alocação otimizados para maximização de retorno e controle de drawdown.
-# Estrutura baseada em regime de tendência (4h) e expansão de momentum líquido.
-# Recalibre com: uv run python -m lab.walk_forward --profile <perfil> --optimize
+# Allocation profiles optimized for return maximization and drawdown control.
+# Structure based on the trend regime (4h) and expansion of liquid momentum.
+# Recalibrate with: uv run python -m lab.walk_forward --profile <profile> --optimize
 
 account:
   quote_asset: USDT
-  managed_capital: 1000        # Teto total de capital gerido
-  one_position_per_asset: true  # Impede acúmulo de risco no mesmo ativo entre perfis
+  managed_capital: 1000        # Total cap of managed capital
+  one_position_per_asset: true  # Prevents stacking risk on the same asset across profiles
 
 profiles:
   swing_trend:
-    # Recalibrado em 01/10/2026: mediana dos 15 treinos do walk-forward otimizado
-    # (var/lab/walk-forward-swing_trend-otimizado-20261001-190610.md, candles de 4h
-    # desde 2021-10). Risco, break-even e prazo máximo não são otimizados pelo
-    # laboratório e seguem como estavam.
+    # Recalibrated on 2026-10-01: median of the 15 trainings of the optimized walk-forward
+    # (var/lab/walk-forward-swing_trend-otimizado-20261001-190610.md, 4h candles
+    # since 2021-10). Risk, break-even and maximum holding are not optimized by the
+    # lab and stay as they were.
     code: swg
     enabled: true
-    capital_share: 0.65        # Alocação principal: 650 USDT
+    capital_share: 0.65        # Main allocation: 650 USDT
     timeframe: 4h
     tiers: {core: 0.70, large: 0.30, mid: 0.0, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lotes robustos de ~275 USDT por trade (evita taxas fracionadas)
+      max_open_positions: 2    # Solid lots of ~275 USDT per trade (avoids fractional fees)
       max_position_pct: 0.42
-      cash_reserve_pct: 0.15   # 15% de liquidez para rebalanceamento
-      risk_per_trade_pct: 1.2  # Risco matemático por trade controlado
+      cash_reserve_pct: 0.15   # 15% liquidity for rebalancing
+      risk_per_trade_pct: 1.2  # Controlled mathematical risk per trade
     entry:
-      min_score: 0.67          # walk-forward (era 0.65)
+      min_score: 0.67          # walk-forward (was 0.65)
       order: limit_fok
       max_slippage_bps: 18
     protection:
-      stop: {mode: fixed, atr_mult: 3.1, max_pct: 4.5}   # walk-forward: atr_mult 3.1 (era 2.9)
-      take_profit: {mode: trailing, activation_pct: 9.7, trailing_delta_bps: 100}   # era 9.9 / 80
-      break_even_after_r: 1.2  # Move stop para 0 após 1.2R de lucro (elimina risco de reversão)
+      stop: {mode: fixed, atr_mult: 3.1, max_pct: 4.5}   # walk-forward: atr_mult 3.1 (was 2.9)
+      take_profit: {mode: trailing, activation_pct: 9.7, trailing_delta_bps: 100}   # was 9.9 / 80
+      break_even_after_r: 1.2  # Moves the stop to 0 after 1.2R of profit (removes reversal risk)
       max_holding: 18d
     exits:
-      exit_score: -0.46        # walk-forward (era -0.53)
+      exit_score: -0.46        # walk-forward (was -0.53)
       exit_after_cycles: 1
     signals:
-      adx_min: 24.0            # walk-forward (era 26)
-      rsi_pullback_max: 41.0   # walk-forward: mediana igual à anterior
-      vol_rel_min: 2.3         # walk-forward (era 1.6)
+      adx_min: 24.0            # walk-forward (was 26)
+      rsi_pullback_max: 41.0   # walk-forward: median equal to the previous one
+      vol_rel_min: 2.3         # walk-forward (was 1.6)
     llm:
       weight: 0.25
       min_confidence: 0.65
       on_failure: ta_only_reduced
 
   momentum_alpha:
-    # Calibrado em 01/10/2026: mediana dos 15 treinos do walk-forward otimizado
-    # (var/lab/walk-forward-momentum_alpha-otimizado-20261001-181357.md, candles de 4h
-    # desde 2021-10). Risco, break-even e prazo máximo não são otimizados pelo
-    # laboratório e seguem como estavam.
+    # Calibrated on 2026-10-01: median of the 15 trainings of the optimized walk-forward
+    # (var/lab/walk-forward-momentum_alpha-otimizado-20261001-181357.md, 4h candles
+    # since 2021-10). Risk, break-even and maximum holding are not optimized by the
+    # lab and stay as they were.
     code: mom
     enabled: true
-    capital_share: 0.35        # Alocação tática: 350 USDT
-    timeframe: 4h              # Migrado de 1h para 4h para eliminar ruído e taxas
+    capital_share: 0.35        # Tactical allocation: 350 USDT
+    timeframe: 4h              # Moved from 1h to 4h to remove noise and fees
     tiers: {core: 0.30, large: 0.50, mid: 0.20, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lotes de ~145 USDT
+      max_open_positions: 2    # Lots of ~145 USDT
       max_position_pct: 0.42
       cash_reserve_pct: 0.15
       risk_per_trade_pct: 1.5
     entry:
-      min_score: 0.67          # walk-forward (era 0.62)
+      min_score: 0.67          # walk-forward (was 0.62)
       order: limit_fok
       max_slippage_bps: 20
     protection:
-      stop: {mode: fixed, atr_mult: 3.0, max_pct: 5.0}   # walk-forward: atr_mult 3.0 (era 2.0)
-      take_profit: {mode: trailing, activation_pct: 9.5, trailing_delta_bps: 130}   # era 6.5 / 140
-      break_even_after_r: 1.0  # Protege o capital imediatamente no 1.0R
-      max_holding: 6d          # Saída rápida se a tese não expandir
+      stop: {mode: fixed, atr_mult: 3.0, max_pct: 5.0}   # walk-forward: atr_mult 3.0 (was 2.0)
+      take_profit: {mode: trailing, activation_pct: 9.5, trailing_delta_bps: 130}   # was 6.5 / 140
+      break_even_after_r: 1.0  # Protects the capital right at 1.0R
+      max_holding: 6d          # Quick exit if the thesis does not expand
     exits: 
-      exit_score: -0.46        # walk-forward (era -0.45)
+      exit_score: -0.46        # walk-forward (was -0.45)
       exit_after_cycles: 1
     signals:
-      adx_min: 29.0            # walk-forward (era 25)
-      rsi_pullback_max: 35.0   # walk-forward: mediana igual à anterior
-      vol_rel_min: 2.6         # walk-forward (era 2.2)
+      adx_min: 29.0            # walk-forward (was 25)
+      rsi_pullback_max: 35.0   # walk-forward: median equal to the previous one
+      vol_rel_min: 2.6         # walk-forward (was 2.2)
     llm: 
       weight: 0.30
       min_confidence: 0.60
-      on_failure: ta_only_reduced  # Não trava entradas se a API do LLM oscilar
+      on_failure: ta_only_reduced  # Does not block entries if the LLM API is unstable

@@ -1,10 +1,10 @@
-# Cópia ESTÁVEL de config/profiles.yaml para os testes unitários: os valores aqui são
-# fixos de propósito (a calibração do arquivo real não deve quebrar testes).
+# STABLE copy of config/profiles.yaml for the unit tests: the values here are fixed on
+# purpose (calibrating the real file must not break tests).
 
 account:
   quote_asset: USDT
-  managed_capital: 1000        # teto de capital que o agente pode usar
-  one_position_per_asset: true # evita dois perfis no mesmo ativo
+  managed_capital: 1000        # capital cap the agent may use
+  one_position_per_asset: true # keeps two profiles off the same asset
 
 profiles:
   conservador:
