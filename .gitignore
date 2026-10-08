@@ -44,4 +44,3 @@ lab/freqtrade/user_data/config.*.json
 !lab/freqtrade/user_data/config.base.json
 lab/freqtrade/user_data/strategies/*.json
 lab/freqtrade/user_data/*.lock
-.claude/settings.local.json
