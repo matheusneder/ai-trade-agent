@@ -196,3 +196,19 @@ async def test_cycle_failures_are_recorded(db: Database) -> None:
     latest = await store.latest_report()
     assert latest is not None and latest.status == "failed" and latest.cost_usd == 0
     assert (await store.latest_report(status="ok")) is not None
+
+
+async def test_a_started_cycle_is_not_cut_short_by_the_cap(db: Database) -> None:
+    """The cap applies per cycle (D-033): it is checked once, before the first call. With a
+    check before each call, the web step (most of the cost) crossed the cap and the reading
+    was then refused, paying for nothing (2026-10-06, 20:03)."""
+    fake = FakeClaude()
+    fake.reply([{"type": "text", "text": "findings"}])  # web step: US$ 0.0175, over the cap
+    fake.reply_json(VIEW)
+    async with httpx.AsyncClient() as http:
+        tight = _service(db, fake, http, budget=BudgetConfig(daily_usd=Decimal("0.01")))
+        done = await tight.run_cycle(trigger="t", candidates=CANDIDATES)
+        assert done.ok and done.cost_usd > Decimal("0.01") and len(fake.requests) == 2
+        refused = await tight.run_cycle(trigger="t", candidates=CANDIDATES)
+    assert not refused.ok and "orçamento" in (refused.error or "")
+    assert refused.cost_usd == 0 and len(fake.requests) == 2  # the next cycle calls nothing

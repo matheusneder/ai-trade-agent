@@ -41,6 +41,10 @@ from trade_agent.strategy.profiles import StrategyConfig, Timeframe
 D = Decimal
 FOUR_HOURS = 4 * HOUR_MS
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "profiles.yaml"
+NEUTRAL_VIEW = {
+    "market_regime": "neutral", "global_sentiment": 0, "exposure_multiplier": 1,
+    "global_risk_flags": [], "assets": [],
+}  # fmt: skip
 UNIVERSE = UniverseConfig(
     min_quote_volume_24h=D(1000), min_history_days=5, max_spread_bps=D(50), large_rank=5
 )
@@ -96,6 +100,7 @@ def _engine(
     research: ResearchService | None = None,
     clock: Clock | None = None,
     alerts: list[str] | None = None,
+    research_wait: timedelta = engine_module.SHARED_RESEARCH_WAIT,
 ) -> tuple[DecisionEngine, RiskGuard]:
     async def notify(severity: Severity, text: str) -> None:
         if alerts is not None:
@@ -116,6 +121,7 @@ def _engine(
         dry_run=dry_run,
         notify=notify,
         clock=clock,
+        research_wait=research_wait,
     )
     guard.set_flattener(engine.flatten)
     return engine, guard
@@ -151,6 +157,66 @@ async def test_profiles_of_the_same_timeframe_never_buy_the_same_asset(
     (late,) = (r for r in reports if not r.opened)
     assert ("SOLUSDT", "ativo já em carteira") in late.rejected
     assert [p.symbol for p in await store.active_positions()] == ["SOLUSDT"]
+
+
+def _twin_profiles() -> StrategyConfig:
+    """Two identical enabled profiles on 4h, like swing_trend and momentum_alpha."""
+    data = _strategy_data()
+    twin = copy.deepcopy(data["profiles"]["conservador"])
+    data["profiles"]["moderado"] = {**twin, "code": "mod", "capital_share": 0.3}
+    return StrategyConfig.model_validate(data)
+
+
+def _research(db: Database, http: httpx.AsyncClient, claude: FakeClaude) -> ResearchService:
+    config = research_config(web=WebResearchConfig(enabled=False))
+    return ResearchService(
+        store=ResearchStore(db),
+        collector=NewsCollector(http, config.sources, AssetTagger([], {})),
+        client=claude.client(),
+        config=config,
+        clock=Clock(),
+    )
+
+
+async def test_profiles_closing_together_share_one_research(
+    db: Database, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """One research per candle close for the profiles of the same timeframe (D-032): with one
+    per profile, a close cost almost twice as much for nearly the same reading."""
+    _setup_market(fake)
+    claude = FakeClaude()
+    claude.reply_json(NEUTRAL_VIEW)
+    async with httpx.AsyncClient() as http:
+        engine, _ = _engine(
+            api, service, store, strategy=_twin_profiles(), research=_research(db, http, claude)
+        )
+        reports = await asyncio.gather(
+            engine.run_profile("conservador"), engine.run_profile("moderado")
+        )
+    assert [r.research for r in reports] == ["ok", "ok"]
+    assert len(claude.requests) == 1  # a single reading for both profiles
+    record = await ResearchStore(db).latest_report()
+    assert record is not None and record.trigger == "ciclo:conservador+moderado"
+
+
+async def test_a_profile_that_misses_the_shared_research_researches_alone(
+    db: Database, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """The first profile does not wait forever for a peer, and a profile that arrives after
+    the shared research started still gets its candidates researched."""
+    _setup_market(fake)
+    claude = FakeClaude()
+    claude.reply_json(NEUTRAL_VIEW)
+    claude.reply_json(NEUTRAL_VIEW)
+    async with httpx.AsyncClient() as http:
+        engine, _ = _engine(
+            api, service, store, strategy=_twin_profiles(), research=_research(db, http, claude),
+            research_wait=timedelta(milliseconds=50),  # the peer never comes
+        )  # fmt: skip
+        alone = await engine.run_profile("conservador")
+        late = await engine.run_profile("moderado")
+    assert (alone.research, late.research) == ("ok", "ok")
+    assert len(claude.requests) == 2
 
 
 async def test_dry_run_simulates_entries_without_orders(
