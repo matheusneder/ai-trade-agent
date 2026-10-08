@@ -1,7 +1,7 @@
-"""Prompts do analista. Mudanças de conteúdo exigem nova ``PROMPT_VERSION`` (auditoria).
+"""Analyst prompts. Content changes require a new ``PROMPT_VERSION`` (audit).
 
-Os prompts são estáveis (sem datas nem valores variáveis) para aproveitar o *prompt
-caching*; tudo o que muda a cada ciclo vai na mensagem do usuário.
+The prompts are stable (no dates or variable values) to benefit from *prompt caching*;
+everything that changes each cycle goes in the user message.
 """
 
 PROMPT_VERSION = "v1"

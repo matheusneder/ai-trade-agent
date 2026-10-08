@@ -1,9 +1,9 @@
-"""Coleta das leituras de risco (``RiskSnapshot``) a partir do banco e da exchange.
+"""Collection of the risk readings (``RiskSnapshot``) from the database and the exchange.
 
-O patrimônio considerado é o **do agente**: capital gerido + PnL realizado + PnL não
-realizado das posições abertas (a preço de venda). Saldos da conta que não pertencem ao
-agente não entram. A abertura do dia (UTC) e o pico ficam persistidos em ``checkpoints``,
-junto com o capital gerido que valia quando foram gravados.
+The equity considered is **the agent's**: managed capital + realized PnL + unrealized PnL
+of the open positions (at the sell price). Account balances that do not belong to the
+agent are left out. The day's open (UTC) and the peak are persisted in ``checkpoints``,
+together with the managed capital in force when they were recorded.
 """
 
 import statistics
@@ -24,14 +24,14 @@ from trade_agent.risk.guard import RiskSnapshot
 from trade_agent.strategy.profiles import StrategyConfig
 
 RECONCILE_FAILURES_TO_COUNT = 2
-"""Reconciliações seguidas com erro a partir das quais os erros contam em reconcile_mismatch."""
+"""Consecutive reconciliations with errors from which the errors count in reconcile_mismatch."""
 
 log = structlog.get_logger(__name__)
 
 EQUITY_KEY = "risk.equity"
 BENCHMARK = "BTCUSDT"
 STABLE_PAIRS = ("USDCUSDT", "FDUSDUSDT")
-"""Referências de paridade da moeda de cotação (USDT) contra outros dólares digitais."""
+"""Parity references of the quote asset (USDT) against other digital dollars."""
 
 
 def _mid(book: BookTicker) -> Decimal:
@@ -39,7 +39,7 @@ def _mid(book: BookTicker) -> Decimal:
 
 
 def consecutive_losses(closed: Sequence[Position]) -> int:
-    """Perdas seguidas a partir da posição encerrada mais recente."""
+    """Consecutive losses starting from the most recently closed position."""
     streak = 0
     for position in closed:
         if position.realized_pnl is None or position.realized_pnl >= 0:
@@ -49,7 +49,7 @@ def consecutive_losses(closed: Sequence[Position]) -> int:
 
 
 def quote_deviation(books: dict[str, BookTicker]) -> float | None:
-    """Desvio absoluto do USDT: 1 / mediana(USDC/USDT, FDUSD/USDT) − 1."""
+    """Absolute deviation of USDT: 1 / median(USDC/USDT, FDUSD/USDT) − 1."""
     mids = [_mid(books[s]) for s in STABLE_PAIRS if s in books and _mid(books[s]) > 0]
     if not mids:
         return None
@@ -78,13 +78,13 @@ class RiskMonitor:
         self._failed_in_a_row = 0
 
     def note_reconcile(self, report: ReconcileReport) -> None:
-        """Órfãs e erros persistentes da última reconciliação alimentam ``reconcile_mismatch``.
+        """Orphans and persistent errors of the last reconciliation feed ``reconcile_mismatch``.
 
-        Uma órfã (lista do agente na Binance sem posição) é divergência real e conta na hora.
-        Um erro é uma checagem que não terminou (rede, DNS, Binance fora do ar) e só conta se
-        as reconciliações seguidas também falharem: em 07/10, 2 min sem DNS viraram uma pausa
-        sem prazo, embora a reconciliação 5 min depois tenha saído limpa. Uma queda longa da
-        API já pausa pelo api_error_rate_5m.
+        An orphan (an agent list on Binance without a position) is a real mismatch and counts
+        right away. An error is a check that did not finish (network, DNS, Binance down) and
+        only counts if the following reconciliations fail too: on 2026-10-07, 2 min without
+        DNS turned into a pause with no deadline, even though the reconciliation 5 min later
+        came out clean. A long API outage already pauses through api_error_rate_5m.
         """
         self._failed_in_a_row = self._failed_in_a_row + 1 if report.errors else 0
         persistent = self._failed_in_a_row >= RECONCILE_FAILURES_TO_COUNT
@@ -100,11 +100,11 @@ class RiskMonitor:
     async def _equity_marks(
         self, equity: Decimal, baseline: Decimal, now: datetime
     ) -> tuple[Decimal, Decimal]:
-        """Abertura do dia (UTC) e pico do patrimônio, atualizados e persistidos.
+        """The day's open (UTC) and the equity peak, updated and persisted.
 
-        Mudar o ``managed_capital`` não é ganho nem perda: as marcas acompanham a diferença
-        de capital, e só o resultado das operações conta para a perda diária e o drawdown.
-        Marcas gravadas sem o capital de referência recomeçam do patrimônio atual.
+        Changing ``managed_capital`` is neither a gain nor a loss: the marks follow the change
+        in capital, and only the trading result counts for the daily loss and the drawdown.
+        Marks recorded without the reference capital start again from the current equity.
         """
         day = now.date().isoformat()
         saved = await self._store.get_checkpoint(EQUITY_KEY) or {}

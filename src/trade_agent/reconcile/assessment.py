@@ -1,7 +1,7 @@
-"""Avaliação pura do estado de uma lista de proteção a partir das ordens na exchange.
+"""Pure assessment of a protection list's state from the orders on the exchange.
 
-Não faz I/O: recebe o instantâneo da lista (entrada, take-profit e stop) e devolve um
-veredito que o serviço de posições aplica.
+It does no I/O: it receives the list snapshot (entry, take-profit and stop) and returns a
+verdict that the position service applies.
 """
 
 from dataclasses import dataclass
@@ -31,27 +31,27 @@ class ListSnapshot:
 
 class VerdictKind(StrEnum):
     MISSING = "missing"
-    """A lista não existe na exchange."""
+    """The list does not exist on the exchange."""
 
     AWAITING_ENTRY = "awaiting_entry"
-    """Entrada maker ainda no livro; nada executado."""
+    """Maker entry still on the book; nothing filled."""
 
     ARMING = "arming"
-    """Entrada executada; a Binance está armando o OCO (``PENDING_NEW``)."""
+    """Entry filled; Binance is arming the OCO (``PENDING_NEW``)."""
 
     PROTECTED = "protected"
     PARTIAL = "partial"
-    """Entrada GTC parcialmente executada: a parte executada ainda não tem proteção."""
+    """GTC entry partially filled: the filled part has no protection yet."""
 
     EXITING = "exiting"
-    """Uma perna de saída está parcialmente executada."""
+    """An exit leg is partially filled."""
 
     CLOSED = "closed"
     REJECTED = "rejected"
-    """A entrada terminou sem nenhuma execução."""
+    """The entry finished without any fill."""
 
     UNPROTECTED = "unprotected"
-    """Há saldo da posição sem proteção ativa (pernas expiradas/canceladas sem execução)."""
+    """Part of the position has no active protection (legs expired/canceled without a fill)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +65,7 @@ class Verdict:
 
 
 def assess(snapshot: ListSnapshot | None) -> Verdict:
-    """Deriva o estado da posição a partir da sua lista de proteção atual."""
+    """Derives the position's state from its current protection list."""
     if snapshot is None:
         return Verdict(VerdictKind.MISSING, "lista não encontrada na exchange")
     entry = snapshot.leg(Leg.ENTRY)

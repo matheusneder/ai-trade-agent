@@ -1,1 +1,1 @@
-"""Reconciliação com a exchange (fonte da verdade) e recuperação após falhas."""
+"""Reconciliation with the exchange (the source of truth) and recovery after failures."""

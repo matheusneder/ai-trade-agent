@@ -1,1 +1,1 @@
-"""Estratégia: perfis de risco, combinação de scores, seleção e dimensionamento."""
+"""Strategy: risk profiles, score blending, selection and sizing."""

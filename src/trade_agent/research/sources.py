@@ -1,11 +1,11 @@
-"""Coleta de notícias e métricas públicas (sem chave).
+"""Collection of public news and metrics (no key).
 
-* Anúncios do site da Binance (listagens, delistagens, notícias);
-* feeds RSS/Atom de mídia cripto;
-* índice Fear & Greed (alternative.me);
-* *funding* e *open interest* da Binance Futures USDⓈ-M.
+* Announcements on the Binance website (listings, delistings, news);
+* RSS/Atom feeds of crypto media;
+* Fear & Greed index (alternative.me);
+* *funding* and *open interest* from Binance Futures USDⓈ-M.
 
-As funções ``parse_*`` são puras; as ``fetch_*`` só fazem o HTTP.
+The ``parse_*`` functions are pure; the ``fetch_*`` ones only do the HTTP.
 """
 
 import calendar
@@ -33,7 +33,7 @@ def clean_html(value: str) -> str:
     return " ".join(html.unescape(_TAG.sub(" ", value)).split())
 
 
-# ============================================================================ parse (puras)
+# ============================================================================ parse (pure)
 def parse_fear_greed(data: Mapping[str, Any]) -> FearGreed:
     rows = data["data"]
     return FearGreed(
@@ -92,7 +92,7 @@ def parse_funding(rows: Sequence[Mapping[str, Any]], symbols: Sequence[str]) -> 
 
 
 def open_interest_change(rows: Sequence[Mapping[str, Any]]) -> float | None:
-    """Variação do *open interest* (USDT) entre o primeiro e o último ponto."""
+    """Change of the *open interest* (USDT) between the first and the last point."""
     if len(rows) < 2:
         return None
     first = float(rows[0]["sumOpenInterestValue"])
@@ -139,7 +139,7 @@ async def fetch_derivatives(
     funding = parse_funding(await _get_json(client, f"{FAPI}/fapi/v1/premiumIndex"), symbols)
     changes: dict[str, float] = {}
     for symbol in symbols:
-        if symbol not in funding:  # sem contrato perpétuo: não há open interest
+        if symbol not in funding:  # no perpetual contract: there is no open interest
             continue
         rows = await _get_json(
             client, f"{FAPI}/futures/data/openInterestHist", symbol=symbol, period="1h", limit=25

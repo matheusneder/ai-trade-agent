@@ -1,4 +1,4 @@
-"""Jaeger em contêiner (testcontainers) com a configuração de produção de ``deploy/jaeger``."""
+"""Jaeger in a container (testcontainers) with the production configuration of ``deploy/jaeger``."""
 
 import contextlib
 import shutil

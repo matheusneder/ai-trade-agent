@@ -1,4 +1,4 @@
-"""Raiz de composição e comando ``trade-agent run`` (PostgreSQL + Binance simulada)."""
+"""Composition root and the ``trade-agent run`` command (PostgreSQL + simulated Binance)."""
 
 import asyncio
 import io
@@ -31,7 +31,7 @@ def _settings(postgres_url: str | None, **overrides: object) -> Settings:
         "binance_key_type": "hmac",
         "binance_api_secret": "fake-secret",
         "database_url": postgres_url,
-        "strategy_config": PROFILES,  # independente do config/ que o operador edita
+        "strategy_config": PROFILES,  # independent of the config/ the operator edits
     }
     values.update(overrides)
     return load_settings(env_file=None, **values)
@@ -63,9 +63,9 @@ async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -
         httpx.AsyncClient() as aux,
         build_runtime(settings, aux_http=aux, user_stream=False) as runtime,
     ):
-        assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h"]  # agressivo desligado
-        assert len(runtime._periodic) == 2  # risco (com telemetria) e notícias
-        assert runtime._heartbeat is None  # sem TA_HEALTHCHECK_URL
+        assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h"]  # agressivo turned off
+        assert len(runtime._periodic) == 2  # risk (with telemetry) and news
+        assert runtime._heartbeat is None  # no TA_HEALTHCHECK_URL
 
 
 async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Database) -> None:
@@ -74,7 +74,7 @@ async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Databa
     offline: list[str] = []
 
     def no_internet(request: httpx.Request) -> httpx.Response:
-        offline.append(request.url.host)  # a coleta de notícias roda já na partida
+        offline.append(request.url.host)  # news collection already runs at startup
         return httpx.Response(503)
 
     stop = asyncio.Event()
@@ -101,9 +101,9 @@ async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Databa
         await asyncio.wait_for(task, timeout=10)
     kinds = [e.kind for e in await store.recent_events()]
     assert kinds[0] == "agent.stopped" and "agent.started" in kinds
-    assert "runtime.task_failed" not in kinds  # risco e coleta rodaram já na partida, sem falha
+    assert "runtime.task_failed" not in kinds  # risk and collection ran at startup, without failing
     assert fake.calls("GET", "/api/v3/time")
-    assert "www.coindesk.com" in offline  # nenhum acesso real à internet nos testes
+    assert "www.coindesk.com" in offline  # no real internet access in the tests
 
 
 async def test_run_agent_traces_the_components(
@@ -157,8 +157,8 @@ async def test_run_agent_traces_the_components(
         ("http://jaeger:4318,http://signoz-ingester:4318", "testnet"),
         ("http://signoz-ingester:4318", "testnet"),
     ]
-    assert tracing._active is None and not metrics.enabled()  # desinstalados ao encerrar
-    assert points["trade_agent.equity"] == [({}, 1000.0)]  # a verificação de risco alimentou
+    assert tracing._active is None and not metrics.enabled()  # uninstalled on shutdown
+    assert points["trade_agent.equity"] == [({}, 1000.0)]  # the risk check fed it
     names = {s.name for s in recorded.spans}
     assert {"agent.start", "reconcile.all", "risk.snapshot", "risk.apply"} <= names
     assert {"telemetry.observe", "research.ingest", "research.collect"} <= names
@@ -171,7 +171,7 @@ async def test_run_agent_traces_the_components(
         ("runtime", "telemetry"),
         ("telemetry", "db"),
         ("runtime", "research"),
-        ("runtime", "db"),  # migrações e eventos da partida
+        ("runtime", "db"),  # migrations and startup events
     } <= recorded.edges()
     offline = [s for s in recorded.spans if s.name.startswith("source ")]
     assert offline and all(s.status.status_code is StatusCode.ERROR for s in offline)
@@ -180,7 +180,7 @@ async def test_run_agent_traces_the_components(
 
 
 async def test_install_signal_handlers_is_safe() -> None:
-    install_signal_handlers(asyncio.Event())  # no Windows, o SO não suporta: ignorado
+    install_signal_handlers(asyncio.Event())  # on Windows, the OS does not support it: ignored
 
 
 def _run_cli(

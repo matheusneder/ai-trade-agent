@@ -1,5 +1,5 @@
-"""Coleta de todas as fontes com isolamento de falhas: uma fonte fora do ar não impede
-as outras (o erro fica registrado no resultado)."""
+"""Collection from every source with failure isolation: one source being down does not stop
+the others (the error is recorded in the result)."""
 
 import asyncio
 import dataclasses
@@ -27,7 +27,7 @@ log = structlog.get_logger(__name__)
 
 
 async def _source[T](name: str, job: Awaitable[T]) -> T:
-    """Uma fonte por span (as fontes rodam em paralelo, sob o span da coleta)."""
+    """One span per source (the sources run in parallel, under the collection span)."""
     with tracing.span("research", f"source {name}", kind=SpanKind.CLIENT) as span:
         result = await job
         if isinstance(result, Sized):

@@ -1,11 +1,11 @@
-"""Subcomandos ``trade-agent research ...`` (analista de mercado).
+"""``trade-agent research ...`` subcommands (market analyst).
 
-Exemplos::
+Examples::
 
-    trade-agent research ingest                     # coleta notícias e métricas (banco)
-    trade-agent research run --assets BTC,ETH,SOL   # um ciclo de pesquisa (banco + chave)
-    trade-agent research show                       # última leitura válida
-    trade-agent research eval --limit 5             # avaliação com casos rotulados (chave)
+    trade-agent research ingest                     # collects news and metrics (database)
+    trade-agent research run --assets BTC,ETH,SOL   # one research cycle (database + key)
+    trade-agent research show                       # latest valid reading
+    trade-agent research eval --limit 5             # evaluation with labeled cases (key)
 """
 
 import argparse
@@ -38,7 +38,7 @@ DEFAULT_OUTPUT = Path("var/eval")
 
 
 class CommandError(Exception):
-    """Pré-condição não atendida (mensagem para o operador)."""
+    """Unmet precondition (message for the operator)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +112,7 @@ async def _with_database(
     out: TextIO,
 ) -> int:
     if args.research_command == "run":
-        deps.anthropic_factory(settings)  # falha cedo sem a chave
+        deps.anthropic_factory(settings)  # fails early without the key
     db = deps.database_factory(settings)
     try:
         await upgrade_to_head(db.engine)

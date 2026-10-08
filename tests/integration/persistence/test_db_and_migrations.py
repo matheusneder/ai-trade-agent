@@ -43,8 +43,8 @@ async def test_exclusive_lock_allows_a_single_instance(db: Database, postgres_ur
 
 
 async def test_the_instance_lock_leaves_no_open_transaction(db: Database) -> None:
-    """Com uma transação aberta, a conexão do lock prenderia o horizonte do VACUUM (o
-    ``backend_xmin``) enquanto o agente roda, e as linhas mortas não seriam removidas."""
+    """With an open transaction, the lock's connection would pin the VACUUM horizon (the
+    ``backend_xmin``) while the agent runs, and the dead rows would not be removed."""
     async with db.exclusive_lock(key=4243), db.session() as session:
         holder = await session.execute(
             text(
@@ -65,7 +65,7 @@ async def test_pool_recovers_after_connection_is_killed(db: Database) -> None:
             )
         )
         await admin.commit()
-    assert await db.ping()  # pool_pre_ping descarta a conexão morta
+    assert await db.ping()  # pool_pre_ping discards the dead connection
 
 
 async def test_models_match_migrations(db: Database) -> None:
@@ -103,7 +103,7 @@ def test_env_uses_database_url_without_injected_connection(
     postgres_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TA_DATABASE_URL", postgres_url)
-    command.upgrade(alembic_config(), "head")  # já está no head: executa o caminho assíncrono
+    command.upgrade(alembic_config(), "head")  # already at head: runs the asynchronous path
     engine = create_async_engine(postgres_url)
 
     async def current() -> str | None:

@@ -1,4 +1,4 @@
-"""Fachada tipada dos endpoints da Binance Spot usados pelo agente."""
+"""Typed facade over the Binance Spot endpoints the agent uses."""
 
 import json
 from collections.abc import Mapping, Sequence
@@ -27,14 +27,14 @@ def _is_not_found(exc: BinanceRejectedError) -> bool:
 
 
 class BinanceSpotApi:
-    """Endpoints REST tipados (dados de mercado, conta e ordens)."""
+    """Typed REST endpoints (market data, account and orders)."""
 
     def __init__(self, rest: BinanceRestClient) -> None:
         self.rest = rest
 
-    # ------------------------------------------------------------------ mercado
+    # ------------------------------------------------------------------ market
     async def exchange_info(self, symbols: Sequence[str] | None = None) -> dict[str, SymbolRules]:
-        """Regras dos símbolos informados (ou de todos os símbolos SPOT)."""
+        """Rules of the given symbols (or of every SPOT symbol)."""
         params: dict[str, ParamValue]
         if not symbols:
             params = {"permissions": "SPOT"}
@@ -50,12 +50,12 @@ class BinanceSpotApi:
         return BookTicker.model_validate(data)
 
     async def book_tickers(self) -> list[BookTicker]:
-        """Melhor bid/ask de todos os símbolos (peso 4)."""
+        """Best bid/ask of every symbol (weight 4)."""
         data = await self.rest.public("GET", "/api/v3/ticker/bookTicker")
         return [BookTicker.model_validate(item) for item in data]
 
     async def tickers_24h(self) -> list[Ticker24h]:
-        """Estatísticas de 24 h de todos os símbolos (peso 80)."""
+        """24 h statistics of every symbol (weight 80)."""
         data = await self.rest.public("GET", "/api/v3/ticker/24hr")
         return [Ticker24h.model_validate(item) for item in data]
 
@@ -68,7 +68,7 @@ class BinanceSpotApi:
         start_time: int | None = None,
         end_time: int | None = None,
     ) -> list[list[Any]]:
-        """Candles brutos (``[openTime, open, high, low, close, volume, closeTime, ...]``)."""
+        """Raw candles (``[openTime, open, high, low, close, volume, closeTime, ...]``)."""
         data: list[list[Any]] = await self.rest.public(
             "GET",
             "/api/v3/klines",
@@ -83,16 +83,16 @@ class BinanceSpotApi:
         return data
 
     async def delist_schedule(self) -> set[str]:
-        """Símbolos com delistagem agendada (``GET /sapi/v1/spot/delist-schedule``)."""
+        """Symbols with a scheduled delisting (``GET /sapi/v1/spot/delist-schedule``)."""
         data = await self.rest.signed("GET", "/sapi/v1/spot/delist-schedule")
         return {symbol for item in data for symbol in item.get("symbols", ())}
 
     async def avg_price(self, symbol: str) -> Decimal:
-        """Preço médio ponderado dos últimos minutos (base do ``PERCENT_PRICE_BY_SIDE``)."""
+        """Weighted average price of the last few minutes (basis of ``PERCENT_PRICE_BY_SIDE``)."""
         data = await self.rest.public("GET", "/api/v3/avgPrice", {"symbol": symbol})
         return Decimal(data["price"])
 
-    # ------------------------------------------------------------------ conta
+    # ------------------------------------------------------------------ account
     async def account(self) -> Account:
         data = await self.rest.signed("GET", "/api/v3/account", {"omitZeroBalances": True})
         return Account.model_validate(data)
@@ -123,7 +123,7 @@ class BinanceSpotApi:
         )
         return [Trade.model_validate(item) for item in data]
 
-    # ------------------------------------------------------------------ ordens simples
+    # ------------------------------------------------------------------ simple orders
     async def new_order(self, params: Mapping[str, ParamValue]) -> Order:
         data = await self.rest.signed("POST", "/api/v3/order", params, trading=True)
         return Order.model_validate(data)
@@ -143,7 +143,7 @@ class BinanceSpotApi:
         return Order.model_validate(data)
 
     async def find_order(self, symbol: str, client_order_id: str) -> Order | None:
-        """Consulta por ``clientOrderId``; ``None`` se a ordem não existir."""
+        """Looks up by ``clientOrderId``; ``None`` if the order does not exist."""
         try:
             return await self.get_order(symbol, client_order_id=client_order_id)
         except BinanceRejectedError as exc:
@@ -164,7 +164,7 @@ class BinanceSpotApi:
         )
         return Order.model_validate(data)
 
-    # ------------------------------------------------------------------ listas de ordens
+    # ------------------------------------------------------------------ order lists
     async def place_order_list(
         self, kind: OrderListKind, params: Mapping[str, ParamValue]
     ) -> OrderList:
@@ -185,7 +185,7 @@ class BinanceSpotApi:
         return OrderList.model_validate(data)
 
     async def find_order_list(self, list_client_order_id: str) -> OrderList | None:
-        """Consulta por ``listClientOrderId``; ``None`` se a lista não existir."""
+        """Looks up by ``listClientOrderId``; ``None`` if the list does not exist."""
         try:
             return await self.get_order_list(list_client_order_id=list_client_order_id)
         except BinanceRejectedError as exc:

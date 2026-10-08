@@ -1,7 +1,7 @@
-"""Regras de saída por decisão (rotação, tempo, veto) e ajuste de *break-even*.
+"""Decision-based exit rules (rotation, time, veto) and the *break-even* adjustment.
 
-As saídas por preço (take-profit e stop) acontecem na própria Binance (OCO); aqui ficam
-apenas as saídas que dependem de análise.
+Price-based exits (take-profit and stop) happen on Binance itself (OCO); only the exits
+that depend on analysis live here.
 """
 
 from datetime import timedelta
@@ -14,11 +14,11 @@ from trade_agent.strategy.profiles import ProfileConfig
 
 PCT = Decimal(100)
 DEFAULT_FEE_BUFFER = Decimal("0.003")
-"""Margem acima do preço de entrada no *break-even* para cobrir as taxas de ida e volta."""
+"""Margin above the entry price at *break-even* to cover the round-trip fees."""
 
 
 def next_weak_cycles(previous: int, signal: Signal | None, profile: ProfileConfig) -> int:
-    """Conta ciclos consecutivos com score no nível de saída (zera ao melhorar)."""
+    """Counts consecutive cycles with the score at the exit level (resets when it improves)."""
     if signal is not None and signal.score <= profile.exits.exit_score:
         return previous + 1
     return 0
@@ -31,7 +31,7 @@ def exit_reason(
     weak_cycles: int,
     veto: bool = False,
 ) -> str | None:
-    """Motivo para encerrar a posição por decisão, ou ``None`` para mantê-la."""
+    """Reason to close the position by decision, or ``None`` to keep it."""
     if veto:
         return "veto do analista"
     max_holding = profile.protection.max_holding
@@ -49,9 +49,10 @@ def break_even_protection(
     *,
     fee_buffer: Decimal = DEFAULT_FEE_BUFFER,
 ) -> Protection | None:
-    """Nova proteção com stop no *break-even* quando o ganho atinge ``break_even_after_r``.
+    """New protection with the stop at *break-even* once the gain reaches ``break_even_after_r``.
 
-    Só se aplica a stops fixos acima do nível atual; retorna ``None`` quando não há ajuste.
+    Only applies to fixed stops above the current level; returns ``None`` when there is no
+    adjustment.
     """
     policy = position.policy
     trigger_r = profile.protection.break_even_after_r

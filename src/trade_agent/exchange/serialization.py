@@ -1,7 +1,7 @@
-"""Serialização de parâmetros para a API da Binance.
+"""Serialization of parameters for the Binance API.
 
-Preços e quantidades trafegam como :class:`~decimal.Decimal` e são enviados em notação
-decimal fixa, sem expoente: a Binance rejeita ``1E-5`` (erro ``-1100 ILLEGAL_CHARS``).
+Prices and quantities travel as :class:`~decimal.Decimal` and are sent in fixed decimal
+notation, without an exponent: Binance rejects ``1E-5`` (error ``-1100 ILLEGAL_CHARS``).
 """
 
 from collections.abc import Mapping
@@ -13,7 +13,7 @@ type ParamValue = str | int | Decimal | bool | Enum | None
 
 
 def format_decimal(value: Decimal) -> str:
-    """Formata um Decimal em notação fixa, sem zeros à direita e sem expoente.
+    """Formats a Decimal in fixed notation, without trailing zeros or an exponent.
 
     >>> format_decimal(Decimal("1E-5"))
     '0.00001'
@@ -31,7 +31,7 @@ def format_decimal(value: Decimal) -> str:
 
 
 def to_param_str(value: str | int | Decimal | bool | Enum) -> str:
-    """Converte um valor de parâmetro para a representação textual esperada pela API."""
+    """Converts a parameter value to the textual form the API expects."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, Enum):
@@ -44,15 +44,15 @@ def to_param_str(value: str | int | Decimal | bool | Enum) -> str:
 
 
 def clean_params(params: Mapping[str, ParamValue]) -> dict[str, str]:
-    """Remove parâmetros ``None`` e converte os demais para texto, preservando a ordem."""
+    """Drops ``None`` parameters and converts the rest to text, preserving the order."""
     return {key: to_param_str(value) for key, value in params.items() if value is not None}
 
 
 def encode_params(params: Mapping[str, ParamValue]) -> str:
-    """Monta a query string percent-encoded (payload assinado da REST API).
+    """Builds the percent-encoded query string (signed payload of the REST API).
 
-    A ordem dos parâmetros é preservada e os valores são codificados por completo
-    (``quote(..., safe="")``), exatamente como serão enviados e assinados.
+    The parameter order is preserved and values are fully encoded
+    (``quote(..., safe="")``), exactly as they will be sent and signed.
     """
     return "&".join(
         f"{quote(key, safe='')}={quote(value, safe='')}"
@@ -61,6 +61,6 @@ def encode_params(params: Mapping[str, ParamValue]) -> str:
 
 
 def ws_signature_payload(params: Mapping[str, ParamValue]) -> str:
-    """Payload de assinatura da WebSocket API: parâmetros ordenados por nome, sem encoding."""
+    """Signature payload of the WebSocket API: parameters sorted by name, without encoding."""
     cleaned = clean_params(params)
     return "&".join(f"{key}={cleaned[key]}" for key in sorted(cleaned))

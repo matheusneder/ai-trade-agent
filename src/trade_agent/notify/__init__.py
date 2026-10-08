@@ -1,1 +1,1 @@
-"""Alertas e comandos do operador (Telegram)."""
+"""Alerts and operator commands (Telegram)."""

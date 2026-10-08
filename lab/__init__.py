@@ -1,1 +1,1 @@
-"""Laboratório de pesquisa (backtest/hyperopt) — ferramentas de desenvolvimento."""
+"""Research lab (backtest/hyperopt) — development tools."""

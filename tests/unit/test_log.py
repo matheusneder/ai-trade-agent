@@ -57,7 +57,7 @@ def test_debug_level_controls_verbosity(fmt: LogFormat, capsys: pytest.CaptureFi
     assert "detalhe.oculto" not in output
     assert "resumo.visivel" in output and "detalhe.visivel" in output
     assert "segredo" not in output
-    for name in QUIET_LIBRARIES:  # URLs completas (com tokens) nunca aparecem nos logs
+    for name in QUIET_LIBRARIES:  # full URLs (with tokens) never show up in the logs
         assert logging.getLogger(name).level == logging.WARNING
 
 

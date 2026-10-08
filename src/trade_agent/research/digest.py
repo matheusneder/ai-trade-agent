@@ -1,7 +1,7 @@
-"""Montagem das mensagens do analista (digest de notícias, métricas e candidatos).
+"""Building of the analyst's messages (digest of news, metrics and candidates).
 
-Conteúdo externo entra delimitado e marcado como não confiável; os sinais ``<`` e ``>``
-desse conteúdo são neutralizados para que ele não consiga fechar o bloco nem abrir outro.
+External content goes in delimited and marked as untrusted; the ``<`` and ``>`` characters
+of that content are neutralized so it cannot close the block or open another one.
 """
 
 from collections.abc import Iterable, Sequence
@@ -23,8 +23,8 @@ def _cut(text: str, limit: int) -> str:
 def select_news(
     news: Iterable[StoredNews], config: DigestConfig, *, now: datetime
 ) -> list[StoredNews]:
-    """Notícias da janela, sem as de baixa relevância (quando triadas), das mais
-    relevantes para as menos; sem triagem, pesa como relevância média."""
+    """News in the window, without the low-relevance ones (when triaged), from the most to
+    the least relevant; without triage, it counts as average relevance."""
     since = now - timedelta(hours=config.lookback_hours)
     recent = [
         n

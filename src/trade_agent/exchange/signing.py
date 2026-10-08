@@ -1,4 +1,4 @@
-"""Assinatura de requisições da Binance (HMAC-SHA256 e Ed25519)."""
+"""Signing of Binance requests (HMAC-SHA256 and Ed25519)."""
 
 import base64
 import hashlib
@@ -11,13 +11,13 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 
 class Signer(Protocol):
-    """Assina um payload textual e devolve a assinatura no formato esperado pela Binance."""
+    """Signs a textual payload and returns the signature in the format Binance expects."""
 
     def sign(self, payload: str) -> str: ...
 
 
 class HmacSigner:
-    """Assinatura HMAC-SHA256 em hexadecimal."""
+    """HMAC-SHA256 signature in hexadecimal."""
 
     __slots__ = ("_secret",)
 
@@ -31,7 +31,7 @@ class HmacSigner:
 
 
 class Ed25519Signer:
-    """Assinatura Ed25519 codificada em base64 (tipo de chave recomendado pela Binance)."""
+    """Ed25519 signature encoded in base64 (the key type Binance recommends)."""
 
     __slots__ = ("_key",)
 

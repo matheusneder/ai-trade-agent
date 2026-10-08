@@ -108,10 +108,10 @@ async def test_analyze_with_web_research_and_safety() -> None:
 async def test_analyze_skips_or_survives_web_research() -> None:
     fake = FakeClaude()
     fake.reply_json(_draft())  # web=False
-    fake.reply_json(_draft())  # web desabilitado na configuração
-    fake.reply_json(_draft())  # sem candidatos
-    fake.fail(500)  # pesquisa falha...
-    fake.reply_json(_draft())  # ...e a leitura segue sem ela
+    fake.reply_json(_draft())  # web turned off in the configuration
+    fake.reply_json(_draft())  # no candidates
+    fake.fail(500)  # the research fails...
+    fake.reply_json(_draft())  # ...and the reading goes on without it
     enabled = MarketAnalyst(fake.claude(), research_config())
     disabled = MarketAnalyst(fake.claude(), research_config(web=WebResearchConfig(enabled=False)))
     args: dict[str, Any] = {"as_of": NOW, "metrics": MarketMetrics(), "news": []}
@@ -128,7 +128,7 @@ async def test_budget_exhausted_during_research_propagates() -> None:
     ledger = MemoryLedger()
     config = research_config(budget=BudgetConfig(daily_usd=Decimal("0.001")))
     fake = FakeClaude()
-    fake.reply([{"type": "text", "text": "x"}])  # pesquisa consome o orçamento
+    fake.reply([{"type": "text", "text": "x"}])  # the research uses up the budget
     analyst = MarketAnalyst(fake.claude(config=config, ledger=ledger), config)
     with pytest.raises(BudgetExceededError):
         await analyst.analyze(
@@ -142,7 +142,7 @@ async def test_budget_exhausted_during_research_propagates() -> None:
         )
 
 
-# ============================================================================ avaliação
+# ============================================================================ evaluation
 def test_repository_cases_are_valid() -> None:
     cases = load_cases(CASES_FILE)
     assert len(cases) >= 30
@@ -248,10 +248,10 @@ def test_check_each_expectation() -> None:
 
 async def test_run_eval_outcomes_and_report() -> None:
     fake = FakeClaude()
-    fake.reply_json(_draft(_asset("SOL", veto=True)))  # aprovado
-    fake.reply([{"type": "text", "text": "não é json"}])  # schema inválido
-    fake.fail(500)  # erro da API
-    fake.reply_json(_draft(_asset("SOL")))  # expectativa falha
+    fake.reply_json(_draft(_asset("SOL", veto=True)))  # passed
+    fake.reply([{"type": "text", "text": "não é json"}])  # invalid schema
+    fake.fail(500)  # API error
+    fake.reply_json(_draft(_asset("SOL")))  # expectation fails
     ledger = TrackingLedger(MemoryLedger())
     analyst = MarketAnalyst(fake.claude(ledger=ledger), research_config())
     cases = [_case(veto=["SOL"]).model_copy(update={"id": f"c{i}"}) for i in range(4)]

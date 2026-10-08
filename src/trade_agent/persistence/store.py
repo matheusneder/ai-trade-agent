@@ -1,4 +1,4 @@
-"""Repositório do agente: posições, intenções, espelho de ordens, execuções e eventos."""
+"""Agent repository: positions, intents, order mirror, fills and events."""
 
 import dataclasses
 from collections.abc import Iterable, Mapping
@@ -73,7 +73,7 @@ class PositionNotFoundError(LookupError):
 
 
 def to_jsonable(params: Mapping[str, ParamValue]) -> dict[str, Any]:
-    """Parâmetros de ordem em JSON (Decimal → texto sem expoente, Enum → valor)."""
+    """Order parameters as JSON (Decimal → text without an exponent, Enum → value)."""
     result: dict[str, Any] = {}
     for key, value in params.items():
         if isinstance(value, Decimal):
@@ -142,7 +142,7 @@ class Store:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    # ================================================================== posições
+    # ================================================================== positions
     async def create_position(
         self,
         *,
@@ -159,7 +159,7 @@ class Store:
         intent_endpoint: str,
         intent_payload: Mapping[str, ParamValue],
     ) -> tuple[Position, Intent]:
-        """Cria a posição ``PLANNED`` e a intenção de abertura na mesma transação."""
+        """Creates the ``PLANNED`` position and the opening intent in the same transaction."""
         async with self.db.session() as session:
             record = PositionRecord(
                 profile=profile,
@@ -216,7 +216,7 @@ class Store:
             return [_to_position(r) for r in records]
 
     async def closed_positions(self, *, limit: int = 1000) -> list[Position]:
-        """Posições encerradas com resultado apurado, das mais recentes para as antigas."""
+        """Closed positions with a settled result, from the most recent to the oldest."""
         async with self.db.session() as session:
             records = await session.scalars(
                 select(PositionRecord)
@@ -239,7 +239,7 @@ class Store:
             return Decimal(total or 0)
 
     async def update_position(self, position_id: int, **changes: Any) -> Position:
-        """Atualiza campos da posição validando a transição de estado (com ``FOR UPDATE``)."""
+        """Updates position fields, validating the state transition (with ``FOR UPDATE``)."""
         unknown = set(changes) - _POSITION_FIELDS
         if unknown:
             raise ValueError(f"campos desconhecidos: {sorted(unknown)}")
@@ -270,7 +270,7 @@ class Store:
             await session.refresh(record)
             return _to_position(record)
 
-    # ================================================================== intenções
+    # ================================================================== intents
     async def add_intent(
         self,
         position_id: int,
@@ -339,7 +339,7 @@ class Store:
             )
             return [_to_intent(r) for r in records]
 
-    # ================================================================== ordens e execuções
+    # ================================================================== orders and fills
     async def upsert_order(self, order: Order, position_id: int | None) -> None:
         values = {
             "position_id": position_id,
@@ -379,7 +379,7 @@ class Store:
             return list(records)
 
     async def add_fills(self, trades: Iterable[Trade], position_id: int | None) -> int:
-        """Grava execuções de forma idempotente; retorna quantas eram novas."""
+        """Records fills idempotently; returns how many were new."""
         rows = [
             {
                 "position_id": position_id,
@@ -418,7 +418,7 @@ class Store:
             )
             return list(records)
 
-    # ================================================================== eventos e checkpoints
+    # ================================================================== events and checkpoints
     async def record_event(
         self,
         kind: str,

@@ -37,11 +37,11 @@ async def test_runs_after_the_close_plus_delay() -> None:
 
 
 async def test_waking_inside_the_delay_does_not_skip_the_cycle() -> None:
-    # acordou 5 ms após o fechamento, antes do atraso de 10 ms: roda este ciclo
+    # woke up 5 ms after the close, before the 10 ms delay: runs this cycle
     assert await _runs(CLOSE + timedelta(milliseconds=5), timedelta(milliseconds=10)) == 1
 
 
 async def test_stop_interrupts_the_wait() -> None:
-    # acabou de rodar: o próximo ciclo é só no fechamento seguinte (4h)
+    # just ran: the next cycle is only at the following close (4h)
     delay = timedelta(seconds=20)
     assert await _runs(CLOSE + delay, delay, stop_early=True) == 0

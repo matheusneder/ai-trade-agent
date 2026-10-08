@@ -1,6 +1,6 @@
-"""Gravação periódica do ``RiskSnapshot``: a verificação de risco roda a cada minuto e
-entrega cada snapshot; a telemetria persiste o primeiro (já na partida) e depois um a cada
-``interval`` para os dashboards."""
+"""Periodic recording of the ``RiskSnapshot``: the risk check runs every minute and hands
+over each snapshot; telemetry persists the first one (right at startup) and then one every
+``interval`` for the dashboards."""
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -43,9 +43,9 @@ class TelemetryRecorder:
 
     @tracing.traced("telemetry", "telemetry.observe")
     async def observe(self, snapshot: RiskSnapshot) -> bool:
-        """Recebe o snapshot da verificação de risco; persiste se a foto estiver vencida."""
+        """Receives the snapshot from the risk check; persists it if the snapshot is due."""
         self.latest = snapshot
-        if metrics.enabled():  # métricas a cada leitura; a foto no banco, a cada ``interval``
+        if metrics.enabled():  # metrics on every reading; the database snapshot, every ``interval``
             metrics.observe(
                 metrics.Reading(
                     equity=snapshot.equity,
@@ -68,7 +68,7 @@ class TelemetryRecorder:
         return True
 
     async def record(self) -> bool:
-        """Persiste o último snapshot observado; ``False`` se ainda não houver nenhum."""
+        """Persists the last observed snapshot; ``False`` if there is none yet."""
         s = self.latest
         if s is None:
             return False

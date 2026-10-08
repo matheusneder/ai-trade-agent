@@ -1,4 +1,4 @@
-"""Dados reais de ``exchangeInfo`` (capturados em 25/09/2026) para os testes."""
+"""Real ``exchangeInfo`` data (captured on 2026-09-25) for the tests."""
 
 import json
 from functools import cache

@@ -1,4 +1,4 @@
-"""User Data Stream contra um servidor WebSocket local que imita a WebSocket API."""
+"""User Data Stream against a local WebSocket server that mimics the WebSocket API."""
 
 import asyncio
 import json
@@ -84,7 +84,7 @@ async def test_subscribes_with_valid_signature_and_parses_events() -> None:
         assert request["params"]["recvWindow"] == 5000
         await _ok(ws, request, sub_id=3)
         await ws.send(json.dumps({"subscriptionId": 3, "event": EXECUTION_REPORT}))
-        await ws.send(json.dumps({"id": "x", "status": 200, "result": {}}))  # resposta: ignorada
+        await ws.send(json.dumps({"id": "x", "status": 200, "result": {}}))  # response: ignored
         await ws.send(
             json.dumps(
                 {

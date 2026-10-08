@@ -1,4 +1,4 @@
-"""Envio de alertas ao operador. Falhas no envio nunca interrompem o agente."""
+"""Sends alerts to the operator. Sending failures never interrupt the agent."""
 
 from typing import Protocol
 
@@ -18,7 +18,7 @@ class Notifier(Protocol):
 
 
 class LogNotifier:
-    """Sem Telegram configurado: o alerta vai só para o log."""
+    """No Telegram configured: the alert only goes to the log."""
 
     async def notify(self, severity: Severity, text: str) -> None:
         log.warning("alert", severity=severity.value, text=text)

@@ -1,1 +1,1 @@
-"""Execução: montagem de ordens, envio idempotente e gestão da proteção das posições."""
+"""Execution: order building, idempotent sending and management of position protection."""

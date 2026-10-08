@@ -1,4 +1,4 @@
-"""Motor de decisão de ponta a ponta (Binance simulada + PostgreSQL)."""
+"""End-to-end decision engine (simulated Binance + PostgreSQL)."""
 
 import asyncio
 import copy
@@ -73,7 +73,7 @@ def _setup_market(fake: FakeBinance, *, sol: list[float] | None = None) -> None:
     for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
         fake.candles[(symbol, "1d")] = _candles([100.0] * 10)
     fake.candles[("BTCUSDT", "4h")] = _candles([100 * math.exp(0.004 * i) for i in range(320)])
-    fake.candles[("ETHUSDT", "4h")] = _candles([100.0] * 100)  # histórico insuficiente
+    fake.candles[("ETHUSDT", "4h")] = _candles([100.0] * 100)  # not enough history
     closes = sol if sol is not None else uptrend_with_pullback()["close"].tolist()
     fake.candles[("SOLUSDT", "4h")] = _candles(closes)
 
@@ -128,10 +128,10 @@ async def test_profiles_of_the_same_timeframe_never_buy_the_same_asset(
     fake: FakeBinance,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Os perfis do mesmo timeframe rodam juntos (swing_trend e momentum_alpha, em 4h), e a
-    pesquisa leva minutos entre a leitura das posições, no início do ciclo, e a compra. Sem
-    uma compra de cada vez, com as posições relidas, os dois compravam o mesmo ativo
-    (STRKUSDT, 04/10/2026), contra o one_position_per_asset."""
+    """Profiles of the same timeframe run together (swing_trend and momentum_alpha, on 4h),
+    and the research takes minutes between reading the positions, at the start of the
+    cycle, and buying. Without one purchase at a time, with the positions read again, both
+    bought the same asset (STRKUSDT, 2026-10-04), against one_position_per_asset."""
     _setup_market(fake)
     data = _strategy_data()
     twin = copy.deepcopy(data["profiles"]["conservador"])
@@ -140,7 +140,7 @@ async def test_profiles_of_the_same_timeframe_never_buy_the_same_asset(
     reading = engine._reading
 
     async def researching(*args: Any) -> Any:
-        await asyncio.sleep(0.05)  # a pesquisa: o outro perfil avança enquanto isso
+        await asyncio.sleep(0.05)  # the research: the other profile moves on meanwhile
         return await reading(*args)
 
     monkeypatch.setattr(engine, "_reading", researching)
@@ -168,7 +168,7 @@ async def test_dry_run_simulates_entries_without_orders(
     assert sol["setup"] == "trend_pullback" and sol["tier"] == "large"
     assert events["decision.reading"]["degraded"] is True
     assert [idea[0] for idea in events["decision.plan"]["ideas"]] == ["SOLUSDT"]
-    assert report.evaluated == 2  # ETH sem histórico suficiente
+    assert report.evaluated == 2  # ETH without enough history
     assert report.research == "sem analista"
     assert not fake.calls("POST", "/api/v3/orderList/opoco")
     assert await store.active_positions() == []
@@ -209,7 +209,7 @@ async def test_live_cycle_traces_decision_through_execution(
     live = {"profile": "conservador", "dry_run": False}
     assert measured.value("trade_agent.decision.cycles", **live, state="running") == 1
     assert measured.value("trade_agent.decision.entries", **live) == 1
-    assert "trade_agent.decision.exits" not in measured.points()  # nenhuma saída no ciclo
+    assert "trade_agent.decision.exits" not in measured.points()  # no exit in the cycle
     cycle = spans.one("decision.cycle")
     attributes = cycle.attributes or {}
     assert attributes["trade_agent.profile"] == "conservador"
@@ -255,22 +255,22 @@ async def test_rule_exits_rotation_and_time(
     clock = Clock()
     engine, guard = _engine(api, service, store, clock=clock)
     await engine.run_profile("conservador")
-    # o ativo passa a cair: score no nível de saída por 2 ciclos → rotação
+    # the asset starts falling: score at the exit level for 2 cycles → rotation
     falling = [150 * math.exp(-0.004 * i) for i in range(320)]
     fake.candles[("SOLUSDT", "4h")] = _candles(falling)
     first = await engine.run_profile("conservador")
     assert first.exits == ()
     await guard.halt(GLOBAL)
     halted = await engine.run_profile("conservador")
-    assert halted.exits == ()  # halt: sem saídas por regra
+    assert halted.exits == ()  # halt: no rule-based exits
     await guard.resume(GLOBAL)
     second = await engine.run_profile("conservador")
     assert second.exits == (("SOLUSDT", "rotação: score no nível de saída"),)
     assert await store.active_positions() == []
 
     _setup_market(fake)
-    await engine.run_profile("conservador")  # nova posição
-    clock.now = datetime.now(UTC) + timedelta(days=22)  # opened_at usa o relógio real
+    await engine.run_profile("conservador")  # new position
+    clock.now = datetime.now(UTC) + timedelta(days=22)  # opened_at uses the real clock
     aged = await engine.run_profile("conservador")
     assert aged.exits == (("SOLUSDT", "tempo máximo de permanência"),)
 
@@ -282,7 +282,7 @@ async def test_dry_run_reports_exits_and_skips_unfilled_positions(
     live, _ = _engine(api, service, store)
     await live.run_profile("conservador")
     pending = EntryOrder("BTCUSDT", D("0.001"), D(50000), EntryMode.LIMIT_MAKER_GTC)
-    await service.open_position(profile="con", entry=pending, policy=POLICY)  # sem execução
+    await service.open_position(profile="con", entry=pending, policy=POLICY)  # no fill
     clock = Clock()
     clock.now = datetime.now(UTC) + timedelta(days=30)
     alerts: list[str] = []
@@ -299,7 +299,7 @@ async def test_break_even_adjusts_protection(
     _setup_market(fake)
     engine, _ = _engine(api, service, store)
     await engine.run_profile("conservador")
-    fake.set_price("SOLUSDT", D(160))  # ganho acima de 1R: stop sobe para o break-even
+    fake.set_price("SOLUSDT", D(160))  # gain above 1R: the stop moves up to break-even
     await engine.run_profile("conservador")
     (position,) = await store.active_positions()
     assert position.protection_seq == 1
@@ -339,7 +339,7 @@ async def test_analyst_veto_blocks_entry_and_exits_holding(
         opened = await engine.run_profile("conservador")
         assert opened.opened == ("SOLUSDT",)
 
-        claude.fail(500)  # ciclo falha: usa a última leitura válida (sem veto)
+        claude.fail(500)  # the cycle fails: uses the last valid reading (no veto)
         failed = await engine.run_profile("conservador")
         assert failed.research.startswith("falhou") and failed.exits == ()
 
@@ -347,7 +347,7 @@ async def test_analyst_veto_blocks_entry_and_exits_holding(
         exit_report = await engine.run_profile("conservador")
         assert exit_report.exits == (("SOLUSDT", "veto do analista"),)
 
-        fake.candles[("SOLUSDT", "4h")] = _candles([150.0] * 320)  # sem setup nem posição
+        fake.candles[("SOLUSDT", "4h")] = _candles([150.0] * 320)  # neither a setup nor a position
         quiet = await engine.run_profile("conservador")
         assert quiet.research == "sem candidatos (leitura anterior)"
     assert len(claude.requests) == 4
@@ -365,14 +365,14 @@ async def test_flatten_sells_filled_and_cancels_pending(
     await engine.run_profile("conservador")
     pending = EntryOrder("BTCUSDT", D("0.001"), D(50000), EntryMode.LIMIT_MAKER_GTC)
     await service.open_position(profile="mod", entry=pending, policy=POLICY)
-    assert await engine.flatten("moderado") == 1  # só o escopo pedido
+    assert await engine.flatten("moderado") == 1  # only the requested scope
     states = {p.symbol: p.state for p in await store.active_positions()}
     assert states == {"SOLUSDT": PositionState.PROTECTED}
 
     closed = await guard.flatten(GLOBAL)
     assert closed == 1 and await store.active_positions() == []
 
-    await engine.run_profile("conservador")  # halt: nenhuma entrada nova
+    await engine.run_profile("conservador")  # halt: no new entry
     assert await store.active_positions() == []
     await guard.resume(GLOBAL)
     await engine.run_profile("conservador")
@@ -389,7 +389,7 @@ async def test_empty_universe_is_reported(
     api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
 ) -> None:
     _setup_market(fake)
-    fake.volumes.clear()  # como no Spot Testnet: nada passa no filtro de volume
+    fake.volumes.clear()  # as on the Spot Testnet: nothing passes the volume filter
     engine, _ = _engine(api, service, store, dry_run=True)
     with capture_logs() as logs:
         report = await engine.run_profile("conservador")
@@ -414,13 +414,13 @@ async def test_universe_cache_ttl(api: BinanceSpotApi, fake: FakeBinance) -> Non
 async def test_each_cycle_sees_a_fresh_universe(
     api: BinanceSpotApi, fake: FakeBinance, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Com 6 h de cache e ciclos de 4 h, o ciclo seguinte usava o universo do anterior."""
+    """With a 6 h cache and 4 h cycles, the next cycle used the previous one's universe."""
     _setup_market(fake)
     builds: list[float] = []
 
     async def build(api: BinanceSpotApi, config: UniverseConfig) -> Universe:
         builds.append(now[0])
-        await asyncio.sleep(0)  # cede o loop, como a rede de verdade
+        await asyncio.sleep(0)  # yields the loop, like the real network
         return await build_universe(api, config)
 
     monkeypatch.setattr(engine_module, "build_universe", build)
@@ -428,8 +428,8 @@ async def test_each_cycle_sees_a_fresh_universe(
     assert UNIVERSE_TTL.total_seconds() < shortest
     now = [0.0]
     cache = UniverseCache(api, UNIVERSE, clock=lambda: now[0])
-    together = await asyncio.gather(cache.get(), cache.get())  # perfis no mesmo fechamento
+    together = await asyncio.gather(cache.get(), cache.get())  # profiles at the same close
     assert together[0] is together[1] and builds == [0.0]
-    now[0] = shortest  # o próximo ciclo, no menor timeframe
+    now[0] = shortest  # the next cycle, on the shortest timeframe
     assert await cache.get() is not together[0]
     assert builds == [0.0, shortest]

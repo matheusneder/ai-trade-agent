@@ -1,11 +1,11 @@
-"""Tradução do ``MarketView`` para as entradas da carteira (``strategy.portfolio``).
+"""Translation of the ``MarketView`` into the portfolio's inputs (``strategy.portfolio``).
 
-Degradação segura (doc 03, §7.3): sem leitura válida (falha, orçamento esgotado ou
-leitura vencida), cada perfil segue a sua regra ``llm.on_failure``:
+Safe degradation (doc 03, §7.3): without a valid reading (failure, budget exhausted or
+expired reading), each profile follows its ``llm.on_failure`` rule:
 
-* ``ta_only``: TA pura com exposição normal;
-* ``ta_only_reduced``: TA pura com exposição reduzida à metade;
-* ``pause_entries``: nenhuma entrada nova.
+* ``ta_only``: pure TA with normal exposure;
+* ``ta_only_reduced``: pure TA with exposure cut in half;
+* ``pause_entries``: no new entries.
 """
 
 from collections.abc import Mapping
@@ -35,8 +35,8 @@ class MarketReading:
 def market_reading(
     view: MarketView | None, llm: LlmConfig, *, now: datetime, max_age: timedelta
 ) -> MarketReading:
-    """Leitura aplicável a um perfil. Vetos e a redução de exposição valem mesmo com
-    ``llm.weight = 0``: a autoridade do LLM é assimétrica e só reduz risco."""
+    """Reading that applies to a profile. Vetoes and the exposure cut hold even with
+    ``llm.weight = 0``: the LLM's authority is asymmetric and only reduces risk."""
     if view is None:
         return MarketReading(FAILURE_EXPOSURE[llm.on_failure], degraded=True, reason="sem leitura")
     if now - view.as_of > max_age:

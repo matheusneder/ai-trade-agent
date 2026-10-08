@@ -1,16 +1,16 @@
-"""Identificadores determinísticos de ordens (``clientOrderId``/``listClientOrderId``).
+"""Deterministic order identifiers (``clientOrderId``/``listClientOrderId``).
 
-Formato: ``ta1-{perfil}-{decisão}-{seq}-{perna}``, por exemplo ``ta1-mod-7f3a9c2b1d-0-TP``.
+Format: ``ta1-{profile}-{decision}-{seq}-{leg}``, for example ``ta1-mod-7f3a9c2b1d-0-TP``.
 
-* ``ta1`` identifica ordens do agente (versão 1 do formato); ordens sem esse prefixo
-  nunca são tocadas pela reconciliação;
-* ``perfil`` é um código curto do perfil de risco (``[a-z0-9]{1,12}``);
-* ``decisão`` identifica a decisão que originou a posição (``[0-9a-f]{6,12}``);
-* ``seq`` numera as proteções sucessivas da mesma posição (0 = OPOCO original,
-  1.. = OCOs recriados em ajustes);
-* ``perna`` indica o papel da ordem (lista, entrada, take-profit, stop, saída).
+* ``ta1`` identifies the agent's orders (version 1 of the format); orders without this
+  prefix are never touched by reconciliation;
+* ``profile`` is a short code of the risk profile (``[a-z0-9]{1,12}``);
+* ``decision`` identifies the decision that created the position (``[0-9a-f]{6,12}``);
+* ``seq`` numbers the successive protections of the same position (0 = original OPOCO,
+  1.. = OCOs recreated in adjustments);
+* ``leg`` is the role of the order (list, entry, take-profit, stop, exit).
 
-Respeita a regra da Binance ``^[.A-Z:/a-z0-9_-]{1,36}$``.
+Follows Binance's rule ``^[.A-Z:/a-z0-9_-]{1,36}$``.
 """
 
 import re
@@ -47,7 +47,7 @@ class ClientIdParts:
 
 @dataclass(frozen=True, slots=True)
 class OrderIdSet:
-    """IDs de uma lista de proteção (OPOCO ou OCO) e de uma eventual saída."""
+    """IDs of a protection list (OPOCO or OCO) and of a possible exit."""
 
     list_id: str
     entry_id: str
@@ -57,7 +57,7 @@ class OrderIdSet:
 
 
 def new_decision_id() -> str:
-    """Novo identificador de decisão (10 hex)."""
+    """New decision identifier (10 hex)."""
     return secrets.token_hex(5)
 
 
@@ -82,7 +82,7 @@ def order_ids(profile: str, decision: str, seq: int = 0) -> OrderIdSet:
 
 
 def parse_client_id(value: str) -> ClientIdParts | None:
-    """Decompõe um ID do agente; ``None`` para IDs de terceiros."""
+    """Breaks down an agent ID; ``None`` for third-party IDs."""
     match = _PARSE.match(value)
     if match is None:
         return None

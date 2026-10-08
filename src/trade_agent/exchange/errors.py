@@ -1,39 +1,39 @@
-"""Hierarquia de erros da integração com a Binance.
+"""Error hierarchy of the Binance integration.
 
-A distinção mais importante para a execução é entre:
+The most important distinction for execution is between:
 
-* :class:`BinanceRejectedError` — a requisição foi recusada; **nada foi executado**;
-* :class:`BinanceUnknownStatusError` — a requisição pode ter sido executada; é obrigatório
-  **consultar** o estado (ex.: pelo ``clientOrderId``) antes de qualquer reenvio;
-* :class:`BinanceConnectionError` — a requisição não chegou a ser enviada; reenviar é seguro.
+* :class:`BinanceRejectedError` — the request was refused; **nothing was executed**;
+* :class:`BinanceUnknownStatusError` — the request may have been executed; the state must
+  be **queried** (e.g. by ``clientOrderId``) before any resend;
+* :class:`BinanceConnectionError` — the request was never sent; resending is safe.
 """
 
 from typing import Any
 
-# Códigos em que a Binance informa explicitamente que o status de execução é desconhecido.
+# Codes where Binance explicitly says the execution status is unknown.
 UNKNOWN_STATUS_CODES = frozenset({-1006, -1007})
 INVALID_TIMESTAMP_CODE = -1021
 NO_SUCH_ORDER_CODE = -2013
 
 
 class BinanceError(Exception):
-    """Erro base da integração com a Binance."""
+    """Base error of the Binance integration."""
 
 
 class BinanceConfigurationError(BinanceError):
-    """Configuração insuficiente para a operação (ex.: requisição assinada sem chave)."""
+    """Insufficient configuration for the operation (e.g. a signed request without a key)."""
 
 
 class TradingDisabledError(BinanceError):
-    """Tentativa de enviar/cancelar ordens com a trava ``trading_enabled`` desligada."""
+    """Attempt to send/cancel orders with the ``trading_enabled`` lock off."""
 
 
 class BinanceConnectionError(BinanceError):
-    """Falha de conexão antes do envio da requisição; reenviar é seguro."""
+    """Connection failure before the request was sent; resending is safe."""
 
 
 class BinanceUnknownStatusError(BinanceError):
-    """O resultado da requisição é desconhecido (timeout de leitura, 5xx, -1006, -1007)."""
+    """The outcome of the request is unknown (read timeout, 5xx, -1006, -1007)."""
 
     def __init__(
         self,
@@ -48,7 +48,7 @@ class BinanceUnknownStatusError(BinanceError):
 
 
 class BinanceAPIError(BinanceError):
-    """Resposta de erro da API com status HTTP e, quando houver, código/mensagem da Binance."""
+    """API error response with the HTTP status and, when present, Binance's code/message."""
 
     def __init__(
         self,
@@ -65,15 +65,15 @@ class BinanceAPIError(BinanceError):
 
 
 class BinanceRejectedError(BinanceAPIError):
-    """Requisição recusada (4xx); nada foi executado."""
+    """Request refused (4xx); nothing was executed."""
 
 
 class BinanceTimestampError(BinanceRejectedError):
-    """``-1021``: timestamp fora do ``recvWindow`` — ressincronizar o relógio."""
+    """``-1021``: timestamp outside ``recvWindow`` — resynchronize the clock."""
 
 
 class BinanceRateLimitedError(BinanceAPIError):
-    """HTTP 429: limite de requisições excedido; aguardar ``retry_after`` segundos."""
+    """HTTP 429: request limit exceeded; wait ``retry_after`` seconds."""
 
     def __init__(
         self,
@@ -88,4 +88,4 @@ class BinanceRateLimitedError(BinanceAPIError):
 
 
 class BinanceIPBannedError(BinanceRateLimitedError):
-    """HTTP 418: IP banido temporariamente por excesso de requisições."""
+    """HTTP 418: IP temporarily banned for too many requests."""

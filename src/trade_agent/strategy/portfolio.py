@@ -1,15 +1,15 @@
-"""Seleção e dimensionamento das entradas de um perfil (função pura).
+"""Selection and sizing of a profile's entries (pure function).
 
-Regras (doc 03, §6.3):
+Rules (doc 03, §6.3):
 
-* ``score_final = (1 − w)·score_TA + w·(sentimento·confiança)`` quando há leitura do LLM
-  com confiança mínima; caso contrário, apenas o score técnico;
-* veto do LLM exclui o ativo;
-* ranking por score final, respeitando vagas, reserva de caixa, limites por *tier* e
-  "uma posição por ativo";
-* tamanho = ``capital × risco_por_trade / distância_do_stop``, limitado por
-  ``max_position_pct``, orçamento e limite do *tier*, e escalado pelo
-  ``exposure_multiplier`` (regime de mercado).
+* ``final_score = (1 − w)·TA_score + w·(sentiment·confidence)`` when there is an LLM
+  reading with the minimum confidence; otherwise, only the technical score;
+* an LLM veto excludes the asset;
+* ranking by final score, honoring slots, cash reserve, *tier* limits and "one position
+  per asset";
+* size = ``capital × risk_per_trade / stop_distance``, capped by ``max_position_pct``,
+  the budget and the *tier* limit, and scaled by the ``exposure_multiplier`` (market
+  regime).
 """
 
 from collections.abc import Sequence
@@ -28,7 +28,7 @@ PCT = Decimal(100)
 
 @dataclass(frozen=True, slots=True)
 class Holding:
-    """Posição ativa (qualquer perfil) considerada nos limites."""
+    """Active position (any profile) taken into account in the limits."""
 
     profile: str
     symbol: str
@@ -38,7 +38,7 @@ class Holding:
 
 @dataclass(frozen=True, slots=True)
 class MarketOpinion:
-    """Leitura do analista LLM para um ativo (Fase 4)."""
+    """The LLM analyst's reading of an asset (Phase 4)."""
 
     sentiment: Decimal
     confidence: Decimal
@@ -80,7 +80,7 @@ class TradeIdea:
 class PlanResult:
     ideas: tuple[TradeIdea, ...]
     rejections: tuple[tuple[str, str], ...]
-    """Pares ``(símbolo, motivo)``, para auditoria das decisões."""
+    """``(symbol, reason)`` pairs, for auditing the decisions."""
 
 
 def plan_entries(
@@ -96,9 +96,9 @@ def plan_entries(
     own = [h for h in holdings if h.profile == name]
     held = {h.symbol for h in (holdings if one_position_per_asset else own)}
     allocation = profile.allocation
-    # O exposure_multiplier do analista escala só o tamanho de cada posição (abaixo), não o
-    # número de vagas: aplicado às duas, a cautela contava duas vezes, e com 2 vagas qualquer
-    # leitura abaixo de 1,0 cortava a capacidade do perfil pela metade (D-030).
+    # The analyst's exposure_multiplier scales only the size of each position (below), not the
+    # number of slots: applied to both, caution counted twice, and with 2 slots any reading
+    # below 1.0 cut the profile's capacity in half (D-030).
     slots = allocation.max_open_positions - len(own)
     budget = capital * (1 - allocation.cash_reserve_pct) - sum((h.cost for h in own), ZERO)
     tier_used = {tier: sum((h.cost for h in own if h.tier is tier), ZERO) for tier in Tier}
@@ -119,7 +119,7 @@ def plan_entries(
             reason = "score abaixo do mínimo"
         elif symbol in held:
             reason = "ativo já em carteira"
-        elif exposure_multiplier <= 0:  # leitura que zera a exposição, ou on_failure: pause_entries
+        elif exposure_multiplier <= 0:  # reading with zero exposure, or on_failure: pause_entries
             reason = "exposição zero"
         elif slots <= 0:
             reason = "sem vagas no perfil"
@@ -130,7 +130,7 @@ def plan_entries(
         stop_pct = profile.protection.stop_distance_pct(
             Decimal(str(candidate.signal.stop_pct)) * PCT
         )
-        notional = exposure_multiplier * min(  # depois dos limites: a cautela sempre reduz
+        notional = exposure_multiplier * min(  # after the limits: caution always reduces
             risk_budget / (stop_pct / PCT),
             capital * allocation.max_position_pct,
             budget,

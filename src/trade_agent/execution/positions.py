@@ -1,12 +1,12 @@
-"""Domínio das posições: estados, transições válidas e cálculo de resultado.
+"""Position domain: states, valid transitions and result calculation.
 
-Máquina de estados (doc 03, §9.2)::
+State machine (doc 03, §9.2)::
 
     PLANNED → ENTRY_SENT → (PARTIAL) → PROTECTED ⇄ ADJUSTING
                                          ↓ ↑           ↓
                                       UNPROTECTED ⇄ EXITING → CLOSED
-    EXITING → PROTECTED (a saída falhou e a proteção segue ativa na exchange)
-    PLANNED/ENTRY_SENT → REJECTED (entrada não executada)
+    EXITING → PROTECTED (the exit failed and the protection is still active on the exchange)
+    PLANNED/ENTRY_SENT → REJECTED (entry not filled)
 """
 
 from collections.abc import Iterable
@@ -24,13 +24,13 @@ ZERO = Decimal(0)
 
 class PositionState(StrEnum):
     PLANNED = "planned"
-    """Intenção gravada; nada enviado ainda (ou envio sem confirmação)."""
+    """Intent recorded; nothing sent yet (or sent without confirmation)."""
 
     ENTRY_SENT = "entry_sent"
-    """OPOCO aceito; entrada ainda não executada (maker) ou resultado em confirmação."""
+    """OPOCO accepted; entry not filled yet (maker) or outcome being confirmed."""
 
     PARTIAL = "partial"
-    """Entrada GTC parcialmente executada (a parte executada ainda não tem OCO)."""
+    """GTC entry partially filled (the filled part has no OCO yet)."""
 
     PROTECTED = "protected"
     ADJUSTING = "adjusting"
@@ -68,7 +68,7 @@ class InvalidTransitionError(ValueError):
 
 
 def ensure_transition(current: PositionState, target: PositionState) -> None:
-    """Valida a transição; permanecer no mesmo estado é sempre permitido."""
+    """Validates the transition; staying in the same state is always allowed."""
     if current is not target and target not in TRANSITIONS[current]:
         raise InvalidTransitionError(current, target)
 
@@ -80,13 +80,13 @@ class ExitReason(StrEnum):
     DECISION = "decision"
     FAILSAFE = "failsafe"
     RESIDUAL = "residual"
-    """Saldo remanescente abaixo do mínimo negociável (não pode ser protegido nem vendido)."""
+    """Remaining balance below the tradable minimum (it can be neither protected nor sold)."""
     ENTRY_REJECTED = "entry_rejected"
     RISK = "risk"
-    """Encerramento por condição de parada (*flatten*)."""
+    """Closed by a stop condition (*flatten*)."""
 
 
-# ---------------------------------------------------------------------- política (JSON)
+# ---------------------------------------------------------------------- policy (JSON)
 def policy_to_json(policy: ProtectionPolicy) -> dict[str, Any]:
     return {
         "take_profit_mode": policy.take_profit_mode.value,
@@ -109,10 +109,10 @@ def policy_from_json(data: dict[str, Any]) -> ProtectionPolicy:
     )
 
 
-# ---------------------------------------------------------------------- posição
+# ---------------------------------------------------------------------- position
 @dataclass(frozen=True, slots=True)
 class Position:
-    """Instantâneo imutável de uma posição (persistido em ``positions``)."""
+    """Immutable snapshot of a position (persisted in ``positions``)."""
 
     id: int
     profile: str
@@ -126,7 +126,7 @@ class Position:
     planned_qty: Decimal
     planned_price: Decimal
     protection_list_id: str
-    """Lista de proteção atual (``seq`` 0 = OPOCO de entrada; 1.. = OCOs posteriores)."""
+    """Current protection list (``seq`` 0 = entry OPOCO; 1.. = later OCOs)."""
     protection_seq: int = 0
     entry_qty: Decimal | None = None
     entry_quote: Decimal | None = None
@@ -143,10 +143,10 @@ class Position:
     updated_at: datetime | None = None
 
 
-# ---------------------------------------------------------------------- resultado
+# ---------------------------------------------------------------------- result
 @dataclass(frozen=True, slots=True)
 class FillSummary:
-    """Agregado das execuções de uma ou mais ordens."""
+    """Aggregate of the fills of one or more orders."""
 
     base_qty: Decimal
     quote_qty: Decimal
@@ -179,7 +179,7 @@ def summarize_fills(trades: Iterable[FillLike]) -> FillSummary:
 
 
 def net_received_base(entry: FillSummary, base_asset: str) -> Decimal:
-    """Quantidade líquida recebida na compra (comissão descontada quando paga no ativo base)."""
+    """Net quantity received on the buy (fee deducted when paid in the base asset)."""
     return entry.base_qty - entry.fees.get(base_asset, ZERO)
 
 
@@ -190,10 +190,10 @@ def realized_pnl(
     base_asset: str,
     quote_asset: str,
 ) -> Decimal:
-    """Resultado em moeda de cotação: recebido na venda − pago na compra − taxas.
+    """Result in the quote asset: received on the sell − paid on the buy − fees.
 
-    Taxas em ativo base são convertidas pelo preço médio de saída; taxas em outros ativos
-    (ex.: BNB) não são convertidas aqui e ficam registradas à parte.
+    Fees in the base asset are converted at the average exit price; fees in other assets
+    (e.g. BNB) are not converted here and are recorded separately.
     """
     fees_quote = entry.fees.get(quote_asset, ZERO) + exit_.fees.get(quote_asset, ZERO)
     fees_base = exit_.fees.get(base_asset, ZERO)

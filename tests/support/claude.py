@@ -1,6 +1,6 @@
-"""API Claude simulada: o SDK ``anthropic`` real sobre ``httpx2.MockTransport``.
+"""Simulated Claude API: the real ``anthropic`` SDK over ``httpx2.MockTransport``.
 
-As respostas são enfileiradas e cada requisição é capturada (corpo JSON), sem rede.
+Responses are queued and every request is captured (JSON body), with no network.
 """
 
 import json

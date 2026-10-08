@@ -1,31 +1,31 @@
-"""Ambientes da Binance Spot e seus endpoints."""
+"""Binance Spot environments and their endpoints."""
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 
 class BinanceEnvironment(StrEnum):
-    """Ambiente de negociação."""
+    """Trading environment."""
 
     TESTNET = "testnet"
-    """Spot Testnet: integração da API; liquidez e preços não realistas."""
+    """Spot Testnet: API integration; unrealistic liquidity and prices."""
 
     DEMO = "demo"
-    """Demo Mode: paper trading com dados de mercado realistas."""
+    """Demo Mode: paper trading with realistic market data."""
 
     PROD = "prod"
-    """Produção: dinheiro real."""
+    """Production: real money."""
 
 
 @dataclass(frozen=True, slots=True)
 class Endpoints:
-    """URLs base de um ambiente."""
+    """Base URLs of an environment."""
 
     rest: str
     ws_api: str
     ws_streams: str
     sapi: bool
-    """Rotas ``/sapi`` (ex.: cronograma de delistagem): a Testnet e a Demo não as têm (HTTP 404)."""
+    """``/sapi`` routes (e.g. delisting schedule): Testnet and Demo do not have them (HTTP 404)."""
 
 
 ENDPOINTS: dict[BinanceEnvironment, Endpoints] = {
@@ -51,5 +51,5 @@ ENDPOINTS: dict[BinanceEnvironment, Endpoints] = {
 
 
 def endpoints_for(environment: BinanceEnvironment) -> Endpoints:
-    """Retorna os endpoints do ambiente informado."""
+    """Returns the endpoints of the given environment."""
     return ENDPOINTS[environment]
