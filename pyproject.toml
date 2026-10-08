@@ -61,15 +61,15 @@ select = [
     "E", "W", "F", "I", "B", "UP", "SIM", "C4", "RUF", "PT", "ASYNC", "S", "DTZ", "TID", "PL",
 ]
 ignore = [
-    "PLR0913",  # muitos argumentos: builders de ordem espelham a API da Binance
-    "PLR2004",  # constantes mágicas em comparações
-    "RUF001", "RUF002", "RUF003",  # caracteres ambíguos (textos em pt-BR)
+    "PLR0913",  # too many arguments: order builders mirror the Binance API
+    "PLR2004",  # magic constants in comparisons
+    "RUF001", "RUF002", "RUF003",  # ambiguous characters (Portuguese texts)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "PLR0917", "SLF001", "PT018", "C408"]
 "scripts/**" = ["T201", "S101"]
-# consultas SQL constantes dos painéis (sem entrada externa)
+# constant SQL queries of the panels (no external input)
 "scripts/grafana_dashboards.py" = ["T201", "E501", "S608"]
 "src/trade_agent/persistence/migrations/**" = ["E501"]
 "lab/freqtrade/**" = ["E501", "ARG002", "PLR0917"]

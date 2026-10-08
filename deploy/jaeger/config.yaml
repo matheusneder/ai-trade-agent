@@ -1,10 +1,10 @@
-# Jaeger v2 (sobre o OpenTelemetry Collector): recebe OTLP do agente e guarda os traces no
-# Badger por 7 dias. Interface e API na 16686: o Grafana consulta por jaeger:16686, e no host
-# ela só abre em desenvolvimento, pelo jaeger-ui (deploy/stack.yml).
-# O volume `jaeger` é montado em /tmp: o Docker copia para ele a permissão do /tmp da imagem,
-# gravável pelo usuário do Jaeger (10001); um diretório novo nasceria só para o root.
-# Versão fixada em 2.20: a 2.21 removeu a API HTTP v1 (/api/services, /api/traces), que o
-# datasource Jaeger do Grafana (12.2 e 12.4) ainda usa.
+# Jaeger v2 (on top of the OpenTelemetry Collector): receives OTLP from the agent and keeps the
+# traces in Badger for 7 days. UI and API on 16686: Grafana queries through jaeger:16686, and on
+# the host it only opens in development, through jaeger-ui (deploy/stack.yml).
+# The `jaeger` volume is mounted on /tmp: Docker copies the image's /tmp permissions to it,
+# writable by the Jaeger user (10001); a new directory would be root-only.
+# Version pinned at 2.20: 2.21 removed the v1 HTTP API (/api/services, /api/traces), which
+# Grafana's Jaeger datasource (12.2 and 12.4) still uses.
 service:
   extensions: [jaeger_storage, jaeger_query, healthcheckv2]
   pipelines:
@@ -16,7 +16,7 @@ service:
     metrics:
       level: none
     traces:
-      level: none   # sem spans internos (ex.: Badger.Compaction) como serviço "jaeger"
+      level: none   # no internal spans (e.g. Badger.Compaction) as a "jaeger" service
     logs:
       level: warn
       encoding: json
@@ -30,7 +30,7 @@ extensions:
   jaeger_query:
     storage:
       traces: badger_store
-    enable_tracing: false   # sem traces do próprio Jaeger (serviço "jaeger") misturados aos do agente
+    enable_tracing: false   # no traces of Jaeger itself ("jaeger" service) mixed with the agent's
     http:
       endpoint: 0.0.0.0:16686
     grpc:
@@ -45,7 +45,7 @@ extensions:
             values: /tmp/jaeger/values
           ephemeral: false
           ttl:
-            spans: 168h   # 7 dias
+            spans: 168h   # 7 days
 
 receivers:
   otlp:

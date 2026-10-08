@@ -1,6 +1,6 @@
-# Logs dos contêineres (Loki, alimentado pelo Alloy). Rótulos: service e level.
-# Um log do agente com trace_id ganha o link "Abrir trace" para o Jaeger. `$$` escapa o `$`
-# da interpolação de variáveis de ambiente do provisionamento.
+# Container logs (Loki, fed by Alloy). Labels: service and level.
+# An agent log with a trace_id gets the "Abrir trace" link to Jaeger. `$$` escapes the `$`
+# of the provisioning's environment variable interpolation.
 apiVersion: 1
 
 datasources:

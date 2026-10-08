@@ -1,4 +1,4 @@
-# Fonte de dados do Grafana: o banco do agente com usuário SOMENTE LEITURA (grafana_ro).
+# Grafana data source: the agent's database with a READ-ONLY user (grafana_ro).
 apiVersion: 1
 
 datasources:
