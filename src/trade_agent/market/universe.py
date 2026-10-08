@@ -1,7 +1,7 @@
-"""Universo de negociação: filtros de elegibilidade e *tiers* por volume (dados da Binance).
+"""Trading universe: eligibility filters and volume *tiers* (Binance data).
 
-A seleção é uma função pura (:func:`select_universe`); :func:`build_universe` apenas coleta
-os dados necessários na exchange.
+The selection is a pure function (:func:`select_universe`); :func:`build_universe` only
+collects the data it needs from the exchange.
 """
 
 import re
@@ -21,7 +21,7 @@ log = structlog.get_logger(__name__)
 
 BIPS = Decimal(10_000)
 
-# Ativos base que não fazem sentido operar contra USDT (stablecoins, moedas fiduciárias).
+# Base assets that make no sense to trade against USDT (stablecoins, fiat currencies).
 STABLE_OR_FIAT = frozenset(
     {
         "USDT", "USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP", "PYUSD", "USDE", "USD1",
@@ -47,11 +47,11 @@ class UniverseConfig:
     max_spread_bps: Decimal = Decimal(20)
     min_history_days: int = 30
     large_rank: int = 20
-    """Posições 1..N por volume (excluindo o *core*) formam o tier *large*."""
+    """Ranks 1..N by volume (excluding *core*) make up the *large* tier."""
     mid_rank: int = 60
     excluded_assets: frozenset[str] = STABLE_OR_FIAT
     delist_schedule: bool = True
-    """Consulta o cronograma de delistagem; desligado onde a Binance não o tem (``sapi``)."""
+    """Queries the delisting schedule; off where Binance does not have it (``sapi``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +69,7 @@ class UniverseMember:
 class Universe:
     members: tuple[UniverseMember, ...]
     excluded: Mapping[str, str] = field(default_factory=dict)
-    """Símbolos da moeda de cotação excluídos e o motivo."""
+    """Excluded symbols of the quote asset and the reason."""
 
     def by_symbol(self) -> dict[str, UniverseMember]:
         return {m.symbol: m for m in self.members}
@@ -108,7 +108,7 @@ def prefilter(
     delisted: set[str],
     config: UniverseConfig,
 ) -> tuple[list[str], dict[str, str]]:
-    """Primeira etapa (sem histórico): regras, liquidez e spread; ordena por volume."""
+    """First stage (no history): rules, liquidity and spread; sorts by volume."""
     passed: list[str] = []
     excluded: dict[str, str] = {}
     for symbol, rules in rules_by_symbol.items():
@@ -138,7 +138,7 @@ def select_universe(
     history_days: Mapping[str, int],
     config: UniverseConfig,
 ) -> Universe:
-    """Seleção completa: pré-filtro, histórico mínimo e atribuição de *tiers*."""
+    """Full selection: pre-filter, minimum history and *tier* assignment."""
     ranked, excluded = prefilter(rules_by_symbol, tickers, books, delisted, config)
     members: list[UniverseMember] = []
     rank = 0
@@ -173,7 +173,7 @@ def select_universe(
 
 
 async def build_universe(api: BinanceSpotApi, config: UniverseConfig) -> Universe:
-    """Coleta regras, tickers, livro, delistagens e histórico, e seleciona o universo."""
+    """Collects rules, tickers, book, delistings and history, and selects the universe."""
     rules = await api.exchange_info()
     tickers = {t.symbol: t for t in await api.tickers_24h()}
     books = {b.symbol: b for b in await api.book_tickers()}

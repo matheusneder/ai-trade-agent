@@ -1,4 +1,4 @@
-"""Reconciliação completa: intenções pendentes, posições ativas e ordens órfãs."""
+"""Full reconciliation: pending intents, active positions and orphan orders."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -60,7 +60,7 @@ class Reconciler:
 
     @tracing.traced("reconcile", "reconcile.all")
     async def reconcile_all(self) -> ReconcileReport:
-        """Reconciliação completa (na partida, periódica e após reconexão do stream)."""
+        """Full reconciliation (at startup, periodically and after the stream reconnects)."""
         report = ReconcileReport(started_at=self._now())
         await self._resolve_intents(report)
         positions = await self.store.active_positions()
@@ -92,7 +92,7 @@ class Reconciler:
 
     @tracing.traced("reconcile", "reconcile.decision")
     async def reconcile_decision(self, decision_id: str) -> Position | None:
-        """Sincroniza apenas a posição de uma decisão (eventos do User Data Stream)."""
+        """Syncs only the position of one decision (User Data Stream events)."""
         tracing.annotate(decision=decision_id)
         position = await self.store.find_position_by_decision(decision_id)
         if position is None or position.state.is_terminal:
@@ -152,7 +152,7 @@ class Reconciler:
         return await self.api.find_order(position.symbol, intent.client_id) is not None
 
     async def _detect_orphans(self, report: ReconcileReport) -> None:
-        """Listas do agente abertas na exchange sem posição ativa correspondente (D-009)."""
+        """Agent lists open on the exchange without a matching active position (D-009)."""
         known = {p.protection_list_id for p in await self.store.active_positions()}
         try:
             open_lists = await self.api.open_order_lists()

@@ -28,7 +28,7 @@ def test_tagger_codes_marked_bare_and_names() -> None:
     tagger = AssetTagger(["SOL", "OP", "NEAR", "BTC"], {"BTC": ["bitcoin"], "OP": ["optimism"]})
     assert tagger.tag("Solana (SOL) rallies; $OP too") == ("OP", "SOL")
     assert tagger.tag("SOL and BTC rise") == ("BTC", "SOL")
-    assert tagger.tag("OP ed: markets") == ()  # código curto só com $ ou parênteses
+    assert tagger.tag("OP ed: markets") == ()  # short code only with $ or parentheses
     assert tagger.tag("Bitcoin and Optimism news") == ("BTC", "OP")
     assert tagger.tag("near-term outlook, SOLANA, solid, XSOL, SOL2") == ()
     assert tagger.tag("NEAR breaks out") == ("NEAR",)

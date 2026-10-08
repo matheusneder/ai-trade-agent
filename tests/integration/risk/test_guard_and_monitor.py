@@ -1,4 +1,4 @@
-"""Risk Guard e monitor com PostgreSQL e Binance simulada (critério de saída da Fase 5)."""
+"""Risk Guard and monitor with PostgreSQL and simulated Binance (Phase 5 exit criterion)."""
 
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -73,7 +73,7 @@ async def test_each_forced_condition_applies_its_action(
     assert not (await guard.effective("moderado")).allows_entries
     assert alerts and alerts[0][0] is Severity.CRITICAL
     assert "risk.state_changed" in [e.kind for e in await store.recent_events()]
-    assert await guard.apply(hits) == []  # repetir o gatilho não muda nada
+    assert await guard.apply(hits) == []  # repeating the trigger changes nothing
 
 
 async def test_pause_expires_extends_and_never_relaxes(store: Store) -> None:
@@ -81,22 +81,22 @@ async def test_pause_expires_extends_and_never_relaxes(store: Store) -> None:
     guard = _guard(store, clock, [])
     btc_drop = evaluate(CONDITIONS, snapshot(btc_change_1h=-0.07))
     fear = evaluate(CONDITIONS, snapshot(fear_greed=5))
-    await guard.apply(btc_drop)  # pausa de 4h
+    await guard.apply(btc_drop)  # 4h pause
     assert (await guard.state(GLOBAL)).until == NOW + timedelta(hours=4)
-    await guard.apply(fear)  # 24h: estende
+    await guard.apply(fear)  # 24h: extends
     assert (await guard.state(GLOBAL)).until == NOW + timedelta(hours=24)
-    await guard.apply(btc_drop)  # mais curta: ignorada
+    await guard.apply(btc_drop)  # shorter: ignored
     assert (await guard.state(GLOBAL)).until == NOW + timedelta(hours=24)
     clock.now = NOW + timedelta(hours=24)
-    assert (await guard.effective("conservador")) is OpState.RUNNING  # cooldown vencido
+    assert (await guard.effective("conservador")) is OpState.RUNNING  # cooldown expired
     await guard.apply(evaluate(CONDITIONS, snapshot(equity=D(800), peak_equity=D(1000))))
-    await guard.apply(btc_drop)  # halt nunca vira pausa
+    await guard.apply(btc_drop)  # halt never turns into a pause
     assert (await guard.state(GLOBAL)).state is OpState.HALTED
 
 
 async def test_a_lasting_condition_acts_once_and_respects_the_operator(store: Store) -> None:
-    """Incidente de 02/10/2026: com 4 perdas seguidas, a pausa era estendida e alertada a cada
-    minuto, e o /resume durava até a avaliação seguinte."""
+    """Incident of 2026-10-02: with 4 consecutive losses, the pause was extended and alerted
+    every minute, and /resume only lasted until the next evaluation."""
     clock = Clock(NOW)
     alerts: list[tuple[Severity, str]] = []
     guard = _guard(store, clock, alerts)
@@ -109,24 +109,24 @@ async def test_a_lasting_condition_acts_once_and_respects_the_operator(store: St
     paused = await guard.state(GLOBAL)
     for _ in range(5):
         assert await minute(consecutive_losses=4) == []
-    assert await guard.state(GLOBAL) == paused  # sem extensão
+    assert await guard.state(GLOBAL) == paused  # no extension
     assert len(alerts) == 1
 
     assert await guard.resume(GLOBAL)
     assert await minute(consecutive_losses=4) == []
     assert await minute(consecutive_losses=7) == []
-    assert (await guard.state(GLOBAL)).state is OpState.RUNNING  # o /resume vale
+    assert (await guard.state(GLOBAL)).state is OpState.RUNNING  # /resume holds
 
-    guard = _guard(store, clock, alerts)  # reinício: o disparo fica no banco
+    guard = _guard(store, clock, alerts)  # restart: the firing stays in the database
     assert await minute(consecutive_losses=7) == []
-    assert [h.value for h in await minute(consecutive_losses=8)] == [8]  # 4 perdas novas
+    assert [h.value for h in await minute(consecutive_losses=8)] == [8]  # 4 new losses
     assert (await guard.state(GLOBAL)).state is OpState.PAUSED
 
     clock.now += timedelta(hours=12)
     assert await minute(consecutive_losses=8) == []
-    assert (await guard.state(GLOBAL)).state is OpState.RUNNING  # o fim do cooldown vale
+    assert (await guard.state(GLOBAL)).state is OpState.RUNNING  # the end of the cooldown holds
 
-    assert await minute() == []  # uma vitória zera a sequência e rearma o gatilho
+    assert await minute() == []  # a win resets the streak and rearms the trigger
     assert await minute(consecutive_losses=4)
     assert [text.split()[1] for _, text in alerts] == ["PAUSED", "RUNNING", "PAUSED", "PAUSED"]
 
@@ -135,11 +135,11 @@ async def test_a_trigger_held_by_a_stricter_state_acts_after_the_resume(store: S
     alerts: list[tuple[Severity, str]] = []
     guard = _guard(store, Clock(NOW), alerts)
     streak = evaluate(CONDITIONS, snapshot(consecutive_losses=4))
-    await guard.pause(GLOBAL, "comando /pause")  # sem prazo: mais restritiva que 12h
+    await guard.pause(GLOBAL, "comando /pause")  # no deadline: more restrictive than 12h
     assert await guard.apply(streak) == []
     assert await guard.fired(GLOBAL) == []
     assert await guard.resume(GLOBAL)
-    assert await guard.apply(streak)  # a pausa por perdas ainda não tinha agido
+    assert await guard.apply(streak)  # the losses pause had not acted yet
     assert await guard.apply(streak) == []
     (fired,) = await guard.fired(GLOBAL)
     assert fired.reason == "max_consecutive_losses: 4 (limite 4)"
@@ -208,16 +208,16 @@ async def test_monitor_snapshot(
     (reading,) = [e for e in logs if e["event"] == "risk.snapshot"]
     assert reading["positions"] == 1 and reading["fear_greed"] == 22
     assert reading["equity"] == str(first.equity)
-    assert first.equity == D(1000) + D(-1) + unrealized  # capital + realizado + aberto
+    assert first.equity == D(1000) + D(-1) + unrealized  # capital + realized + open
     assert first.day_start_equity == first.peak_equity == first.equity
     assert first.consecutive_losses == 3
     assert first.profile_consecutive_losses == {"conservador": 2, "moderado": 1, "agressivo": 0}
     assert first.profile_daily_pnl == {"conservador": D(-4), "moderado": D(-2), "agressivo": 0}
     assert first.btc_change_1h == pytest.approx(-0.05)
-    assert first.quote_deviation == pytest.approx(abs(1 / 1.03 - 1))  # mediana 1,03
+    assert first.quote_deviation == pytest.approx(abs(1 / 1.03 - 1))  # median 1.03
     assert (first.fear_greed, first.api_error_rate, first.reconcile_anomalies) == (22, 0.2, 2)
 
-    fake.set_price("BTCUSDT", D(64000))  # patrimônio sobe: novo pico, mesma abertura do dia
+    fake.set_price("BTCUSDT", D(64000))  # equity rises: new peak, same day open
     second = await monitor.snapshot()
     assert second.peak_equity == second.equity > first.equity
     assert second.day_start_equity == first.equity
@@ -250,7 +250,7 @@ async def test_monitor_rebases_marks_when_managed_capital_changes(
             taken = await monitor.snapshot()
         return taken, [e for e in logs if e["event"] == "risk.equity_rebased"]
 
-    # Incidente: 1000 → 1500 → 500 sem operar não é ganho, perda nem drawdown.
+    # Incident: 1000 → 1500 → 500 without trading is neither a gain, a loss nor a drawdown.
     first, rebased = await reading(1000)
     assert first.day_start_equity == first.peak_equity == D(1000) and rebased == []
     for capital in (1500, 500):
@@ -259,20 +259,20 @@ async def test_monitor_rebases_marks_when_managed_capital_changes(
     assert rebased_event["previous_baseline"] == "1500" and rebased_event["baseline"] == "500"
     assert evaluate(CONDITIONS, taken) == []
 
-    # Uma perda real continua valendo: 100 abaixo do pico e 20 abaixo da abertura do dia.
+    # A real loss still counts: 100 below the peak and 20 below the day open.
     today = NOW.date().isoformat()
     marks = {"day": today, "day_start": "1020", "peak": "1100", "baseline": "1000"}
     await store.set_checkpoint(EQUITY_KEY, marks)
     cut, _ = await reading(800)
     assert (cut.equity, cut.day_start_equity, cut.peak_equity) == (D(800), D(820), D(900))
 
-    # Novo dia: a abertura é o patrimônio atual; o pico acompanha a diferença de capital.
+    # New day: the open is the current equity; the peak follows the change in capital.
     await store.set_checkpoint(EQUITY_KEY, marks)
     next_day, (event,) = await reading(800, days=1)
     assert (next_day.day_start_equity, next_day.peak_equity) == (D(800), D(900))
     assert event["day_start"] == "800" and event["peak"] == "900"
 
-    # Marcas antigas, sem o capital de referência: recomeçam do patrimônio atual.
+    # Old marks, without the reference capital: they start again from the current equity.
     await store.set_checkpoint(EQUITY_KEY, {"day": today, "day_start": "1000", "peak": "1500"})
     legacy, (event,) = await reading(500)
     assert legacy.day_start_equity == legacy.peak_equity == D(500)
@@ -284,7 +284,7 @@ async def test_monitor_rebases_marks_when_managed_capital_changes(
 async def test_monitor_without_market_references(
     store: Store, api: BinanceSpotApi, fake: FakeBinance
 ) -> None:
-    fake.candles[("BTCUSDT", "1m")] = _klines([60000.0] * 10)  # menos de 61 candles
+    fake.candles[("BTCUSDT", "1m")] = _klines([60000.0] * 10)  # fewer than 61 candles
     monitor = RiskMonitor(api=api, store=store, strategy=PROFILES, health=CallHealth())
     reading = await monitor.snapshot()
     assert reading.btc_change_1h is None and reading.quote_deviation is None
@@ -296,10 +296,10 @@ async def test_monitor_without_market_references(
 async def test_reconcile_counts_orphans_at_once_and_errors_only_when_they_persist(
     api: BinanceSpotApi, store: Store
 ) -> None:
-    """Uma órfã (lista do agente na Binance sem posição) é divergência real e conta na hora. Um
-    erro é uma checagem que não terminou (rede, DNS) e só conta se a reconciliação seguinte
-    também falhar: em 07/10, 2 min sem DNS pausaram as entradas por 7 h, embora a
-    reconciliação 5 min depois tenha saído limpa."""
+    """An orphan (an agent list on Binance without a position) is a real mismatch and counts
+    right away. An error is a check that did not finish (network, DNS) and only counts if
+    the next reconciliation fails too: on 2026-10-07, 2 min without DNS paused entries for
+    7 h, even though the reconciliation 5 min later came out clean."""
     monitor = RiskMonitor(api=api, store=store, strategy=PROFILES, health=CallHealth())
 
     def note(orphans: tuple[str, ...] = (), errors: tuple[str, ...] = ()) -> int:
@@ -308,9 +308,9 @@ async def test_reconcile_counts_orphans_at_once_and_errors_only_when_they_persis
         return monitor.reconcile_anomalies
 
     assert note(orphans=("x",)) == 1
-    assert note(errors=("dns",)) == 0  # a primeira falha não conta
-    assert note() == 0  # a seguinte saiu limpa
+    assert note(errors=("dns",)) == 0  # the first failure does not count
+    assert note() == 0  # the next one came out clean
     assert note(errors=("dns",)) == 0
-    assert note(errors=("dns", "dns")) == 2  # duas seguidas: os erros contam
+    assert note(errors=("dns", "dns")) == 2  # two in a row: the errors count
     assert note(orphans=("x",), errors=("dns",)) == 2
     assert note() == 0

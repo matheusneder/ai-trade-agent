@@ -1,12 +1,12 @@
-"""Métricas do agente com OpenTelemetry, exportadas por OTLP/HTTP (para o SigNoz).
+"""Agent metrics with OpenTelemetry, exported over OTLP/HTTP (to SigNoz).
 
-A cada verificação de risco (1 min), a última leitura alimenta os medidores (patrimônio,
-drawdown, PnL, exposição, posições, erros de API, peso usado, relógio e estado de cada escopo).
-Contadores registram o que acontece entre as leituras: custo e tokens do LLM, ciclos de
-decisão, entradas, saídas e mudanças de estado do risco.
+On every risk check (1 min), the latest reading feeds the gauges (equity, drawdown, PnL,
+exposure, positions, API errors, used weight, clock and the state of each scope).
+Counters record what happens between readings: LLM cost and tokens, decision cycles,
+entries, exits and risk state changes.
 
-Latência, vazão e erros por operação não entram aqui: o SigNoz calcula a partir dos traces.
-Sem ``TA_OTLP_METRICS_ENDPOINT``, nada é instalado e as chamadas não fazem nada.
+Latency, throughput and errors per operation are not here: SigNoz derives them from the
+traces. Without ``TA_OTLP_METRICS_ENDPOINT``, nothing is installed and the calls do nothing.
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -25,12 +25,12 @@ from trade_agent.tracing import NAMESPACE
 SERVICE = NAMESPACE
 EXPORT_INTERVAL_MS = 60_000
 STATE_CODES = {"running": 0, "paused": 1, "halted": 2, "flattening": 3}
-"""Estado do risco como número (0 = operando): o gráfico sobe quando o agente para."""
+"""Risk state as a number (0 = running): the chart goes up when the agent stops."""
 
 
 @dataclass(frozen=True, slots=True)
 class Reading:
-    """Última leitura do agente (vem da verificação de risco)."""
+    """The agent's latest reading (from the risk check)."""
 
     equity: Decimal
     day_start_equity: Decimal
@@ -155,7 +155,7 @@ _active: AgentMetrics | None = None
 
 
 def install(metrics: AgentMetrics | None) -> None:
-    global _active  # noqa: PLW0603 - uma única instância por processo
+    global _active  # noqa: PLW0603 - a single instance per process
     _active = metrics
 
 
@@ -164,7 +164,7 @@ def enabled() -> bool:
 
 
 def configure_metrics(endpoint: str | None, *, environment: str) -> AgentMetrics | None:
-    """Liga a exportação OTLP/HTTP de métricas para ``endpoint`` (a cada minuto)."""
+    """Turns on the OTLP/HTTP export of metrics to ``endpoint`` (every minute)."""
     if endpoint is None:
         install(None)
         return None

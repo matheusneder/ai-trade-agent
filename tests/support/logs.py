@@ -1,7 +1,8 @@
-"""Loki e Alloy em contêiner (testcontainers) com a configuração de produção de ``deploy/``.
+"""Loki and Alloy in containers (testcontainers) with the production configuration of ``deploy/``.
 
-O Alloy de teste usa o mesmo processamento (``loki.process``) e o mesmo envio (``loki.write``)
-do arquivo versionado. Só a origem muda: arquivos de amostra no lugar da API do Docker.
+The test Alloy uses the same processing (``loki.process``) and the same sending
+(``loki.write``) as the versioned file. Only the source changes: sample files instead of
+the Docker API.
 """
 
 import contextlib
@@ -34,15 +35,16 @@ def image(service: str) -> str:
 
 
 def compose_config(**env: str) -> dict[str, Any]:
-    """O modelo do ``stack.yml`` como o Docker Compose o monta, com ``env`` no ambiente.
+    """The ``stack.yml`` model as Docker Compose builds it, with ``env`` in the environment.
 
-    Sem o ``.env`` da raiz (o ``docker-compose.yml`` o exige) e sem as variáveis ``DEV_`` do
-    ambiente de quem roda os testes: o que vale é o padrão de um ambiente novo.
+    Without the root ``.env`` (``docker-compose.yml`` requires it) and without the ``DEV_``
+    variables from the environment of whoever runs the tests: what counts is the default of
+    a new environment.
     """
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível")
     base = {k: v for k, v in os.environ.items() if not k.startswith("DEV_")}
-    done = subprocess.run(  # noqa: S603 - comando fixo
+    done = subprocess.run(  # noqa: S603 - fixed command
         ["docker", "compose", "-f", str(DEPLOY / "stack.yml"), "config", "--format", "json"],  # noqa: S607
         capture_output=True, check=True, env=base | env,
     )  # fmt: skip
@@ -51,7 +53,7 @@ def compose_config(**env: str) -> dict[str, Any]:
 
 
 def alloy_blocks() -> dict[str, str]:
-    """Blocos de primeiro nível do ``config.alloy`` pelo identificador (``loki.write.loki``)."""
+    """Top-level blocks of ``config.alloy`` by identifier (``loki.write.loki``)."""
     text = ALLOY_CONFIG.read_text(encoding="utf-8")
     return {
         ".".join(filter(None, (m["name"], m["label"]))): m.group(0)
@@ -61,11 +63,11 @@ def alloy_blocks() -> dict[str, str]:
 
 SIGNOZ_OTLP = "http://signoz-ingester:4318"
 LOKI_OTLP = "http://loki:3100/otlp"
-"""No teste, a cópia OTLP (a do SigNoz) vai para a entrada OTLP do próprio Loki."""
+"""In the test, the OTLP copy (SigNoz's) goes to Loki's own OTLP input."""
 
 
 def file_pipeline(files: Mapping[str, str], *, otlp_endpoint: str = LOKI_OTLP) -> str:
-    """Config do Alloy de teste: amostras por serviço → processamento e envio de produção."""
+    """Config of the test Alloy: samples per service → production processing and sending."""
     blocks = alloy_blocks()
     targets = ",\n".join(
         f'\t\t{{"__path__" = "/samples/{name}", "service" = "{service}"}}'
@@ -106,7 +108,7 @@ def wait_ready(url: str, timeout_s: float = 90) -> None:
 
 
 def loki_with_alloy(samples: Path, files: Mapping[str, str]) -> Iterator[str]:
-    """Sobe Loki (alias ``loki``, como no compose) e Alloy lendo ``samples``; devolve a URL."""
+    """Starts Loki (aliased ``loki``, as in compose) and Alloy on ``samples``; returns the URL."""
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível: testes de logs ignorados")
     from testcontainers.core.container import DockerContainer
@@ -153,11 +155,11 @@ def query(url: str, expr: str, *, instant: bool = False, window_s: int = 3600) -
 def label_values(url: str, label: str) -> list[str]:
     body = httpx.get(f"{url}/loki/api/v1/label/{label}/values", timeout=10).json()
     assert body["status"] == "success", body
-    return list(body.get("data") or [])  # rótulo inexistente: sem "data"
+    return list(body.get("data") or [])  # label that does not exist: no "data"
 
 
 def counts(url: str, expr: str) -> dict[tuple[tuple[str, str], ...], int]:
-    """``sum by (...) (count_over_time(...))`` instantâneo como {rótulos: total}."""
+    """Instant ``sum by (...) (count_over_time(...))`` as {labels: total}."""
     return {
         tuple(sorted(row["metric"].items())): int(row["value"][1])
         for row in query(url, expr, instant=True)

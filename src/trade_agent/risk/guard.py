@@ -1,9 +1,9 @@
-"""Risk Guard: avalia as condições de parada, aplica as ações e valida cada ordem.
+"""Risk Guard: evaluates the stop conditions, applies the actions and validates each order.
 
-A avaliação (``evaluate``) é uma função pura sobre um ``RiskSnapshot``; a aplicação
-(``RiskGuard.apply``) persiste o novo estado, registra o evento e alerta o operador, uma vez
-por ocorrência de cada gatilho.
-``flatten`` delega o encerramento das posições a quem executa ordens (o motor de decisão).
+The evaluation (``evaluate``) is a pure function over a ``RiskSnapshot``; the application
+(``RiskGuard.apply``) persists the new state, records the event and alerts the operator,
+once per occurrence of each trigger.
+``flatten`` delegates closing the positions to whoever executes orders (the decision engine).
 """
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -41,33 +41,33 @@ log = structlog.get_logger(__name__)
 PCT = Decimal(100)
 
 type Flattener = Callable[[str], Awaitable[int]]
-"""Encerra as posições do escopo (``global`` ou nome do perfil); retorna quantas."""
+"""Closes the scope's positions (``global`` or a profile name); returns how many."""
 
 
 @dataclass(frozen=True, slots=True)
 class RiskSnapshot:
     now: datetime
     equity: Decimal
-    """Patrimônio do agente: capital gerido + PnL realizado + PnL não realizado."""
+    """Agent equity: managed capital + realized PnL + unrealized PnL."""
     day_start_equity: Decimal
     peak_equity: Decimal
     baseline_equity: Decimal
-    """Capital gerido (base das perdas e da meta, em %)."""
+    """Managed capital (the basis of the losses and the target, in %)."""
     consecutive_losses: int = 0
     profile_consecutive_losses: Mapping[str, int] = field(default_factory=dict)
     profile_daily_pnl: Mapping[str, Decimal] = field(default_factory=dict)
-    """PnL realizado no dia (UTC) por perfil, na moeda de cotação."""
+    """Realized PnL for the day (UTC) per profile, in the quote asset."""
     profile_capital: Mapping[str, Decimal] = field(default_factory=dict)
     btc_change_1h: float | None = None
     quote_deviation: float | None = None
-    """Desvio absoluto da moeda de cotação em relação ao dólar (fração)."""
+    """Absolute deviation of the quote asset from the dollar (fraction)."""
     fear_greed: int | None = None
     api_error_rate: float = 0.0
     reconcile_anomalies: int = 0
     realized_pnl: Decimal = Decimal(0)
     unrealized_pnl: Decimal = Decimal(0)
     exposure: Decimal = Decimal(0)
-    """Custo das posições ativas (na moeda de cotação)."""
+    """Cost of the active positions (in the quote asset)."""
     active_positions: int = 0
 
 
@@ -80,7 +80,7 @@ class Hit:
     threshold: float | None
     cooldown: timedelta | None = None
     below: bool = False
-    """Dispara abaixo do limite (ex.: Fear & Greed)."""
+    """Fires below the limit (e.g. Fear & Greed)."""
 
     @property
     def key(self) -> tuple[str, str]:
@@ -92,8 +92,8 @@ class Hit:
         return f"{self.condition}: {self.value:.4g}{limit}"
 
     def worsened(self, previous: float) -> bool:
-        """Piorou mais um limite inteiro desde ``previous`` (4 → 8 perdas seguidas; perda
-        diária de 3% → 6%). Sem limite (ex.: divergências na reconciliação): qualquer piora."""
+        """Got one full limit worse since ``previous`` (4 → 8 consecutive losses; daily loss
+        of 3% → 6%). No limit (e.g. reconciliation mismatches): any worsening."""
         step = abs(self.threshold or 0)
         down = self.below or (self.threshold or 0) < 0
         if step == 0:
@@ -106,8 +106,8 @@ def _pct(numerator: Decimal, denominator: Decimal) -> float:
 
 
 def _reached(trigger: Trigger, value: float, *, below: bool) -> bool:
-    """Valor ≥ limite; limite negativo: valor ≤ limite (quedas); ``below``: valor < limite;
-    sem limite (ex.: divergência na reconciliação): qualquer ocorrência."""
+    """Value ≥ limit; negative limit: value ≤ limit (drops); ``below``: value < limit;
+    no limit (e.g. a reconciliation mismatch): any occurrence."""
     if trigger.value is None:
         return value > 0
     if below:
@@ -120,7 +120,7 @@ def _scaled(value: float | None, factor: float = 100) -> float | None:
 
 
 def evaluate(conditions: StopConditions, s: RiskSnapshot) -> list[Hit]:
-    """Condições atingidas no snapshot (função pura)."""
+    """Conditions met in the snapshot (pure function)."""
     g = conditions.global_
     readings: list[tuple[str, str, Trigger | None, float | None, bool]] = [
         (GLOBAL, "max_daily_loss_pct", g.max_daily_loss_pct,
@@ -153,7 +153,7 @@ def evaluate(conditions: StopConditions, s: RiskSnapshot) -> list[Hit]:
     ]
 
 
-# ============================================================================ pré-ordem
+# ============================================================================ pre-trade
 @dataclass(frozen=True, slots=True)
 class PreTradeContext:
     state: OpState
@@ -172,7 +172,7 @@ def pre_trade_violations(
     context: PreTradeContext,
     conditions: StopConditions,
 ) -> list[str]:
-    """Validações obrigatórias antes de qualquer entrada (doc 03, §10.1)."""
+    """Mandatory checks before any entry (doc 03, §10.1)."""
     config: PreTradeConfig = conditions.pre_trade
     problems: list[str] = []
     if not context.state.allows_entries:
@@ -186,7 +186,7 @@ def pre_trade_violations(
     if idea.symbol in context.delisted_symbols:
         problems.append("em delistagem")
 
-    # "sempre com proteção": o ProtectionPolicy já recusa, na construção, política sem stop
+    # "always protected": ProtectionPolicy already refuses, when built, a policy without a stop
     policy = idea.policy
     stop_pct = policy.stop_pct or Decimal(policy.stop_trailing_bips or 0) / PCT
     fee = Decimal(str(config.round_trip_fee_pct))
@@ -206,7 +206,7 @@ def pre_trade_violations(
     return problems
 
 
-# ============================================================================ aplicação
+# ============================================================================ application
 class RiskGuard:
     def __init__(
         self,
@@ -231,7 +231,7 @@ class RiskGuard:
         return await self._states.get(scope, self._clock())
 
     async def effective(self, profile: str) -> OpState:
-        """Estado efetivo do perfil (o mais restritivo entre o global e o do perfil)."""
+        """The profile's effective state (the most restrictive of global and the profile's)."""
         return combined(await self.state(GLOBAL), await self.state(profile))
 
     async def _set(self, scope: str, new: ScopeState, *, source: str) -> None:
@@ -248,19 +248,20 @@ class RiskGuard:
         log.warning("risk.state_changed", **payload)
 
     async def fired(self, scope: str) -> list[Fired]:
-        """Gatilhos do escopo que já agiram e cuja condição continua valendo."""
+        """Triggers of the scope that already acted and whose condition still holds."""
         fired = await self._states.fired()
         return [record for (owner, _), record in sorted(fired.items()) if owner == scope]
 
     @tracing.traced("risk", "risk.apply")
     async def apply(self, hits: Iterable[Hit]) -> list[Hit]:
-        """Aplica as ações dos gatilhos de uma avaliação; retorna os que mudaram algum estado.
+        """Applies the actions of an evaluation's triggers; returns the ones that changed a state.
 
-        ``hits`` é a avaliação inteira: um gatilho ausente deixou de valer e fica rearmado.
-        Cada gatilho age uma vez por ocorrência: enquanto a condição continua, ele não estende
-        a pausa nem alerta de novo, e o ``/resume`` e o fim do cooldown valem. Ele só volta a
-        agir se piorar mais um limite inteiro (``Hit.worsened``). Um gatilho que não mudou o
-        estado (já havia outro mais restritivo) segue armado: age depois de um ``/resume``.
+        ``hits`` is the whole evaluation: a trigger that is missing no longer holds and is
+        rearmed. Each trigger acts once per occurrence: while the condition lasts, it does not
+        extend the pause or alert again, and ``/resume`` and the end of the cooldown hold. It
+        only acts again if it gets one full limit worse (``Hit.worsened``). A trigger that did
+        not change the state (another, more restrictive one was already there) stays armed: it
+        acts after a ``/resume``.
         """
         applied: list[Hit] = []
         hits = list(hits)
@@ -314,7 +315,7 @@ class RiskGuard:
         )
         return closed
 
-    # ------------------------------------------------------------------ comandos manuais
+    # ------------------------------------------------------------------ manual commands
     @tracing.traced("risk", "risk.pause")
     async def pause(self, scope: str, reason: str = "manual") -> None:
         await self._set(scope, ScopeState(OpState.PAUSED, reason, self._clock()), source="manual")
@@ -325,7 +326,7 @@ class RiskGuard:
 
     @tracing.traced("risk", "risk.resume")
     async def resume(self, scope: str) -> bool:
-        """Volta a ``RUNNING``; recusa durante um flatten em andamento."""
+        """Returns to ``RUNNING``; refuses during a flatten in progress."""
         if (await self.state(scope)).state is OpState.FLATTENING:
             return False
         await self._set(scope, ScopeState(reason="retomado pelo operador"), source="manual")

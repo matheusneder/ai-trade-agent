@@ -1,17 +1,17 @@
-"""Cliente REST assíncrono e enxuto para a Binance Spot.
+"""Lean asynchronous REST client for Binance Spot.
 
-Responsabilidades:
+Responsibilities:
 
-* montar e assinar requisições (payload percent-encoded, idêntico ao que é enviado);
-* manter o deslocamento de relógio em relação ao servidor (``timestamp``/``recvWindow``);
-* traduzir respostas de erro para a hierarquia de :mod:`trade_agent.exchange.errors`;
-* registrar o consumo de limites informado pelos cabeçalhos ``X-MBX-*``;
-* impedir envio de ordens quando a trava ``trading_enabled`` estiver desligada.
+* build and sign requests (percent-encoded payload, identical to what is sent);
+* keep the clock offset relative to the server (``timestamp``/``recvWindow``);
+* translate error responses into the :mod:`trade_agent.exchange.errors` hierarchy;
+* record the limit usage reported by the ``X-MBX-*`` headers;
+* block order submission when the ``trading_enabled`` lock is off.
 
-Não há retentativas automáticas nesta camada: a política de retentativa depende da
-operação (consulta x ordem) e fica com quem chama. A exceção é o ``-1021`` (``timestamp``
-fora do ``recvWindow``): a Binance recusa a requisição antes de executá-la, então o cliente
-mede o relógio de novo e repete uma vez, inclusive ordens.
+There are no automatic retries in this layer: the retry policy depends on the operation
+(query vs order) and belongs to the caller. The exception is ``-1021`` (``timestamp``
+outside ``recvWindow``): Binance refuses the request before executing it, so the client
+measures the clock again and retries once, orders included.
 """
 
 import time
@@ -48,11 +48,11 @@ type HttpMethod = Literal["GET", "POST", "PUT", "DELETE"]
 
 API_KEY_HEADER = "X-MBX-APIKEY"
 CLOCK_JUMP_WARN_MS = 1000
-"""Variação do deslocamento entre duas medições que indica um salto do relógio local."""
+"""Change of the offset between two measurements that indicates a jump of the local clock."""
 CLOCK_SAMPLES = 3
-"""Amostras por medição do relógio; vale a de menor ida e volta."""
+"""Samples per clock measurement; the one with the shortest round trip wins."""
 
-# Falhas em que a requisição comprovadamente não foi enviada ao servidor.
+# Failures where the request provably was not sent to the server.
 _NOT_SENT_ERRORS: tuple[type[httpx.TransportError], ...] = (
     httpx.ConnectError,
     httpx.ConnectTimeout,
@@ -61,13 +61,13 @@ _NOT_SENT_ERRORS: tuple[type[httpx.TransportError], ...] = (
 
 
 def system_clock_ms() -> int:
-    """Relógio local em milissegundos desde a época Unix."""
+    """Local clock in milliseconds since the Unix epoch."""
     return time.time_ns() // 1_000_000
 
 
 @dataclass(slots=True)
 class RateLimitUsage:
-    """Consumo de limites informado pela Binance na última resposta."""
+    """Limit usage reported by Binance in the last response."""
 
     used_weight_1m: int | None = None
     order_count_10s: int | None = None
@@ -80,9 +80,9 @@ class RateLimitUsage:
 
 
 class CallHealth:
-    """Janela deslizante de chamadas para a taxa de **falhas de infraestrutura** (sem
-    conexão, resultado desconhecido, HTTP 5xx, 418 e 429). Rejeições de negócio (4xx)
-    não contam como falha: são respostas válidas da exchange."""
+    """Sliding window of calls for the rate of **infrastructure failures** (no connection,
+    unknown outcome, HTTP 5xx, 418 and 429). Business rejections (4xx) do not count as
+    failures: they are valid responses from the exchange."""
 
     def __init__(
         self, *, window_s: float = 300.0, clock: Callable[[], float] = time.monotonic
@@ -97,7 +97,7 @@ class CallHealth:
         self._calls.append((now, ok))
 
     def error_rate(self, *, min_calls: int = 5) -> float:
-        """Fração de falhas na janela; 0 com menos de ``min_calls`` chamadas."""
+        """Fraction of failures in the window; 0 with fewer than ``min_calls`` calls."""
         now = self._clock()
         recent = [ok for at, ok in self._calls if now - at <= self._window_s]
         if len(recent) < min_calls:
@@ -126,7 +126,7 @@ def _retry_after(headers: httpx.Headers) -> float | None:
 
 
 class BinanceRestClient:
-    """Cliente REST da Binance Spot (assíncrono)."""
+    """Binance Spot REST client (asynchronous)."""
 
     def __init__(
         self,
@@ -152,7 +152,7 @@ class BinanceRestClient:
         self.usage = RateLimitUsage()
         self.health = CallHealth()
 
-    # ------------------------------------------------------------------ ciclo de vida
+    # ------------------------------------------------------------------ lifecycle
     async def __aenter__(self) -> Self:
         return self
 
@@ -168,29 +168,29 @@ class BinanceRestClient:
         if self._owns_http:
             await self._http.aclose()
 
-    # ------------------------------------------------------------------ propriedades
+    # ------------------------------------------------------------------ properties
     @property
     def trading_enabled(self) -> bool:
         return self._trading_enabled
 
     @property
     def time_offset_ms(self) -> int:
-        """Diferença estimada ``relógio do servidor - relógio local`` em ms."""
+        """Estimated difference ``server clock - local clock`` in ms."""
         return self._time_offset_ms
 
     def now_ms(self) -> int:
-        """Horário estimado do servidor em ms."""
+        """Estimated server time in ms."""
         return self._clock() + self._time_offset_ms
 
-    # ------------------------------------------------------------------ relógio
+    # ------------------------------------------------------------------ clock
     async def sync_time(self) -> int:
-        """Mede o deslocamento de relógio usando ``GET /api/v3/time``; retorna o offset.
+        """Measures the clock offset with ``GET /api/v3/time``; returns the offset.
 
-        O horário do servidor é comparado com o meio da ida e volta, e uma ida e volta longa
-        (abrindo a conexão, com TLS) desloca a estimativa em centenas de ms. Por isso são
-        ``CLOCK_SAMPLES`` amostras seguidas, e vale a mais rápida.
+        The server time is compared with the midpoint of the round trip, and a long round
+        trip (opening the connection, with TLS) shifts the estimate by hundreds of ms. That
+        is why there are ``CLOCK_SAMPLES`` samples in a row, and the fastest one wins.
         """
-        samples: list[tuple[int, int]] = []  # (ida e volta, offset)
+        samples: list[tuple[int, int]] = []  # (round trip, offset)
         for _ in range(CLOCK_SAMPLES):
             before = self._clock()
             data = await self.public("GET", "/api/v3/time")
@@ -199,21 +199,21 @@ class BinanceRestClient:
         round_trip, offset = min(samples)
         jump = offset - self._time_offset_ms
         if self._synced and abs(jump) > CLOCK_JUMP_WARN_MS:
-            # o relógio local foi ajustado (NTP religado, VM que acordou): o desvio anterior
-            # já não valia, e as requisições assinadas seriam recusadas com -1021
+            # the local clock was adjusted (NTP turned back on, a VM that woke up): the previous
+            # offset no longer held, and signed requests would be refused with -1021
             log.warning("rest.clock_jumped", offset_ms=offset, jump_ms=jump)
         self._time_offset_ms, self._synced = offset, True
         log.debug("rest.clock_synced", offset_ms=offset, round_trip_ms=round_trip)
         return offset
 
-    # ------------------------------------------------------------------ requisições
+    # ------------------------------------------------------------------ requests
     async def public(
         self,
         method: HttpMethod,
         path: str,
         params: Mapping[str, ParamValue] | None = None,
     ) -> Any:
-        """Requisição sem assinatura (dados de mercado, informações gerais)."""
+        """Unsigned request (market data, general information)."""
         query = encode_params(params or {})
         url = f"{path}?{query}" if query else path
         return await self._send(method, url, headers={})
@@ -226,10 +226,10 @@ class BinanceRestClient:
         *,
         trading: bool = False,
     ) -> Any:
-        """Requisição assinada (``TRADE``/``USER_DATA``).
+        """Signed request (``TRADE``/``USER_DATA``).
 
-        ``trading=True`` marca operações que criam/cancelam ordens: são bloqueadas quando a
-        trava ``trading_enabled`` está desligada.
+        ``trading=True`` marks operations that create/cancel orders: they are blocked when
+        the ``trading_enabled`` lock is off.
         """
         if trading and not self._trading_enabled:
             raise TradingDisabledError(f"envio de ordens desabilitado: {method} {path}")
@@ -238,7 +238,7 @@ class BinanceRestClient:
         try:
             return await self._send_signed(method, path, params, self._api_key, self._signer)
         except BinanceTimestampError:
-            # recusada antes de executar: mede o relógio de novo e assina outra vez
+            # refused before executing: measure the clock again and sign once more
             log.warning(
                 "rest.timestamp_rejected",
                 method=method,
@@ -265,7 +265,7 @@ class BinanceRestClient:
         return await self._send(method, url, headers={API_KEY_HEADER: api_key})
 
     async def _send(self, method: HttpMethod, url: str, headers: dict[str, str]) -> Any:
-        # só o caminho vai para logs, spans e mensagens de erro: a query tem a assinatura
+        # only the path goes to logs, spans and error messages: the query carries the signature
         path = url.split("?", 1)[0]
         attributes: dict[str, tracing.AttributeValue] = {
             "http.request.method": method,

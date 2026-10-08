@@ -1,6 +1,6 @@
-"""Cliente fino da Bot API do Telegram (``sendMessage`` e ``getUpdates`` com long polling).
+"""Thin client for the Telegram Bot API (``sendMessage`` and ``getUpdates`` with long polling).
 
-O token faz parte da URL da API: mensagens de erro e spans nunca incluem a URL.
+The token is part of the API URL: error messages and spans never include the URL.
 """
 
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ from trade_agent import tracing
 API_URL = "https://api.telegram.org"
 MAX_MESSAGE = 4096
 UNTRACED = frozenset({"getUpdates"})
-"""A espera por mensagens (long polling a cada 30 s) não vira trace; o comando recebido, sim."""
+"""The wait for messages (long polling every 30 s) is not traced; the received command is."""
 
 log = structlog.get_logger(__name__)
 

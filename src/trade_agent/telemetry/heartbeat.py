@@ -1,5 +1,5 @@
-"""Heartbeat externo (ex.: Healthchecks.io): sem pings, o serviço externo alerta que o
-agente parou. A URL contém o identificador secreto do check e nunca é registrada."""
+"""External heartbeat (e.g. Healthchecks.io): without pings, the external service alerts
+that the agent stopped. The URL contains the check's secret identifier and is never logged."""
 
 import httpx
 import structlog
@@ -13,7 +13,7 @@ class Heartbeat:
         self._url = url
 
     async def ping(self) -> bool:
-        """Envia o ping; falhas são registradas (sem a URL) e nunca propagadas."""
+        """Sends the ping; failures are recorded (without the URL) and never propagated."""
         try:
             response = await self._http.get(self._url, timeout=10)
             response.raise_for_status()

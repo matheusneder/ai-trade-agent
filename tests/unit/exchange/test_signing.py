@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from trade_agent.exchange.serialization import ParamValue, encode_params, ws_signature_payload
 from trade_agent.exchange.signing import Ed25519Signer, HmacSigner
 
-# Vetores oficiais da documentação da Binance (rest-api.md e web-socket-api.md).
+# Official vectors from the Binance documentation (rest-api.md and web-socket-api.md).
 DOC_SECRET = "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j"
 DOC_API_KEY = "vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A"
 

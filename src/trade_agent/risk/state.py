@@ -1,15 +1,16 @@
-"""Estados operacionais (doc 03, §10.2), globais e por perfil, persistidos no banco.
+"""Operating states (doc 03, §10.2), global and per profile, persisted in the database.
 
-| Estado        | Novas entradas | Proteções | Saídas por regra | Retorno                    |
+| State         | New entries    | Protection| Rule-based exits | Return                     |
 |---------------|----------------|-----------|------------------|----------------------------|
-| ``RUNNING``   | sim            | sim       | sim              | —                          |
-| ``PAUSED``    | não            | sim       | sim              | após o cooldown ou manual  |
-| ``FLATTENING``| não            | vende     | —                | vai para ``HALTED``        |
-| ``HALTED``    | não            | mantidas  | não              | só manual (``/resume``)    |
+| ``RUNNING``   | yes            | yes       | yes              | —                          |
+| ``PAUSED``    | no             | yes       | yes              | after the cooldown/manual  |
+| ``FLATTENING``| no             | sells     | —                | goes to ``HALTED``         |
+| ``HALTED``    | no             | kept      | no               | manual only (``/resume``)  |
 
-Gatilhos automáticos só **escalam** (nunca aliviam um estado mais restritivo); o retorno
-a ``RUNNING`` é manual, exceto a pausa com cooldown vencido. Cada gatilho age uma vez por
-ocorrência (``Fired``): enquanto a condição continua, o ``/resume`` e o fim do cooldown valem.
+Automatic triggers only **escalate** (they never relax a more restrictive state); the
+return to ``RUNNING`` is manual, except for a pause whose cooldown expired. Each trigger
+acts once per occurrence (``Fired``): while the condition lasts, ``/resume`` and the end
+of the cooldown hold.
 """
 
 from collections.abc import Mapping
@@ -49,12 +50,12 @@ class ScopeState:
     reason: str | None = None
     since: datetime | None = None
     until: datetime | None = None
-    """Fim do cooldown de uma pausa (``None``: só manual)."""
+    """End of a pause's cooldown (``None``: manual only)."""
     flattened: bool = False
-    """``HALTED`` resultante de um flatten: o mesmo gatilho não o repete."""
+    """``HALTED`` that resulted from a flatten: the same trigger does not repeat it."""
 
     def current(self, now: datetime) -> "ScopeState":
-        """Pausa com cooldown vencido volta a ``RUNNING``."""
+        """A pause whose cooldown expired returns to ``RUNNING``."""
         if self.state is OpState.PAUSED and self.until is not None and now >= self.until:
             return ScopeState()
         return self
@@ -81,7 +82,7 @@ class ScopeState:
 
 @dataclass(frozen=True, slots=True)
 class Fired:
-    """Último disparo de um gatilho cuja condição continua valendo."""
+    """Last firing of a trigger whose condition still holds."""
 
     value: float
     reason: str
@@ -96,13 +97,13 @@ class Fired:
 
 
 type FiredMap = dict[tuple[str, str], Fired]
-"""Disparos por (escopo, condição)."""
+"""Firings by (scope, condition)."""
 
 
 def escalate(current: ScopeState, proposed: ScopeState) -> ScopeState | None:
-    """Novo estado para um gatilho automático, ou ``None`` se não houver mudança."""
+    """New state for an automatic trigger, or ``None`` if nothing changes."""
     if proposed.state is OpState.FLATTENING and current.flattened:
-        return None  # já zerado; sem novas entradas até o /resume
+        return None  # already flat; no new entries until /resume
     if proposed.state.rank > current.state.rank:
         return proposed
     if (
@@ -111,17 +112,17 @@ def escalate(current: ScopeState, proposed: ScopeState) -> ScopeState | None:
         and current.until is not None
         and (proposed.until is None or proposed.until > current.until)
     ):
-        return proposed  # estende a pausa
+        return proposed  # extends the pause
     return None
 
 
 def combined(*states: ScopeState) -> OpState:
-    """Estado efetivo: o mais restritivo entre o global e o do perfil."""
+    """Effective state: the most restrictive of the global one and the profile's."""
     return max((s.state for s in states), key=lambda s: s.rank)
 
 
 class StateStore:
-    """Estados persistidos em ``checkpoints`` (sobrevivem a reinícios)."""
+    """States persisted in ``checkpoints`` (they survive restarts)."""
 
     def __init__(self, store: Store) -> None:
         self._store = store

@@ -1,15 +1,16 @@
-"""Rastreamento com OpenTelemetry, exportado por OTLP/HTTP ao Jaeger.
+"""Tracing with OpenTelemetry, exported over OTLP/HTTP to Jaeger.
 
-Cada componente do agente é um serviço no Jaeger (``trade-agent.<componente>``, namespace
-``trade-agent``). O Jaeger liga dois serviços quando um span de um é pai de um span do
-outro, então o grafo *System Architecture* mostra quem chama quem: o runtime dispara o risco
-e a decisão, a decisão consulta o analista e a execução, e todos chegam à Binance e ao banco.
+Each component of the agent is a service in Jaeger (``trade-agent.<component>``, namespace
+``trade-agent``). Jaeger links two services when a span of one is the parent of a span of
+the other, so the *System Architecture* graph shows who calls whom: the runtime triggers
+risk and decision, decision consults the analyst and execution, and all of them reach
+Binance and the database.
 
-Todos os provedores compartilham um único processador em lote (uma fila e uma conexão). Sem
-``TA_OTLP_ENDPOINT``, nada é instalado e os spans não custam nada (API no-op).
+Every provider shares a single batch processor (one queue and one connection). Without
+``TA_OTLP_ENDPOINT``, nothing is installed and spans cost nothing (no-op API).
 
-Segredos nunca vão para os spans: só caminhos de URL (sem *query*), nomes de métodos,
-contagens e identificadores. O conteúdo das mensagens do LLM e do Telegram também não.
+Secrets never go into spans: only URL paths (without the *query*), method names, counts and
+identifiers. Neither does the content of LLM and Telegram messages.
 """
 
 import functools
@@ -29,17 +30,17 @@ from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
 NAMESPACE = "trade-agent"
 COMPONENTS = (
-    "runtime",  # tarefas de fundo, partida e eventos do User Data Stream
-    "risk",  # leituras de risco e disjuntores
-    "decision",  # ciclo de decisão por perfil
-    "research",  # coleta de notícias e analista
-    "llm",  # chamadas à API Claude
-    "execution",  # posições e ordens
-    "exchange",  # REST da Binance
-    "reconcile",  # reconciliação com a exchange
+    "runtime",  # background tasks, startup and User Data Stream events
+    "risk",  # risk readings and circuit breakers
+    "decision",  # decision cycle per profile
+    "research",  # news collection and analyst
+    "llm",  # Claude API calls
+    "execution",  # positions and orders
+    "exchange",  # Binance REST
+    "reconcile",  # reconciliation with the exchange
     "db",  # PostgreSQL
-    "telegram",  # comandos e alertas
-    "telemetry",  # fotos de telemetria
+    "telegram",  # commands and alerts
+    "telemetry",  # telemetry snapshots
 )
 type AttributeValue = str | bool | int | float | Sequence[str]
 
@@ -49,7 +50,7 @@ def service_name(component: str) -> str:
 
 
 class Tracing:
-    """Provedores por componente; cada processador (um por destino) é compartilhado por todos."""
+    """Providers per component; each processor (one per destination) is shared by all of them."""
 
     def __init__(self, *processors: SpanProcessor, environment: str) -> None:
         self._processors = processors
@@ -60,7 +61,7 @@ class Tracing:
                     "service.name": service_name(component),
                     "service.namespace": NAMESPACE,
                     "service.version": version("trade-agent"),
-                    # o nome atual e o antigo (o SigNoz agrupa as métricas pelo antigo)
+                    # the current name and the old one (SigNoz groups the metrics by the old one)
                     "deployment.environment.name": environment,
                     "deployment.environment": environment,
                 }
@@ -74,7 +75,7 @@ class Tracing:
         return self._providers[component].get_tracer("trade_agent")
 
     def shutdown(self) -> None:
-        """Envia o que falta nas filas e encerra (uma vez: os processadores são compartilhados)."""
+        """Flushes what is left in the queues and shuts down (once: the processors are shared)."""
         for processor in self._processors:
             processor.shutdown()
 
@@ -83,19 +84,19 @@ _active: Tracing | None = None
 
 
 def install(tracing: Tracing | None) -> None:
-    global _active  # noqa: PLW0603 - um único rastreamento por processo
+    global _active  # noqa: PLW0603 - a single tracing setup per process
     _active = tracing
 
 
 def endpoints(value: str | None) -> list[str]:
-    """``"http://jaeger:4318, http://signoz-ingester:4318"`` → lista sem vazios nem ``/`` final."""
+    """``"http://jaeger:4318, http://signoz-ingester:4318"`` → list, no blanks or trailing ``/``."""
     return [e.strip().rstrip("/") for e in (value or "").split(",") if e.strip()]
 
 
 def configure_tracing(endpoint: str | None, *, environment: str) -> Tracing | None:
-    """Liga a exportação OTLP/HTTP para cada destino (ex.: ``http://jaeger:4318``).
+    """Turns on the OTLP/HTTP export to each destination (e.g. ``http://jaeger:4318``).
 
-    Cada destino tem a sua fila: um fora do ar não atrasa nem derruba o outro.
+    Each destination has its own queue: one being down neither delays nor breaks the other.
     """
     targets = endpoints(endpoint)
     if not targets:
@@ -129,7 +130,7 @@ def _value(value: object) -> AttributeValue | None:
 
 
 def annotate(**attributes: object) -> None:
-    """Acrescenta atributos ao span atual (``None`` é ignorado)."""
+    """Adds attributes to the current span (``None`` is ignored)."""
     current = trace.get_current_span()
     for key, value in attributes.items():
         converted = _value(value)
@@ -150,7 +151,7 @@ def span(
 
 
 def fail(current: Span, exc: BaseException) -> None:
-    """Marca o span como erro quando a exceção é tratada (e não propaga até ele)."""
+    """Marks the span as an error when the exception is handled (and does not propagate to it)."""
     current.record_exception(exc)
     current.set_status(Status(StatusCode.ERROR, type(exc).__name__))
 
@@ -158,7 +159,7 @@ def fail(current: Span, exc: BaseException) -> None:
 def traced[**P, R](
     component: str, name: str
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-    """Envolve uma corrotina num span; o corpo pode completar com :func:`annotate`."""
+    """Wraps a coroutine in a span; the body can complete it with :func:`annotate`."""
 
     def decorate(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @functools.wraps(fn)
@@ -174,7 +175,7 @@ def traced[**P, R](
 def add_trace_ids(
     _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
 ) -> MutableMapping[str, Any]:
-    """Processador do structlog: ``trace_id``/``span_id`` do span atual em cada log."""
+    """structlog processor: ``trace_id``/``span_id`` of the current span in every log."""
     context = trace.get_current_span().get_span_context()
     if context.is_valid:
         event_dict["trace_id"] = format(context.trace_id, "032x")

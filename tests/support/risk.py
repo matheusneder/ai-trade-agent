@@ -1,4 +1,4 @@
-"""Apoio aos testes de risco: snapshot calmo, tabela de gatilhos e posições encerradas."""
+"""Support for the risk tests: calm snapshot, trigger table and closed positions."""
 
 import itertools
 from dataclasses import replace
@@ -17,8 +17,8 @@ from trade_agent.risk.state import GLOBAL
 D = Decimal
 NOW = datetime(2026, 9, 26, 12, tzinfo=UTC)
 STOP_CONDITIONS_FILE = Path(__file__).parents[2] / "config" / "stop_conditions.yaml"
-# As condições do repositório, mais um limite por perfil para o "moderado" dos perfis de
-# teste (tests/fixtures/profiles.yaml): o repositório não traz limite por perfil.
+# The repository's conditions, plus a per-profile limit for "moderado" in the test profiles
+# (tests/fixtures/profiles.yaml): the repository has no per-profile limit.
 DAILY_LOSS_2PCT = Trigger(value=2, action=Action.PAUSE, cooldown=timedelta(hours=24))
 CONDITIONS = load_stop_conditions(STOP_CONDITIONS_FILE).model_copy(
     update={"per_profile": {"moderado": ProfileConditions(max_daily_loss_pct=DAILY_LOSS_2PCT)}}
@@ -43,7 +43,7 @@ def snapshot(**overrides: Any) -> RiskSnapshot:
     return replace(calm, **overrides)
 
 
-# Cada gatilho de config/stop_conditions.yaml: condição forçada → ação esperada.
+# Each trigger of config/stop_conditions.yaml: forced condition → expected action.
 TRIGGERS: list[tuple[str, str, dict[str, Any], Action]] = [
     ("max_daily_loss_pct", GLOBAL, {"equity": D(969), "day_start_equity": D(1000)}, Action.PAUSE),
     ("max_drawdown_pct", GLOBAL,

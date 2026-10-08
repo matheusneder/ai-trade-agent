@@ -1,7 +1,7 @@
-"""Conexão com o PostgreSQL e *lock* exclusivo de instância.
+"""PostgreSQL connection and the exclusive instance *lock*.
 
-Cada comando SQL vira um span do componente ``db`` (texto do comando com os marcadores
-``$1``, ``$2``...; os valores nunca vão para o span).
+Every SQL statement becomes a span of the ``db`` component (statement text with the
+``$1``, ``$2``... placeholders; the values never go into the span).
 """
 
 import re
@@ -21,14 +21,14 @@ from sqlalchemy.ext.asyncio import (
 
 from trade_agent import tracing
 
-AGENT_LOCK_KEY = 0x7A_61_67_65_6E_74  # "zagent": chave do pg_advisory_lock da instância
+AGENT_LOCK_KEY = 0x7A_61_67_65_6E_74  # "zagent": key of the instance's pg_advisory_lock
 MAX_QUERY_TEXT = 2000
 _TARGET = re.compile(r"\b(?:FROM|INTO|UPDATE|TRUNCATE|JOIN)\s+([a-z_][\w.]*)", re.IGNORECASE)
 _SPAN_ATTR = "_trade_agent_span"
 
 
 def statement_span_name(statement: str) -> tuple[str, str | None]:
-    """Nome do span (``SELECT positions``) e a tabela principal, se houver."""
+    """Span name (``SELECT positions``) and the main table, if any."""
     operation = statement.split(maxsplit=1)[0].upper() if statement.strip() else "SQL"
     target = _TARGET.search(statement)
     table = target.group(1) if target else None
@@ -61,7 +61,7 @@ def _end_span(
 
 
 def _fail_span(error: ExceptionContext) -> None:
-    # sem contexto de execução (ex.: falha ao conectar) não há span de comando aberto
+    # without an execution context (e.g. a failure to connect) there is no open statement span
     span = getattr(error.execution_context, _SPAN_ATTR, None)
     if span is not None:
         original = error.original_exception
@@ -74,18 +74,18 @@ def _fail_span(error: ExceptionContext) -> None:
 
 
 def trace_statements(engine: Engine) -> None:
-    """Liga spans de comando SQL ao motor (o span pai vem do contexto da tarefa)."""
+    """Attaches SQL statement spans to the engine (the parent span comes from the task context)."""
     event.listen(engine, "before_cursor_execute", _start_span)
     event.listen(engine, "after_cursor_execute", _end_span)
     event.listen(engine, "handle_error", _fail_span)
 
 
 class AlreadyRunningError(RuntimeError):
-    """Outra instância do agente já detém o *lock* exclusivo."""
+    """Another agent instance already holds the exclusive *lock*."""
 
 
 class Database:
-    """Motor assíncrono, fábrica de sessões e *lock* de instância única."""
+    """Asynchronous engine, session factory and single-instance *lock*."""
 
     def __init__(self, url: str, *, echo: bool = False) -> None:
         self.engine: AsyncEngine = create_async_engine(url, echo=echo, pool_pre_ping=True)
@@ -97,7 +97,7 @@ class Database:
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
-        """Sessão transacional: *commit* ao sair sem erro, *rollback* em exceção."""
+        """Transactional session: *commit* on a clean exit, *rollback* on an exception."""
         async with self.sessions() as session, session.begin():
             yield session
 
@@ -107,12 +107,12 @@ class Database:
 
     @asynccontextmanager
     async def exclusive_lock(self, key: int = AGENT_LOCK_KEY) -> AsyncIterator[None]:
-        """Garante uma única instância ativa (``pg_try_advisory_lock``).
+        """Ensures a single active instance (``pg_try_advisory_lock``).
 
-        O *lock* pertence à conexão: se o processo morrer, o PostgreSQL o libera sozinho.
-        A conexão fica sem transação (*autocommit*): aberta durante toda a execução do
-        agente, uma transação prenderia o horizonte do VACUUM, e as linhas mortas de todas
-        as tabelas ficariam sem limpeza.
+        The *lock* belongs to the connection: if the process dies, PostgreSQL releases it on
+        its own. The connection holds no transaction (*autocommit*): open for the agent's
+        whole run, a transaction would pin the VACUUM horizon, and the dead rows of every
+        table would never be cleaned up.
         """
         conn = await self.engine.connect()
         try:

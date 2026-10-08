@@ -1,4 +1,4 @@
-"""Rastreamento (OpenTelemetry): um serviço por componente, processador compartilhado."""
+"""Tracing (OpenTelemetry): one service per component, shared processor."""
 
 import json
 from collections.abc import Sequence
@@ -26,7 +26,7 @@ class Color(Enum):
 
 
 class FakeExporter(SpanExporter):
-    instances: list["FakeExporter"] = []  # noqa: RUF012 - registro do teste
+    instances: list["FakeExporter"] = []  # noqa: RUF012 - the test's record
 
     def __init__(self, *, endpoint: str, timeout: float) -> None:
         self.endpoint, self.timeout = endpoint, timeout
@@ -46,7 +46,7 @@ def test_without_configuration_spans_are_free() -> None:
     assert isinstance(tracing.tracer("risk"), NoOpTracer)
     with tracing.span("risk", "risk.snapshot") as current:
         assert not current.is_recording()
-        tracing.annotate(equity=Decimal(1))  # sem efeito, sem erro
+        tracing.annotate(equity=Decimal(1))  # no effect, no error
         assert tracing.add_trace_ids(None, "info", {}) == {}
     assert tracing.configure_tracing(None, environment="demo") is None
 
@@ -60,9 +60,9 @@ def test_configure_tracing_exports_every_component(monkeypatch: pytest.MonkeyPat
     assert traces is not None
     with tracing.span("runtime", "job check_risk"), tracing.span("risk", "risk.snapshot"):
         pass
-    traces.shutdown()  # uma vez: envia as filas e fecha os exportadores compartilhados
+    traces.shutdown()  # once: flushes the queues and closes the shared exporters
     tracing.install(None)
-    jaeger, signoz = FakeExporter.instances  # uma fila por destino, com todos os spans
+    jaeger, signoz = FakeExporter.instances  # one queue per destination, with every span
     assert [(e.endpoint, e.timeout, e.closed) for e in (jaeger, signoz)] == [
         ("http://jaeger:4318/v1/traces", 5, True),
         ("http://signoz-ingester:4318/v1/traces", 5, True),
@@ -74,7 +74,7 @@ def test_configure_tracing_exports_every_component(monkeypatch: pytest.MonkeyPat
     assert runtime.resource.attributes["service.name"] == "trade-agent.runtime"
     assert risk.resource.attributes["service.namespace"] == "trade-agent"
     assert risk.resource.attributes["deployment.environment.name"] == "demo"
-    assert risk.resource.attributes["deployment.environment"] == "demo"  # nome usado pelo SigNoz
+    assert risk.resource.attributes["deployment.environment"] == "demo"  # name used by SigNoz
     assert risk.parent is not None and risk.parent.span_id == runtime.context.span_id
 
 
@@ -176,7 +176,7 @@ def test_statement_span_name(statement: str, expected: tuple[str, str | None]) -
 
 def test_sql_listeners_ignore_statements_without_span() -> None:
     no_span = SimpleNamespace()
-    _end_span(None, None, "SELECT 1", None, no_span, False)  # nada a encerrar
+    _end_span(None, None, "SELECT 1", None, no_span, False)  # nothing to shut down
     _fail_span(SimpleNamespace(execution_context=None, original_exception=OSError()))  # type: ignore[arg-type]
 
 

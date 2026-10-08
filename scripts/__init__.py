@@ -1,1 +1,1 @@
-"""Utilitários operacionais (spike, geração dos dashboards do Grafana)."""
+"""Operational utilities (spike, generation of the Grafana dashboards)."""

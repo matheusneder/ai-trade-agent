@@ -1,9 +1,8 @@
-"""Marcação dos ativos citados em notícias (dicionário código → nomes).
+"""Tagging of the assets mentioned in news (code → names dictionary).
 
-Códigos são reconhecidos em maiúsculas, isolados, com ``$`` na frente (``$SOL``) ou entre
-parênteses (``Solana (SOL)``). Códigos de dois caracteres (ex.: ``OP``) só nas duas
-últimas formas, para evitar falsos positivos. Nomes são reconhecidos sem diferenciar
-maiúsculas.
+Codes are recognized in uppercase, standing alone, with a ``$`` in front (``$SOL``) or in
+parentheses (``Solana (SOL)``). Two-character codes (e.g. ``OP``) only in the last two
+forms, to avoid false positives. Names are recognized case-insensitively.
 """
 
 import re

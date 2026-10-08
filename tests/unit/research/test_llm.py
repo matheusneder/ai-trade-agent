@@ -122,14 +122,14 @@ async def test_structured_with_effort_and_failures() -> None:
         await claude.structured(**kwargs)
     with pytest.raises(LlmError, match="InternalServerError"):
         await claude.structured(**kwargs)
-    assert len(ledger._inner.usages) == 3  # type: ignore[attr-defined]  # respostas inválidas contam
+    assert len(ledger._inner.usages) == 3  # type: ignore[attr-defined]  # invalid responses count
 
 
 async def test_budget_blocks_calls_before_any_request() -> None:
     fake = FakeClaude()
     ledger = MemoryLedger()
     await ledger.record(_usage("5"))
-    await ledger.record(_usage("100", hours_ago=13))  # dia anterior (UTC)
+    await ledger.record(_usage("100", hours_ago=13))  # previous day (UTC)
     claude = fake.claude(ledger=ledger)
     with pytest.raises(BudgetExceededError, match="orçamento"):
         await claude.structured(
@@ -238,7 +238,7 @@ async def test_research_limits_and_failures() -> None:
     config = research_config(web=WebResearchConfig(max_fetches=0, max_continuations=1))
     fake = FakeClaude()
     fake.reply(_search_blocks(1), stop_reason="pause_turn")
-    fake.reply(_search_blocks(2), stop_reason="pause_turn")  # esgota as retomadas
+    fake.reply(_search_blocks(2), stop_reason="pause_turn")  # uses up the resumptions
     fake.reply([{"type": "text", "text": "x"}], stop_reason="refusal")
     claude = fake.claude(config=config)
     partial = await claude.research(

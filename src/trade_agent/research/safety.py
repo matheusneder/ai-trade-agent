@@ -1,11 +1,11 @@
-"""Regras de segurança do ``MarketView``, aplicadas por **código** (doc 03, §7.3).
+"""Safety rules of the ``MarketView``, enforced by **code** (doc 03, §7.3).
 
-* faixas numéricas truncadas (valores não finitos viram o valor mais conservador);
-* **autoridade assimétrica**: ativos fora do universo recebido são descartados, e o
-  multiplicador de exposição nunca passa de 1 (o LLM só reduz risco);
-* sentimento acima de ``bullish_threshold`` exige ``min_bullish_sources`` fontes de
-  domínios distintos; sem elas, é rebaixado ao limite. Vetos valem sem fonte;
-* textos e listas são limitados (auditoria enxuta, sem conteúdo arbitrário longo).
+* numeric ranges are truncated (non-finite values become the most conservative value);
+* **asymmetric authority**: assets outside the received universe are discarded, and the
+  exposure multiplier never exceeds 1 (the LLM only reduces risk);
+* sentiment above ``bullish_threshold`` requires ``min_bullish_sources`` sources from
+  distinct domains; without them, it is lowered to the limit. Vetoes hold without a source;
+* texts and lists are capped (lean audit, no long arbitrary content).
 """
 
 import math
@@ -22,7 +22,7 @@ from trade_agent.research.models import AssetDraft, AssetView, MarketView, Marke
 class SafetyResult:
     view: MarketView
     adjustments: tuple[str, ...]
-    """Ajustes aplicados, para auditoria (ex.: "SOL: sentimento rebaixado ...")."""
+    """Adjustments applied, for the audit (e.g. "SOL: sentimento rebaixado ...")."""
 
 
 def _clamp(value: float, low: float, high: float, fallback: float) -> float:
@@ -52,7 +52,7 @@ def distinct_hosts(urls: Iterable[str]) -> int:
 
 
 def _merge(first: AssetView, second: AssetView) -> AssetView:
-    """Duas leituras do mesmo ativo: combina pelo lado mais conservador."""
+    """Two readings of the same asset: combines them on the more conservative side."""
     return first.model_copy(
         update={
             "sentiment": min(first.sentiment, second.sentiment),
@@ -99,7 +99,7 @@ def apply_safety(
     as_of: datetime,
     config: SafetyConfig,
 ) -> SafetyResult:
-    """Converte a saída do LLM numa leitura saneada, registrando cada ajuste."""
+    """Converts the LLM output into a sanitized reading, recording each adjustment."""
     notes: list[str] = []
     allowed = {a.upper() for a in allowed_assets}
     views: dict[str, AssetView] = {}

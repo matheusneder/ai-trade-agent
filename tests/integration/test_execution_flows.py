@@ -1,4 +1,4 @@
-"""Fluxos de execução ponta a ponta: abrir → proteger → ajustar → fechar (Binance simulada)."""
+"""End-to-end execution flows: open → protect → adjust → close (simulated Binance)."""
 
 from decimal import Decimal
 
@@ -51,7 +51,7 @@ async def test_opoco_fok_arms_protection_with_received_quantity(
     sl = fake.order_by_client_id(IDS.stop_id)
     assert entry is not None and tp is not None and sl is not None
     assert entry.status == "FILLED"
-    # 0.01 comprado, 0,1% de comissão no ativo base → 0.00999 protegido (semântica OPO)
+    # 0.01 bought, 0.1% fee in the base asset → 0.00999 protected (OPO semantics)
     assert tp.orig_qty == sl.orig_qty == D("0.00999")
     assert tp.is_open and sl.is_open
     assert fake.balance("BTC") == (D("0"), D("0.00999"))
@@ -64,8 +64,8 @@ async def test_trailing_take_profit_follows_the_top_and_closes(
     for price in ("64000", "64900", "66000", "67500", "67000"):
         fake.set_price("BTCUSDT", D(price))
     tp = fake.order_by_client_id(IDS.take_profit_id)
-    assert tp is not None and tp.status == "NEW"  # recuo de 0,74% < 1%
-    fake.set_price("BTCUSDT", D("66800"))  # recuo de 1,04% a partir do topo 67500
+    assert tp is not None and tp.status == "NEW"  # pullback of 0.74% < 1%
+    fake.set_price("BTCUSDT", D("66800"))  # pullback of 1.04% from the 67500 top
     assert tp.status == "FILLED"
     sl = fake.order_by_client_id(IDS.stop_id)
     assert sl is not None and sl.status == "EXPIRED" and sl.expiry_reason == "OCO_TRIGGER"
@@ -87,12 +87,12 @@ async def test_trailing_stop_rises_with_price(gateway: ExecutionGateway, fake: F
     protection = Protection(LimitTakeProfit(D("70000")), TrailingStop(300))
     await gateway.submit_order_list("opoco", build_opoco(_entry(), protection, IDS, BTC))
     fake.set_price("BTCUSDT", D("66000"))
-    fake.set_price("BTCUSDT", D("64200"))  # -2,7% do topo: não dispara
+    fake.set_price("BTCUSDT", D("64200"))  # -2.7% from the top: does not trigger
     assert fake.order_by_client_id(IDS.stop_id).status == "NEW"  # type: ignore[union-attr]
-    fake.set_price("BTCUSDT", D("64000"))  # -3,03% do topo 66000
+    fake.set_price("BTCUSDT", D("64000"))  # -3.03% from the 66000 top
     stop = fake.order_by_client_id(IDS.stop_id)
     assert stop is not None and stop.status == "FILLED"
-    assert fake.trades[-1]["price"] == "64000"  # saída acima da entrada: lucro travado
+    assert fake.trades[-1]["price"] == "64000"  # exit above the entry: profit locked in
 
 
 async def test_fok_entry_not_fillable_expires_without_arming(
@@ -139,8 +139,8 @@ async def test_duplicate_open_list_is_rejected_and_reuse_after_done_is_accepted(
     await gateway.submit_order_list("opoco", params)
     with pytest.raises(BinanceRejectedError, match="Duplicate"):
         await gateway.submit_order_list("opoco", params)
-    fake.set_price("BTCUSDT", D("60000"))  # stop executa; lista termina
-    # A Binance aceita repetir o ID de uma lista encerrada: por isso nunca reenviamos às cegas.
+    fake.set_price("BTCUSDT", D("60000"))  # the stop fills; the list finishes
+    # Binance accepts repeating the ID of a finished list: that is why we never resend blindly.
     again = await gateway.submit_order_list("opoco", params)
     assert again.is_active
 
@@ -170,12 +170,12 @@ async def test_unknown_status_not_found_raises_outcome_unknown(
     gateway: ExecutionGateway, fake: FakeBinance
 ) -> None:
     fake.inject(Fault("POST", "/api/v3/orderList/opoco", "timeout_before"))
-    fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))  # 1ª consulta também falha
+    fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))  # the 1st lookup fails too
     with pytest.raises(OrderOutcomeUnknownError) as info:
         await gateway.submit_order_list("opoco", build_opoco(_entry(), PROTECTION, IDS, BTC))
     assert info.value.client_id == IDS.list_id
     assert len(fake.calls("GET", "/api/v3/orderList")) == 3
-    assert fake.lists == {}  # nada foi reenviado
+    assert fake.lists == {}  # nothing was resent
 
 
 async def test_connection_error_is_retried_safely(
@@ -248,7 +248,7 @@ async def test_replace_protection_when_already_closed_sends_nothing(
     gateway: ExecutionGateway, fake: FakeBinance
 ) -> None:
     await _open(gateway)
-    fake.set_price("BTCUSDT", D("60000"))  # stop já executou na Binance
+    fake.set_price("BTCUSDT", D("60000"))  # the stop already filled on Binance
     new_ids = order_ids("mod", "a1b2c3d4e5", seq=1)
     new_oco = build_oco(
         "BTCUSDT", D("0.00999"), PROTECTION, new_ids, BTC, reference_price=D("63000")

@@ -1,4 +1,4 @@
-"""Aplicação programática das migrações Alembic (partida do agente e testes)."""
+"""Programmatic application of the Alembic migrations (agent startup and tests)."""
 
 from pathlib import Path
 
@@ -19,12 +19,12 @@ def alembic_config(connection: Connection | None = None) -> Config:
 
 
 async def upgrade_to_head(engine: AsyncEngine) -> None:
-    """Aplica todas as migrações pendentes."""
+    """Applies every pending migration."""
     async with engine.begin() as connection:
         await connection.run_sync(lambda sync: command.upgrade(alembic_config(sync), "head"))
 
 
 async def downgrade_to_base(engine: AsyncEngine) -> None:
-    """Reverte todas as migrações (usado em testes)."""
+    """Reverts every migration (used in tests)."""
     async with engine.begin() as connection:
         await connection.run_sync(lambda sync: command.downgrade(alembic_config(sync), "base"))

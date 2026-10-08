@@ -1,8 +1,8 @@
-"""Regras (filtros) de negociação de um símbolo e arredondamento de preço e quantidade.
+"""Trading rules (filters) of a symbol and rounding of price and quantity.
 
-Implementa as regras de ``filters.md`` da Binance que afetam as ordens do agente:
+Implements the rules from Binance's ``filters.md`` that affect the agent's orders:
 ``PRICE_FILTER``, ``LOT_SIZE``, ``MARKET_LOT_SIZE``, ``NOTIONAL``/``MIN_NOTIONAL``,
-``PERCENT_PRICE_BY_SIDE``, ``TRAILING_DELTA`` e limites de quantidade de ordens.
+``PERCENT_PRICE_BY_SIDE``, ``TRAILING_DELTA`` and order count limits.
 """
 
 from collections.abc import Mapping
@@ -24,7 +24,7 @@ class Rounding(StrEnum):
 
 
 class OrderValidationError(ValueError):
-    """A ordem viola uma ou mais regras do símbolo."""
+    """The order violates one or more of the symbol's rules."""
 
     def __init__(self, violations: list[str]) -> None:
         super().__init__("; ".join(violations))
@@ -47,7 +47,7 @@ class PercentPriceBySide:
     ask_down: Decimal
 
 
-# Tipos cujo trailingDelta usa os limites "above" (FAQ de trailing stop da Binance).
+# Types whose trailingDelta uses the "above" limits (Binance's trailing stop FAQ).
 _ABOVE_TRAILING = frozenset(
     {
         (OrderType.STOP_LOSS, OrderSide.BUY),
@@ -63,7 +63,7 @@ def _dec(value: Any, default: Decimal = ZERO) -> Decimal:
 
 
 def _snap(value: Decimal, base: Decimal, step: Decimal, rounding: Rounding) -> Decimal:
-    """Ajusta ``value`` à grade ``base + k*step`` (k inteiro)."""
+    """Snaps ``value`` to the grid ``base + k*step`` (k an integer)."""
     units = ((value - base) / step).to_integral_value(rounding=rounding.value)
     return base + units * step
 
@@ -74,7 +74,7 @@ def _on_grid(value: Decimal, base: Decimal, step: Decimal) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class SymbolRules:
-    """Regras de um símbolo extraídas de ``exchangeInfo``."""
+    """Rules of a symbol extracted from ``exchangeInfo``."""
 
     symbol: str
     status: str
@@ -104,7 +104,7 @@ class SymbolRules:
     max_num_algo_orders: int | None = None
     max_num_order_lists: int | None = None
 
-    # ------------------------------------------------------------------ construção
+    # ------------------------------------------------------------------ construction
     @classmethod
     def from_exchange_info(cls, data: Mapping[str, Any]) -> "SymbolRules":
         filters: dict[str, Mapping[str, Any]] = {f["filterType"]: f for f in data["filters"]}
@@ -172,7 +172,7 @@ class SymbolRules:
             max_num_order_lists=_opt_int(filters, "MAX_NUM_ORDER_LISTS", "maxNumOrderLists"),
         )
 
-    # ------------------------------------------------------------------ consultas
+    # ------------------------------------------------------------------ queries
     @property
     def is_trading(self) -> bool:
         return self.status == "TRADING"
@@ -180,17 +180,17 @@ class SymbolRules:
     def supports(self, order_type: OrderType) -> bool:
         return order_type.value in self.order_types
 
-    # ------------------------------------------------------------------ arredondamento
+    # ------------------------------------------------------------------ rounding
     def round_price(self, price: Decimal, rounding: Rounding = Rounding.NEAREST) -> Decimal:
-        """Ajusta o preço ao ``tickSize`` (a partir de ``minPrice``)."""
+        """Snaps the price to the ``tickSize`` (starting from ``minPrice``)."""
         if self.tick_size <= 0:
             return price
         return _snap(price, self.min_price, self.tick_size, rounding)
 
     def round_qty(self, qty: Decimal, *, market: bool = False) -> Decimal:
-        """Ajusta a quantidade para baixo ao ``stepSize`` (nunca arredonda para cima).
+        """Rounds the quantity down to the ``stepSize`` (never rounds up).
 
-        Ordens a mercado também respeitam o ``MARKET_LOT_SIZE`` quando ele define um passo.
+        Market orders also follow ``MARKET_LOT_SIZE`` when it defines a step.
         """
         grids = [(self.min_qty, self.step_size)]
         if market:
@@ -203,7 +203,7 @@ class SymbolRules:
             qty = _snap(qty, base, step, Rounding.DOWN)
         return qty
 
-    # ------------------------------------------------------------------ validações
+    # ------------------------------------------------------------------ validations
     def price_violations(self, price: Decimal, label: str = "preço") -> list[str]:
         problems: list[str] = []
         if price <= 0:

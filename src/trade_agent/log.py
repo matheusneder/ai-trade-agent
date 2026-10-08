@@ -1,16 +1,15 @@
-"""Configuração de logs estruturados (structlog).
+"""Structured logging configuration (structlog).
 
-Níveis: ``INFO`` (padrão) traz o ciclo de vida e as decisões; ``DEBUG``
-(``TA_LOG_LEVEL=DEBUG``) acrescenta o detalhe de cada etapa: requisições à Binance (sem
-*query string*), sincronizações de posição, leituras de risco, sinais por ativo, chamadas
-ao LLM (tokens e custo, nunca o conteúdo), coleta de notícias, Telegram e duração das
-tarefas de fundo.
+Levels: ``INFO`` (default) carries the lifecycle and the decisions; ``DEBUG``
+(``TA_LOG_LEVEL=DEBUG``) adds the detail of each step: Binance requests (without the
+*query string*), position syncs, risk readings, per-asset signals, LLM calls (tokens and
+cost, never the content), news collection, Telegram and the duration of background tasks.
 
-Segredos nunca devem chegar aos logs; ``redact_secrets`` é a última barreira: mascara
-campos com nomes sensíveis e padrões conhecidos de token em qualquer texto.
+Secrets must never reach the logs; ``redact_secrets`` is the last barrier: it masks fields
+with sensitive names and known token patterns in any text.
 
-Dentro de um span (OpenTelemetry), cada log leva ``trace_id`` e ``span_id``: no Grafana, o
-log abre o trace no Jaeger e o trace lista os seus logs.
+Inside a span (OpenTelemetry), every log carries ``trace_id`` and ``span_id``: in Grafana,
+the log opens the trace in Jaeger and the trace lists its logs.
 """
 
 import logging
@@ -24,19 +23,19 @@ from trade_agent.config.settings import LogFormat, LogLevel
 from trade_agent.tracing import add_trace_ids
 
 REDACTED = "***"
-# nome exato do campo (ou sufixo após "_"): "bot_token" é mascarado, "input_tokens" não
+# exact field name (or suffix after "_"): "bot_token" is masked, "input_tokens" is not
 SENSITIVE_KEYS = re.compile(
     r"(^|_)(api_?key|secret|signature|token|password|passphrase|authorization|private_key)$",
     re.IGNORECASE,
 )
 SECRET_PATTERNS = (
-    re.compile(r"(bot)\d+:[A-Za-z0-9_-]{20,}"),  # token de bot do Telegram na URL da API
-    re.compile(r"sk-ant-[A-Za-z0-9_-]+"),  # chave da API Anthropic
-    re.compile(r"(signature=)[^&\s]+"),  # assinatura de requisição da Binance
+    re.compile(r"(bot)\d+:[A-Za-z0-9_-]{20,}"),  # Telegram bot token in the API URL
+    re.compile(r"sk-ant-[A-Za-z0-9_-]+"),  # Anthropic API key
+    re.compile(r"(signature=)[^&\s]+"),  # Binance request signature
 )
-# Bibliotecas que registram URLs completas (podem conter tokens): nunca abaixo de WARNING.
+# Libraries that log full URLs (which may contain tokens): never below WARNING.
 QUIET_LIBRARIES = ("httpx", "httpcore", "httpx2", "httpcore2", "websockets", "anthropic")
-# O exportador de traces avisa a cada nova tentativa com o Jaeger fora do ar: só erros finais.
+# The trace exporter warns on every retry while Jaeger is down: only final errors.
 TRACE_EXPORTER_LOGGER = "opentelemetry"
 
 
@@ -49,7 +48,7 @@ def _scrub(text: str) -> str:
 def redact_secrets(
     _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
 ) -> MutableMapping[str, Any]:
-    """Mascara campos sensíveis pelo nome e padrões de segredo em valores de texto."""
+    """Masks sensitive fields by name and secret patterns in text values."""
     for key, value in list(event_dict.items()):
         if SENSITIVE_KEYS.search(key):
             event_dict[key] = REDACTED
@@ -59,7 +58,7 @@ def redact_secrets(
 
 
 def configure_logging(level: LogLevel = "INFO", fmt: LogFormat = LogFormat.CONSOLE) -> None:
-    """Configura o structlog para saída em console (dev) ou JSON (produção)."""
+    """Configures structlog for console output (dev) or JSON (production)."""
     processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         add_trace_ids,

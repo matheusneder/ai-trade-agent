@@ -1,16 +1,16 @@
-"""Avaliação do analista contra casos rotulados (critério de saída da Fase 4).
+"""Evaluation of the analyst against labeled cases (Phase 4 exit criterion).
 
-Cada caso descreve uma situação (histórica ou sintética) com notícias, métricas e
-candidatos, e as expectativas: ativos que **devem** ser vetados, ativos que **não podem**
-ser vetados, regimes aceitos, faixa de exposição e sinal do sentimento.
+Each case describes a situation (historical or synthetic) with news, metrics and
+candidates, and the expectations: assets that **must** be vetoed, assets that **must not**
+be vetoed, accepted regimes, exposure range and sentiment sign.
 
-A avaliação roda só a etapa estruturada, **sem busca web**: em casos históricos, a busca
-traria o desfecho conhecido (viés retrospectivo). Mesmo assim, o modelo pode conhecer os
-eventos históricos pelo treinamento; por isso há também casos sintéticos, com ativos
-fictícios.
+The evaluation runs only the structured step, **without web search**: in historical
+cases, the search would bring back the known outcome (hindsight bias). Even so, the model
+may know the historical events from its training; that is why there are also synthetic
+cases, with fictional assets.
 
-Critério de saída: 100% das respostas válidas no schema, todos os casos críticos corretos
-e custo projetado por dia dentro do orçamento.
+Exit criterion: 100% of the answers valid against the schema, every critical case correct
+and the projected daily cost within the budget.
 """
 
 from collections.abc import Sequence
@@ -65,9 +65,9 @@ class EvalExpectation(_Strict):
     max_exposure: float | None = None
     min_exposure: float | None = None
     negative: list[str] = Field(default_factory=list)
-    """Sentimento ≤ 0 (ou veto)."""
+    """Sentiment ≤ 0 (or a veto)."""
     positive: list[str] = Field(default_factory=list)
-    """Sentimento > 0 e sem veto."""
+    """Sentiment > 0 and no veto."""
     max_sentiment: dict[str, float] = Field(default_factory=dict)
 
 
@@ -139,7 +139,7 @@ def case_inputs(
 
 
 def check(case: EvalCase, view: MarketView) -> list[str]:
-    """Expectativas não atendidas (lista vazia = caso aprovado)."""
+    """Unmet expectations (empty list = case passed)."""
     expect = case.expect
     failures: list[str] = []
 
@@ -197,7 +197,7 @@ class EvalReport:
     outcomes: tuple[CaseOutcome, ...]
     budget_usd: Decimal
     skipped: tuple[str, ...] = field(default_factory=tuple)
-    """Casos não executados (orçamento da avaliação esgotado)."""
+    """Cases not run (the evaluation budget ran out)."""
 
     @property
     def schema_rate(self) -> float:

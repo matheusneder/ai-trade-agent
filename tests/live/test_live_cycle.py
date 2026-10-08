@@ -1,8 +1,8 @@
-"""Ciclo completo contra o Spot Testnet/Demo Mode (critério de saída da Fase 1).
+"""Full cycle against the Spot Testnet/Demo Mode (Phase 1 exit criterion).
 
-Executar com ``uv run pytest -m live``. Requer chaves no ``.env`` e recusa produção.
-Cada execução usa ~15 USDT de saldo fictício e devolve a posição ao final, **inclusive
-quando falha no meio** (limpeza no ``finally``).
+Run with ``uv run pytest -m live``. Requires keys in the ``.env`` and refuses production.
+Each run uses ~15 USDT of fake balance and gives the position back at the end, **even
+when it fails halfway** (cleanup in ``finally``).
 """
 
 import asyncio
@@ -35,7 +35,7 @@ SYMBOL = "BTCUSDT"
 PROFILE = "live"
 ENV_FILE = Path(".env")
 CLEANUP_SEQ = 90
-"""``seq`` reservado para a venda de limpeza (nunca colide com as proteções do teste)."""
+"""``seq`` reserved for the cleanup sell (never collides with the test's protections)."""
 
 
 HAS_ENV_FILE = ENV_FILE.exists()
@@ -57,7 +57,7 @@ async def api() -> AsyncIterator[BinanceSpotApi]:
 
 
 async def _armed(api: BinanceSpotApi, client_order_id: str, timeout_s: float = 10) -> Order:
-    """Perna pendente do OPOCO após a entrada: sai de ``PENDING_NEW`` logo após a execução."""
+    """Pending OPOCO leg after the entry: it leaves ``PENDING_NEW`` right after the fill."""
     for _ in range(int(timeout_s / 0.25)):
         order = await api.get_order(SYMBOL, client_order_id=client_order_id)
         if order.status is not OrderStatus.PENDING_NEW:
@@ -69,7 +69,7 @@ async def _armed(api: BinanceSpotApi, client_order_id: str, timeout_s: float = 1
 async def _close_leftovers(
     api: BinanceSpotApi, gateway: ExecutionGateway, rules: SymbolRules, decision: str
 ) -> None:
-    """Encerra qualquer proteção desta decisão ainda aberta (cancela e vende a mercado)."""
+    """Closes any protection of this decision still open (cancels and sells at market)."""
     for order_list in await api.open_order_lists():
         if f"-{decision}-" not in order_list.list_client_order_id:
             continue
@@ -91,7 +91,7 @@ async def _open_adjust_close(
         TrailingTakeProfit(entry_price * D("1.03"), 100), FixedStop(entry_price * D("0.96"))
     )
 
-    # 1) abrir: OPOCO FOK arma o OCO na própria Binance
+    # 1) open: the FOK OPOCO arms the OCO on Binance itself
     opened = await gateway.submit_order_list("opoco", build_opoco(entry, protection, ids, rules))
     assert opened.is_active
     tp = await _armed(api, ids.take_profit_id)
@@ -101,7 +101,7 @@ async def _open_adjust_close(
     assert tp.trailing_delta == 100
     qty = tp.orig_qty
 
-    # 2) ajustar: novo OCO com stop mais próximo (cancelar + recriar)
+    # 2) adjust: new OCO with a closer stop (cancel + recreate)
     bid = (await api.book_ticker(SYMBOL)).bid_price
     new_ids = order_ids(PROFILE, decision, seq=1)
     tighter = Protection(TrailingTakeProfit(bid * D("1.04"), 150), FixedStop(bid * D("0.97")))
@@ -113,7 +113,7 @@ async def _open_adjust_close(
     )
     assert replaced.protection is not None and replaced.protection.is_active
 
-    # 3) fechar: cancelar a proteção e vender a mercado
+    # 3) close: cancel the protection and sell at market
     sell = build_market_sell(SYMBOL, qty, new_ids.exit_id, rules, reference_price=bid)
     closed = await gateway.close_position(SYMBOL, new_ids.list_id, sell)
     assert closed is not None and closed.status is OrderStatus.FILLED

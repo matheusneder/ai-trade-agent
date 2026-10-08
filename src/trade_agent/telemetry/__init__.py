@@ -1,1 +1,1 @@
-"""Telemetria (doc 03, §12): snapshots para os dashboards e heartbeat externo."""
+"""Telemetry (doc 03, §12): snapshots for the dashboards and an external heartbeat."""

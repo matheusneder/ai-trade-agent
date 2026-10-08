@@ -104,11 +104,11 @@ def test_select_news_filters_and_ranks() -> None:
     config = DigestConfig(lookback_hours=12, max_items=3, min_relevance=0.3)
     news = [
         _news(1, 1, relevance=0.9),
-        _news(2, 2, relevance=0.1),  # irrelevante
-        _news(3, 13, relevance=1.0),  # fora da janela
-        _news(4, 3),  # sem triagem: 0.5
+        _news(2, 2, relevance=0.1),  # irrelevant
+        _news(3, 13, relevance=1.0),  # outside the window
+        _news(4, 3),  # no triage: 0.5
         _news(5, 1, relevance=0.4),
-        _news(6, 0.5),  # sem triagem, mais recente
+        _news(6, 0.5),  # no triage, most recent
     ]
     assert [n.id for n in digest.select_news(news, config, now=NOW)] == [1, 6, 4]
 
@@ -187,6 +187,6 @@ def test_inputs() -> None:
         "<web_findings>\nachado ‹b›\nFontes:\nhttps://a.example\n</web_findings>" in with_findings
     )
     research = digest.research_input(as_of=NOW, candidates=candidates, news=news)
-    assert "[1]" in research and "[2]" not in research  # só as críticas
+    assert "[1]" in research and "[2]" not in research  # only the critical ones
     triage = digest.triage_input(news, ["SOL", "BTC", "SOL"])
     assert triage.startswith("<known_assets>BTC, SOL</known_assets>")

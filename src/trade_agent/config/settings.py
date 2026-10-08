@@ -1,4 +1,4 @@
-"""Configuração via variáveis de ambiente (prefixo ``TA_``) e arquivo ``.env``."""
+"""Configuration through environment variables (``TA_`` prefix) and the ``.env`` file."""
 
 from enum import StrEnum
 from pathlib import Path
@@ -11,7 +11,7 @@ from trade_agent.exchange.environments import BinanceEnvironment
 
 
 class KeyType(StrEnum):
-    """Tipo da chave de API da Binance."""
+    """Type of the Binance API key."""
 
     ED25519 = "ed25519"
     HMAC = "hmac"
@@ -26,9 +26,9 @@ type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
 class Settings(BaseSettings):
-    """Configuração de infraestrutura (credenciais, ambiente, logs).
+    """Infrastructure configuration (credentials, environment, logs).
 
-    Parâmetros de estratégia e risco ficam em arquivos YAML versionados, não aqui.
+    Strategy and risk parameters live in versioned YAML files, not here.
     """
 
     model_config = SettingsConfigDict(
@@ -50,27 +50,27 @@ class Settings(BaseSettings):
     trading_enabled: bool = False
 
     database_url: SecretStr | None = None
-    """URL SQLAlchemy do PostgreSQL, ex.: ``postgresql+asyncpg://user:senha@host/db``."""
+    """SQLAlchemy URL of PostgreSQL, e.g. ``postgresql+asyncpg://user:password@host/db``."""
 
     anthropic_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("TA_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
     )
-    """Chave da API Claude (analista de mercado, Fase 4)."""
+    """Claude API key (market analyst, Phase 4)."""
     research_config: Path = Path("config/research.yaml")
     strategy_config: Path = Path("config/profiles.yaml")
     stop_conditions: Path = Path("config/stop_conditions.yaml")
 
     telegram_bot_token: SecretStr | None = None
-    """Token do bot (@BotFather) para alertas e comandos do operador."""
+    """Bot token (@BotFather) for alerts and operator commands."""
     telegram_chat_id: int | None = None
-    """Único chat autorizado a receber alertas e enviar comandos."""
+    """The only chat allowed to receive alerts and send commands."""
     healthcheck_url: SecretStr | None = None
-    """URL de ping do heartbeat externo (ex.: Healthchecks.io); contém um segredo."""
+    """Ping URL of the external heartbeat (e.g. Healthchecks.io); it contains a secret."""
     otlp_endpoint: str | None = None
-    """Destinos OTLP/HTTP dos traces, separados por vírgula (Jaeger, SigNoz); vazio desliga."""
+    """Comma-separated OTLP/HTTP destinations for traces (Jaeger, SigNoz); empty turns it off."""
     otlp_metrics_endpoint: str | None = None
-    """Destino OTLP/HTTP das métricas do agente (ex.: ``http://signoz-ingester:4318``)."""
+    """OTLP/HTTP destination of the agent's metrics (e.g. ``http://signoz-ingester:4318``)."""
 
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
@@ -116,5 +116,5 @@ class Settings(BaseSettings):
 
 
 def load_settings(env_file: Path | str | None = ".env", **overrides: Any) -> Settings:
-    """Carrega as configurações do ambiente e, se existir, do arquivo ``env_file``."""
+    """Loads the settings from the environment and, if it exists, from the ``env_file``."""
     return Settings(_env_file=env_file, **overrides)

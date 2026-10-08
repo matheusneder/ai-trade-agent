@@ -1,4 +1,4 @@
-"""Condições de parada (``config/stop_conditions.yaml``), validadas por schema."""
+"""Stop conditions (``config/stop_conditions.yaml``), validated by schema."""
 
 import re
 from datetime import datetime, time, timedelta
@@ -15,11 +15,11 @@ _WINDOW = re.compile(r"^(\d{2}):(\d{2})-(\d{2}):(\d{2})$")
 
 class Action(StrEnum):
     PAUSE = "pause"
-    """Sem novas entradas; proteções e saídas por regra continuam. Volta após o cooldown."""
+    """No new entries; protections and rule-based exits go on. Returns after the cooldown."""
     HALT = "halt"
-    """Sem entradas nem saídas por regra; proteções mantidas. Volta só manualmente."""
+    """Neither entries nor rule-based exits; protections kept. Returns only manually."""
     FLATTEN = "flatten"
-    """Cancela as proteções, vende tudo e termina em ``HALT``."""
+    """Cancels the protections, sells everything and ends in ``HALT``."""
 
 
 def parse_duration(value: Any) -> Any:
@@ -50,7 +50,7 @@ class Trigger(_Strict):
     value: float | None = None
     action: Action
     cooldown: timedelta | None = None
-    """Só para ``pause``: retorno automático após o prazo (sem prazo, só manual)."""
+    """Only for ``pause``: automatic return after the deadline (no deadline: manual only)."""
 
     _cooldown = field_validator("cooldown", mode="before")(parse_duration)
 
@@ -60,14 +60,14 @@ class GlobalConditions(_Strict):
     max_drawdown_pct: Trigger | None = None
     max_consecutive_losses: Trigger | None = None
     btc_move_1h_pct: Trigger | None = None
-    """Negativo: queda (move ≤ valor); positivo: alta (move ≥ valor)."""
+    """Negative: drop (move ≤ value); positive: rise (move ≥ value)."""
     quote_depeg_pct: Trigger | None = None
     fear_greed_below: Trigger | None = None
     api_error_rate_5m: Trigger | None = None
     reconcile_mismatch: Trigger | None = None
     profit_target_pct: Trigger | None = None
     trading_window_utc: list[str] | None = None
-    """Janelas ``HH:MM-HH:MM`` (UTC) em que novas entradas são permitidas."""
+    """``HH:MM-HH:MM`` (UTC) windows in which new entries are allowed."""
 
     @field_validator("trading_window_utc")
     @classmethod
@@ -84,10 +84,10 @@ class ProfileConditions(_Strict):
 
 class PreTradeConfig(_Strict):
     min_reward_risk: float = Field(default=1.5, gt=0)
-    """Alvo (ativação do take-profit) ÷ stop, já descontadas as taxas de ida e volta."""
+    """Target (take-profit activation) ÷ stop, after the round-trip fees."""
     round_trip_fee_pct: float = Field(default=0.2, ge=0)
     risk_tolerance_pct: float = Field(default=5, ge=0)
-    """Folga sobre o risco por trade (arredondamentos de preço e quantidade)."""
+    """Slack over the per-trade risk (price and quantity rounding)."""
 
 
 class StopConditions(_Strict):
@@ -97,7 +97,7 @@ class StopConditions(_Strict):
 
 
 def in_trading_window(windows: list[str] | None, now: datetime) -> bool:
-    """Sem janelas configuradas, sempre permitido. Janelas podem cruzar a meia-noite."""
+    """With no windows configured, always allowed. Windows may cross midnight."""
     if not windows:
         return True
     current = now.time().replace(second=0, microsecond=0)

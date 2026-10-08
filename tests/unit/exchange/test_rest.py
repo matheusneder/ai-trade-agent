@@ -128,10 +128,10 @@ async def test_signed_request_requires_credentials() -> None:
 
 
 async def test_sync_time_uses_the_fastest_of_three_samples(router: respx.MockRouter) -> None:
-    """O horário do servidor é comparado com o meio de cada ida e volta. Uma ida e volta longa
-    (a primeira, abrindo a conexão) desloca a estimativa: vale a mais rápida das três."""
-    ticks = iter([0, 900, 1_000, 1_100, 2_000, 2_300])  # idas e voltas de 900, 100 e 300 ms
-    server = iter([815, 1_100, 2_250])  # offsets pelo meio de cada uma: 365, 50 e 100 ms
+    """The server time is compared with the midpoint of each round trip. A long round trip
+    (the first one, opening the connection) shifts the estimate: the fastest of the three wins."""
+    ticks = iter([0, 900, 1_000, 1_100, 2_000, 2_300])  # round trips of 900, 100 and 300 ms
+    server = iter([815, 1_100, 2_250])  # offsets from each midpoint: 365, 50 and 100 ms
     route = router.get("/api/v3/time").mock(
         side_effect=lambda _: httpx.Response(200, json={"serverTime": next(server)})
     )
@@ -152,7 +152,7 @@ async def test_now_ms_applies_offset(router: respx.MockRouter) -> None:
 
 
 async def test_sync_time_warns_only_when_the_clock_jumps(router: respx.MockRouter) -> None:
-    # +4 s; +0,5 s de deriva; +15,5 s (relógio corrigido): as três amostras de cada medição
+    # +4 s; +0.5 s of drift; +15.5 s (clock corrected): the three samples of each measurement
     server = iter([v for v in (5_000, 5_500, 21_000) for _ in range(CLOCK_SAMPLES)])
     router.get("/api/v3/time").mock(
         side_effect=lambda _: httpx.Response(200, json={"serverTime": next(server)})
@@ -160,7 +160,7 @@ async def test_sync_time_warns_only_when_the_clock_jumps(router: respx.MockRoute
     async with BinanceRestClient(BASE, clock=lambda: 1_000) as c:
         with capture_logs() as logs:
             for _ in range(3):
-                await c.sync_time()  # a primeira medição não tem com o que comparar
+                await c.sync_time()  # the first measurement has nothing to compare with
     jumps = [e for e in logs if e["event"] == "rest.clock_jumped"]
     assert [(e["offset_ms"], e["jump_ms"], e["log_level"]) for e in jumps] == [
         (20_000, 15_500, "warning")
@@ -170,7 +170,7 @@ async def test_sync_time_warns_only_when_the_clock_jumps(router: respx.MockRoute
 async def test_timestamp_rejection_resyncs_and_retries_once(
     router: respx.MockRouter, client: BinanceRestClient
 ) -> None:
-    """``-1021``: a Binance recusou antes de executar; repetir é seguro, até para uma ordem."""
+    """``-1021``: Binance refused before executing; retrying is safe, even for an order."""
     router.get("/api/v3/time").respond(200, json={"serverTime": 1499827319559 + 15_000})
     ahead = "Timestamp for this request was 1000ms ahead of the server's time."
     route = router.post("/api/v3/order").mock(
@@ -183,7 +183,7 @@ async def test_timestamp_rejection_resyncs_and_retries_once(
         params = {"symbol": "BTCUSDT"}
         assert await client.signed("POST", "/api/v3/order", params, trading=True) == {"orderId": 7}
     first, second = (dict(parse_qsl(c.request.url.query.decode())) for c in route.calls)
-    assert int(second["timestamp"]) - int(first["timestamp"]) == 15_000  # assinada de novo
+    assert int(second["timestamp"]) - int(first["timestamp"]) == 15_000  # signed again
     assert client.time_offset_ms == 15_000
     rejected = next(e for e in logs if e["event"] == "rest.timestamp_rejected")
     assert (rejected["path"], rejected["log_level"]) == ("/api/v3/order", "warning")
@@ -201,7 +201,7 @@ async def test_timestamp_rejection_after_resync_is_raised(
     )
     with pytest.raises(BinanceTimestampError):
         await client.signed("GET", "/api/v3/account")
-    assert (route.call_count, clock.call_count) == (2, CLOCK_SAMPLES)  # uma só nova tentativa
+    assert (route.call_count, clock.call_count) == (2, CLOCK_SAMPLES)  # a single retry
 
 
 def test_system_clock_is_milliseconds() -> None:

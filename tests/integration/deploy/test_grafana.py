@@ -1,8 +1,8 @@
-"""Grafana como código: dashboards em dia com o gerador e consultas válidas no schema real.
+"""Grafana as code: dashboards in sync with the generator and queries valid on the real schema.
 
-A verificação num Grafana 12.2 de verdade (provisionamento, 34 consultas pela API e
-avaliação das regras) foi feita manualmente; aqui ficam as garantias contra regressões.
-O dashboard de logs (Loki) é testado em ``test_logs.py``.
+The check on a real Grafana 12.2 (provisioning, 34 queries through the API and evaluation
+of the rules) was done manually; the guarantees against regressions live here.
+The logs dashboard (Loki) is tested in ``test_logs.py``.
 """
 
 import json
@@ -23,7 +23,7 @@ TIME_FILTER = re.compile(r"\$__timeFilter\((\w+)\)")
 
 
 def _grafana_sql(sql: str) -> str:
-    """Expande as macros do Grafana usadas nos painéis (janela de 7 dias)."""
+    """Expands the Grafana macros used in the panels (7-day window)."""
     return TIME_FILTER.sub(r"\1 BETWEEN now() - interval '7 days' AND now()", sql)
 
 
@@ -33,7 +33,7 @@ def _dashboard_queries() -> list[tuple[str, str]]:
         for board in build().values()
         for panel in board["panels"]
         for target in panel["targets"]
-        if target["datasource"] == DATASOURCE  # as consultas LogQL rodam em test_logs.py
+        if target["datasource"] == DATASOURCE  # the LogQL queries run in test_logs.py
     ]
 
 
@@ -73,7 +73,7 @@ async def test_alert_rule_queries_run_on_the_schema(db: Database) -> None:
             assert {reduce["datasourceUid"], threshold["datasourceUid"]} == {"__expr__"}
             assert rule["condition"] == threshold["refId"] == "C"
             result = await conn.execute(text(query["model"]["rawSql"]))
-            assert len(result.all()) <= 1  # sem linhas = NoData (tratado por noDataState)
+            assert len(result.all()) <= 1  # no rows = NoData (handled by noDataState)
 
 
 def test_datasource_and_telegram_placeholder_match_compose() -> None:
@@ -84,27 +84,27 @@ def test_datasource_and_telegram_placeholder_match_compose() -> None:
     assert datasource["user"] == "grafana_ro"
     contact = yaml.safe_load((PROVISIONING / "alerting" / "telegram.yaml").read_text("utf-8"))
     settings = contact["contactPoints"][0]["receivers"][0]["settings"]
-    assert settings["chatid"] == "__TELEGRAM_CHAT_ID__"  # renderizado na partida (texto)
+    assert settings["chatid"] == "__TELEGRAM_CHAT_ID__"  # rendered at startup (text)
     compose = yaml.safe_load((DEPLOY / "stack.yml").read_text(encoding="utf-8"))
     grafana = compose["services"]["grafana"]
     assert "s/__TELEGRAM_CHAT_ID__/$${TELEGRAM_CHAT_ID}/" in grafana["command"][0]
     provisioning = grafana["environment"]["GF_PATHS_PROVISIONING"]
-    assert provisioning == "/tmp/provisioning"  # noqa: S108 - caminho dentro do contêiner
+    assert provisioning == "/tmp/provisioning"  # noqa: S108 - path inside the container
     init = (DEPLOY / "postgres" / "init" / "10-grafana-readonly.sh").read_text(encoding="utf-8")
     assert "ALTER DEFAULT PRIVILEGES" in init and "grafana_ro" in init
     assert json.loads(render(build()["overview.json"]))["refresh"] == "1m"
 
 
 def test_compose_always_reads_the_root_env_file() -> None:
-    """Sem o include, ``docker compose -f deploy/docker-compose.yml`` (sem ``--env-file``)
-    procurava o .env em deploy/ e subia o Grafana com a senha padrão do grafana_ro."""
+    """Without the include, ``docker compose -f deploy/docker-compose.yml`` (no ``--env-file``)
+    looked for the .env in deploy/ and started Grafana with grafana_ro's default password."""
     entry = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text(encoding="utf-8"))
     assert entry == {
         "name": "trade-agent",
         "include": [{"path": "stack.yml", "env_file": "../.env"}],
     }
     stack = (DEPLOY / "stack.yml").read_text(encoding="utf-8")
-    assert not re.search(r"^name:", stack, re.M)  # o nome do projeto fica no arquivo de entrada
+    assert not re.search(r"^name:", stack, re.M)  # the project name lives in the entry file
     example = (DEPLOY.parent / ".env.example").read_text(encoding="utf-8")
     for variable in ("GRAFANA_DB_PASSWORD", "GRAFANA_ADMIN_PASSWORD", "TA_TELEGRAM_BOT_TOKEN"):
         assert f"${{{variable}:-" in stack and f"\n{variable}=" in example

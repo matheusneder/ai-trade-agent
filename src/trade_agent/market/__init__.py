@@ -1,1 +1,1 @@
-"""Dados de mercado: candles e universo de negociação."""
+"""Market data: candles and the trading universe."""

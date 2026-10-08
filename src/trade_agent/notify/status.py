@@ -1,4 +1,4 @@
-"""Textos das consultas do operador (``/status``, ``/positions``, ``/pnl``, ``/report``,
+"""Texts of the operator queries (``/status``, ``/positions``, ``/pnl``, ``/report``,
 ``/config``)."""
 
 import hashlib

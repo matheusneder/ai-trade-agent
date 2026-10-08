@@ -35,7 +35,7 @@ REPOSITORY_FILE = Path(__file__).parents[3] / "config" / "stop_conditions.yaml"
 PROFILES = load_strategy_config(Path(__file__).parents[2] / "fixtures" / "profiles.yaml")
 
 
-# ============================================================================ condições
+# ============================================================================ conditions
 def test_repository_stop_conditions_are_valid() -> None:
     conditions = load_stop_conditions(REPOSITORY_FILE)
     g = conditions.global_
@@ -46,7 +46,7 @@ def test_repository_stop_conditions_are_valid() -> None:
     assert g.reconcile_mismatch is not None and g.reconcile_mismatch.value is None
     assert g.profit_target_pct is None and g.trading_window_utc is None
     profiles = load_strategy_config(REPOSITORY_FILE.parent / "profiles.yaml").profiles
-    assert set(conditions.per_profile) <= set(profiles)  # nenhum limite de perfil removido
+    assert set(conditions.per_profile) <= set(profiles)  # no profile limit removed
 
 
 def test_empty_file_and_durations(tmp_path: Path) -> None:
@@ -73,7 +73,7 @@ def test_trading_windows() -> None:
     assert not in_trading_window(["22:00-02:00"], NOW)
 
 
-# ============================================================================ estados
+# ============================================================================ states
 def test_scope_state_serialization_and_cooldown() -> None:
     paused = ScopeState(OpState.PAUSED, "x", NOW, NOW + timedelta(hours=1))
     assert ScopeState.from_json(paused.to_json()) == paused
@@ -90,21 +90,21 @@ def test_escalation_rules() -> None:
     long = ScopeState(OpState.PAUSED, until=NOW + timedelta(hours=4))
     forever = ScopeState(OpState.PAUSED)
     assert escalate(running, short) == short
-    assert escalate(short, long) == long  # estende
+    assert escalate(short, long) == long  # extends
     assert escalate(long, short) is None
     assert escalate(short, forever) == forever
     assert escalate(forever, long) is None
-    assert escalate(halted, long) is None  # nunca alivia
+    assert escalate(halted, long) is None  # never relaxes
     assert escalate(halted, ScopeState(OpState.FLATTENING)) is not None
     already_flat = ScopeState(OpState.HALTED, flattened=True)
-    assert escalate(already_flat, ScopeState(OpState.FLATTENING)) is None  # não repete
+    assert escalate(already_flat, ScopeState(OpState.FLATTENING)) is None  # does not repeat
     assert ScopeState.from_json(already_flat.to_json()) == already_flat
     assert combined(running, short, halted) is OpState.HALTED
     assert OpState.RUNNING.allows_entries and not OpState.PAUSED.allows_entries
     assert OpState.PAUSED.allows_rule_exits and not OpState.HALTED.allows_rule_exits
 
 
-# ============================================================================ gatilhos
+# ============================================================================ triggers
 def _snapshot(**overrides: Any) -> RiskSnapshot:
     return snapshot(**overrides)
 
@@ -126,7 +126,7 @@ def test_each_trigger_fires_its_action(
 
 def test_thresholds_are_inclusive_and_directional() -> None:
     assert evaluate(CONDITIONS, _snapshot(btc_change_1h=-0.059)) == []
-    assert evaluate(CONDITIONS, _snapshot(btc_change_1h=0.08)) == []  # alta não pausa
+    assert evaluate(CONDITIONS, _snapshot(btc_change_1h=0.08)) == []  # a rise does not pause
     assert evaluate(CONDITIONS, _snapshot(fear_greed=10)) == []
     assert evaluate(CONDITIONS, _snapshot(consecutive_losses=3)) == []
     rally = CONDITIONS.model_copy(
@@ -166,19 +166,19 @@ def test_a_trigger_acts_again_only_one_limit_worse() -> None:
         return found
 
     assert hit(consecutive_losses=8).worsened(4) and not hit(consecutive_losses=7).worsened(4)
-    daily = hit(equity=D(940), day_start_equity=D(1000))  # perda de 6% no dia (limite 3%)
+    daily = hit(equity=D(940), day_start_equity=D(1000))  # 6% loss in the day (limit 3%)
     assert daily.worsened(3.0) and not daily.worsened(3.1)
-    btc = hit(btc_change_1h=-0.125)  # queda: piora para baixo
+    btc = hit(btc_change_1h=-0.125)  # drop: worsens downward
     assert btc.worsened(-6.0) and not btc.worsened(-6.6)
-    assert not hit(fear_greed=0).worsened(9)  # abaixo de 10: só ao sair e voltar
-    mismatch = hit(reconcile_anomalies=2)  # sem limite: qualquer piora
+    assert not hit(fear_greed=0).worsened(9)  # below 10: only after leaving and coming back
+    mismatch = hit(reconcile_anomalies=2)  # no limit: any worsening
     assert mismatch.worsened(1) and not mismatch.worsened(2)
-    assert Hit(GLOBAL, "x", Action.PAUSE, 0.5, 0, below=True).worsened(1)  # limite zero
+    assert Hit(GLOBAL, "x", Action.PAUSE, 0.5, 0, below=True).worsened(1)  # zero limit
     fired = Fired(4.0, "max_consecutive_losses: 4 (limite 4)", NOW)
     assert Fired.from_json(fired.to_json()) == fired
 
 
-# ============================================================================ pré-ordem
+# ============================================================================ pre-trade
 def _idea(**policy: Any) -> TradeIdea:
     values: dict[str, Any] = {
         "take_profit_mode": TakeProfitMode.TRAILING,

@@ -1,1 +1,1 @@
-"""Integração com a Binance Spot (REST, WebSocket API e regras de símbolo)."""
+"""Binance Spot integration (REST, WebSocket API and symbol rules)."""

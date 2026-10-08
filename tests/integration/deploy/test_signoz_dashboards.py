@@ -1,8 +1,9 @@
-"""SigNoz como código: dashboards em dia com o gerador e dentro das regras do esquema v2.
+"""SigNoz as code: dashboards in sync with the generator and within the v2 schema rules.
 
-A validação num SigNoz 0.144 de verdade (criação pela API, que aplica o validador do esquema,
-e cada consulta pelo ``/api/v5/query_range``) é feita com ``--apply`` e ``--check``. Aqui ficam
-as garantias contra regressões, espelhando as regras de ``pkg/types/dashboardtypes`` do SigNoz.
+Validation on a real SigNoz 0.144 (creation through the API, which applies the schema
+validator, and every query through ``/api/v5/query_range``) is done with ``--apply`` and
+``--check``. The guarantees against regressions live here, mirroring the rules of SigNoz's
+``pkg/types/dashboardtypes``.
 """
 
 import json
@@ -38,7 +39,7 @@ COMPOSE: dict[str, Any] = yaml.safe_load(
 BOARDS = build()
 SIGNOZ = "http://signoz.test"
 RESERVED_TAG_KEYS = {"name", "description", "created_at", "updated_at", "created_by", "locked"}
-REQUEST_BY_PANEL = {  # o tipo de requisição que cada tipo de painel desenha
+REQUEST_BY_PANEL = {  # the request type each panel type draws
     "signoz/TimeSeriesPanel": "time_series",
     "signoz/BarChartPanel": "time_series",
     "signoz/NumberPanel": "scalar",
@@ -59,7 +60,7 @@ def _builder_specs(panel: dict[str, Any]) -> list[dict[str, Any]]:
     return [plugin["spec"]]
 
 
-# ============================================================================ gerador
+# ============================================================================ generator
 def test_versioned_dashboards_match_the_generator() -> None:
     assert sorted(p.name for p in OUTPUT.glob("*.json")) == sorted(BOARDS)
     for name, board in BOARDS.items():
@@ -67,7 +68,7 @@ def test_versioned_dashboards_match_the_generator() -> None:
 
 
 def test_dashboards_have_stable_valid_names() -> None:
-    """O ``name`` identifica o dashboard ao aplicar de novo: único, rótulo DNS (RFC 1123)."""
+    """The ``name`` identifies the dashboard when applying again: unique, a DNS label (RFC 1123)."""
     names = [board["name"] for board in BOARDS.values()]
     assert len(set(names)) == len(names) == 4
     for board in BOARDS.values():
@@ -90,7 +91,7 @@ def test_layouts_fit_the_grid_and_place_every_panel_once() -> None:
                 assert min(item["x"], item["y"]) >= 0
                 assert item["x"] + item["width"] <= GRID_COLUMNS
                 placed.append(item["content"]["$ref"].removeprefix("#/spec/panels/"))
-            for i, a in enumerate(items):  # dentro de uma seção, nada se sobrepõe
+            for i, a in enumerate(items):  # within a section, nothing overlaps
                 for b in items[i + 1 :]:
                     assert not (
                         a["x"] < b["x"] + b["width"]
@@ -109,16 +110,16 @@ def test_each_panel_has_one_query_of_the_kind_it_draws() -> None:
         assert query["kind"] == REQUEST_BY_PANEL[kind], name
         specs = _builder_specs(panel)
         assert len({spec["name"] for spec in specs}) == len(specs), name
-        if kind == "signoz/ListPanel":  # lista: registros brutos de um builder só
+        if kind == "signoz/ListPanel":  # list: raw records from a single builder
             assert query["spec"]["plugin"]["kind"] == "signoz/BuilderQuery", name
             assert "aggregations" not in specs[0] and specs[0]["limit"] > 0, name
-        if kind == "signoz/NumberPanel":  # métrica num valor único precisa de reduceTo
+        if kind == "signoz/NumberPanel":  # a metric as a single value needs reduceTo
             for spec in specs:
                 if spec["signal"] == "metrics":
                     assert all("reduceTo" in a for a in spec["aggregations"]), name
         for spec in specs:
             for aggregation in spec.get("aggregations", []):
-                if "expression" in aggregation:  # uma única função por agregação
+                if "expression" in aggregation:  # a single function per aggregation
                     assert re.fullmatch(r"\w+\(\w*\)", aggregation["expression"]), name
 
 
@@ -140,7 +141,7 @@ def test_filters_name_real_components_and_compose_services() -> None:
     components = set(re.findall(r"service\.name = 'trade-agent\.(\w+)'", text))
     assert {"runtime", "exchange", "db", "llm"} <= components <= set(tracing.COMPONENTS)
     services = set(re.findall(r"service\.name = '([\w-]+)'", text))
-    assert services <= set(COMPOSE["services"])  # nos logs, o nome é o serviço do compose
+    assert services <= set(COMPOSE["services"])  # in the logs, the name is the compose service
 
 
 # ============================================================================ API
@@ -173,7 +174,7 @@ def test_apply_creates_missing_and_updates_existing(signoz: respx.MockRouter) ->
     assert (created.call_count, updated.call_count) == (len(BOARDS) - 1, 1)
     body = json.loads(updated.calls.last.request.content)
     assert body["name"] == "trade-agent-saude"
-    assert "generateName" not in body  # a atualização recusa campos desconhecidos
+    assert "generateName" not in body  # the update refuses unknown fields
     posted = {json.loads(c.request.content)["name"] for c in created.calls}
     assert "trade-agent-saude" not in posted
 
@@ -190,7 +191,7 @@ def _query_result(request: httpx.Request) -> httpx.Response:
     results: dict[str, list[dict[str, Any]]] = {
         "time_series": [{"aggregations": [{"series": [{"values": []}]}]}],
         "scalar": [{"data": [[1.0]]}],
-        "raw": [{"rows": []}],  # listas sem registros
+        "raw": [{"rows": []}],  # lists without records
     }
     if "trade_agent.clock.offset" in request.content.decode():
         return httpx.Response(500, json={"error": "falhou"})
@@ -221,7 +222,7 @@ def test_main_writes_files_and_applies(
     monkeypatch.setattr(signoz_dashboards, "OUTPUT", tmp_path)
     monkeypatch.setenv("TA_SIGNOZ_API_KEY", "chave-de-teste")
     monkeypatch.setenv("TA_SIGNOZ_URL", SIGNOZ)
-    monkeypatch.chdir(tmp_path)  # sem o .env do repositório
+    monkeypatch.chdir(tmp_path)  # without the repository's .env
     signoz.get("/api/v2/dashboards").respond(200, json=_envelope({"dashboards": []}))
     created = signoz.post("/api/v2/dashboards").respond(200, json=_envelope({"id": "novo"}))
     signoz_dashboards.main(["--apply"])

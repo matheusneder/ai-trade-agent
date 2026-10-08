@@ -1,4 +1,4 @@
-"""CLI de operação manual contra a Binance simulada."""
+"""Manual operation CLI against the simulated Binance."""
 
 import io
 import json
@@ -63,7 +63,7 @@ def test_open_with_fok_then_list_and_close(env_file: Path) -> None:
     assert list_id.startswith("ta1-man-")
     tp = fake.order_by_client_id(list_id.replace("-L", "-TP"))
     assert tp is not None and tp.is_open
-    assert tp.stop_price == D("65019.78")  # ask 63000 +0,2% de slippage → 63126 × 1,03
+    assert tp.stop_price == D("65019.78")  # ask 63000 +0.2% slippage → 63126 × 1.03
     code, data, _ = _run(fake, env_file, "lists")
     assert [ol["listClientOrderId"] for ol in data] == [list_id]
     code, data, _ = _run(
@@ -139,7 +139,7 @@ def test_prod_requires_confirmation(tmp_path: Path) -> None:
     code, _, err = _run(FakeBinance(), env_file, "open", "BTCUSDT", "--quote", "100", *PROTECTION)
     assert code == 2
     assert "--confirm-prod" in err
-    code, data, _ = _run(FakeBinance(), env_file, "account")  # consultas não exigem confirmação
+    code, data, _ = _run(FakeBinance(), env_file, "account")  # queries need no confirmation
     assert code == 0 and "USDT" in data
     code, data, err = _run(
         FakeBinance(), env_file, "open", "BTCUSDT", "--quote", "100", *PROTECTION, "--confirm-prod"
@@ -176,6 +176,6 @@ async def test_default_api_factory_syncs_time(
     monkeypatch.setattr(httpx, "AsyncClient", patched)
     settings = Settings(_env_file=None)
     async with cli._default_api(settings) as api:
-        assert abs(api.rest.now_ms() - fake.clock()) < 5_000  # relógio alinhado ao servidor
+        assert abs(api.rest.now_ms() - fake.clock()) < 5_000  # clock aligned with the server
         assert (await api.book_ticker("BTCUSDT")).ask_price == D("63000")
     assert fake.calls("GET", "/api/v3/time")

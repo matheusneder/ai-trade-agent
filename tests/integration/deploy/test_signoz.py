@@ -1,8 +1,8 @@
-"""SigNoz em paralelo ao Jaeger e ao Loki: manifestos do Foundry, ajustes locais e coletores.
+"""SigNoz alongside Jaeger and Loki: Foundry manifests, local adjustments and collectors.
 
-O SigNoz completo (ClickHouse, keeper, metastore, migrações) é pesado demais para a bateria;
-aqui ficam as garantias de configuração, verificadas no modelo que o próprio Docker Compose
-monta e com os binários oficiais. A ingestão real foi conferida na pilha em execução.
+The full SigNoz (ClickHouse, keeper, metastore, migrations) is too heavy for the suite; the
+configuration guarantees live here, checked on the model Docker Compose itself builds and
+with the official binaries. Real ingestion was verified on the running stack.
 """
 
 import shutil
@@ -30,7 +30,7 @@ def _docker() -> None:
 
 @pytest.fixture(scope="module")
 def merged() -> dict[str, Any]:
-    """O modelo final do compose (include + override), como o Docker Compose o monta."""
+    """The final compose model (include + override), as Docker Compose builds it."""
     return compose_config()
 
 
@@ -41,12 +41,12 @@ def test_every_published_port_is_local_and_unique(merged: dict[str, Any]) -> Non
         for port in service.get("ports", [])
     ]
     assert {name for name, _ in published} >= {"signoz-signoz-0", "ingester", "grafana"}
-    assert "jaeger" not in {name for name, _ in published}  # a interface sai pelo jaeger-ui
+    assert "jaeger" not in {name for name, _ in published}  # the UI goes out through jaeger-ui
     assert all(port["host_ip"] == "127.0.0.1" for _, port in published)
     counts = Counter(port["published"] for _, port in published)
     assert all(n == 1 for n in counts.values()), counts
     ports = {name: port["published"] for name, port in published if port["target"] in (4318, 8080)}
-    # o OTLP do SigNoz fica na 14318 no host, com a 4318 (porta padrão do OTLP) livre
+    # SigNoz's OTLP is on 14318 on the host, leaving 4318 (the OTLP default port) free
     assert (ports["ingester"], ports["signoz-signoz-0"]) == ("14318", "8080")
 
 
@@ -63,11 +63,11 @@ def test_signoz_services_rotate_logs_and_pin_versions(merged: dict[str, Any]) ->
     assert signoz["ingester"]["image"] == casting["ingester"]["spec"]["image"]
     assert signoz["signoz-telemetrystore-migrator"]["image"] == casting["ingester"]["spec"]["image"]
     for spec in (casting["signoz"]["spec"], casting["ingester"]["spec"]):
-        assert spec["image"].endswith(f":{spec['version']}")  # versão e imagem coerentes
+        assert spec["image"].endswith(f":{spec['version']}")  # version and image consistent
 
 
 def test_signoz_waits_for_its_metastore(merged: dict[str, Any]) -> None:
-    """O SigNoz encerra na partida se o PostgreSQL de metadados ainda não aceita conexões."""
+    """SigNoz exits at startup if the metadata PostgreSQL does not accept connections yet."""
     signoz = merged["services"]["signoz-signoz-0"]
     metastore = urlsplit(signoz["environment"]["SIGNOZ_SQLSTORE_POSTGRES_DSN"]).hostname
     assert metastore is not None and "healthcheck" in merged["services"][metastore]
@@ -90,7 +90,7 @@ def test_agent_and_collectors_reach_the_signoz_ingester(merged: dict[str, Any]) 
     assert collector["exporters"]["otlp_http"]["endpoint"] == target
     assert collector["receivers"]["docker_stats"]["endpoint"] == "tcp://docker-proxy:2375"
     assert COMPOSE["services"]["container-metrics"]["networks"] == ["docker-api", "signoz-network"]
-    # o SigNoz calcula o custo do LLM com os atributos que o agente grava nos spans
+    # SigNoz computes the LLM cost with the attributes the agent writes in the spans
     pricing = config["processors"]["signozllmpricing"]["attrs"]
     assert (
         pricing["model"] == "gen_ai.request.model" and pricing["in"] == "gen_ai.usage.input_tokens"
@@ -98,10 +98,10 @@ def test_agent_and_collectors_reach_the_signoz_ingester(merged: dict[str, Any]) 
 
 
 def test_pours_are_in_sync_with_the_casting(tmp_path: Path) -> None:
-    """Os manifestos versionados saem do casting.yaml (como os dashboards saem do gerador)."""
+    """The versioned manifests come from casting.yaml (as dashboards come from the generator)."""
     _docker()
     shutil.copy(SIGNOZ / "casting.yaml", tmp_path / "casting.yaml")
-    subprocess.run(  # noqa: S603 - comando fixo
+    subprocess.run(  # noqa: S603 - fixed command
         ["docker", "run", "--rm", "-v", f"{tmp_path}:/work", "-w", "/work", FOUNDRY,  # noqa: S607
          "forge", "--no-ledger", "--no-updater"],
         capture_output=True, check=True,
@@ -119,7 +119,7 @@ def test_pours_are_in_sync_with_the_casting(tmp_path: Path) -> None:
 
 def test_container_metrics_config_is_valid() -> None:
     _docker()
-    done = subprocess.run(  # noqa: S603 - comando fixo
+    done = subprocess.run(  # noqa: S603 - fixed command
         ["docker", "run", "--rm", "-v", f"{CONTAINER_METRICS}:/etc/otelcol/config.yaml:ro",  # noqa: S607
          image("container-metrics"), "validate", "--config=/etc/otelcol/config.yaml"],
         capture_output=True, check=False,
