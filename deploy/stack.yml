@@ -85,7 +85,12 @@ services:
       TELEGRAM_BOT_TOKEN: ${TA_TELEGRAM_BOT_TOKEN:-nao-configurado}
       TELEGRAM_CHAT_ID: ${TA_TELEGRAM_CHAT_ID:-0}
     ports:
-      - "127.0.0.1:3000:3000"
+      # ── DEVELOPMENT ONLY: OFF BY DEFAULT ── Grafana listens on this machine only. To open it
+      # to the local network (e.g. a phone on the same Wi-Fi), put DEV_GRAFANA_UI_HOST=0.0.0.0
+      # (or this machine's LAN IP) in the root .env and run `docker compose ... up -d`
+      # (runbook, §1). The access still asks for the login, but over plain HTTP. On a VPS,
+      # leave it unset.
+      - "${DEV_GRAFANA_UI_HOST:-127.0.0.1}:3000:3000"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning-src:ro
       - ./grafana/dashboards:/etc/grafana/dashboards:ro

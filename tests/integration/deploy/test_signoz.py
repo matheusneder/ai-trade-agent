@@ -21,6 +21,7 @@ SIGNOZ = DEPLOY / "signoz"
 POURS = SIGNOZ / "pours" / "deployment"
 FOUNDRY = "signoz/foundryctl:v0.3.0"
 CONTAINER_METRICS = DEPLOY / "otelcol" / "container-metrics.yaml"
+EVERY_INTERFACE = "0.0.0.0"  # noqa: S104 - what the DEV_*_UI_HOST variables open, on purpose
 
 
 def _docker() -> None:
@@ -48,6 +49,29 @@ def test_every_published_port_is_local_and_unique(merged: dict[str, Any]) -> Non
     ports = {name: port["published"] for name, port in published if port["target"] in (4318, 8080)}
     # SigNoz's OTLP is on 14318 on the host, leaving 4318 (the OTLP default port) free
     assert (ports["ingester"], ports["signoz-signoz-0"]) == ("14318", "8080")
+
+
+@pytest.mark.parametrize(
+    ("variable", "opened"),
+    [
+        ("DEV_GRAFANA_UI_HOST", ("grafana", "3000")),
+        ("DEV_SIGNOZ_UI_HOST", ("signoz-signoz-0", "8080")),
+    ],
+)
+def test_only_the_requested_ui_opens_to_the_local_network(
+    variable: str, opened: tuple[str, str]
+) -> None:
+    """Each DEV_*_UI_HOST (development) opens its UI alone; OTLP, PostgreSQL and the rest stay
+    local."""
+    merged = compose_config(**{variable: EVERY_INTERFACE})
+    hosts = {
+        (name, port["published"]): port["host_ip"]
+        for name, service in merged["services"].items()
+        for port in service.get("ports", [])
+    }
+    assert hosts.pop(opened) == EVERY_INTERFACE
+    assert {("ingester", "14318"), ("postgres", "5432")} <= hosts.keys()
+    assert set(hosts.values()) == {"127.0.0.1"}
 
 
 def test_signoz_services_rotate_logs_and_pin_versions(merged: dict[str, Any]) -> None:
