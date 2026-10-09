@@ -28,6 +28,8 @@ After starting or recreating the stack, check the ports from the host. `000` is 
 for p in 3000 8080 14318; do curl -s -o /dev/null -m 5 -w "$p: %{http_code}\n" http://127.0.0.1:$p/; done
 ```
 
+**Grafana and SigNoz from another device on the local network, only in development** (e.g. a phone on the same Wi-Fi): put `DEV_GRAFANA_UI_HOST=0.0.0.0` and/or `DEV_SIGNOZ_UI_HOST=0.0.0.0` (or the machine's LAN IP) in the `.env`, run `docker compose -f deploy/docker-compose.yml up -d` and open `http://<machine's LAN IP>:3000` (Grafana) or `:8080` (SigNoz); on Windows, `ipconfig` shows the IP. Only these UIs open: SigNoz's OTLP (14318), PostgreSQL and the other ports stay on `127.0.0.1`. The login is still required (in Grafana, admin / `GRAFANA_ADMIN_PASSWORD`, so never leave the default `admin`), but over plain HTTP: use it only on a trusted network. On Windows, the Rancher Desktop installation already lets `host-switch.exe` through the firewall (inbound, every profile), so with a variable on its UI answers on any network the machine joins. To close them, delete the lines and run the same command. Changing these variables also restarts the agent, which receives the whole `.env`: do it outside a decision cycle. On a VPS, leave them unset.
+
 **Environment:** the **Spot Testnet** is for validating orders (spike and `pytest -m live`), not for the decision cycle. It is reset periodically and has only ~20 days of history (the signals need 201 candles and the universe, 30 days), besides artificial volumes. The universe ends up empty and the log shows `decision.empty_universe`. For *paper trading*, use **Demo Mode** (`TA_BINANCE_ENV=demo`, with keys created at demo.binance.com), which uses real market data.
 
 The periodic tasks (risk, telemetry, news and heartbeat) run right at startup and then at every interval. The first decision cycle happens at the next 4h candle close (00, 04, 08, 12, 16 and 20 UTC).
@@ -106,7 +108,7 @@ SigNoz runs alongside Jaeger and Loki, for comparison (`http://127.0.0.1:8080`).
 
 SigNoz's internal logs (ClickHouse, keeper, migrations) go neither to Loki nor to SigNoz: see them with `docker compose ... logs <service>`. The agent sends traces to both destinations with separate queues: one being down does not affect the other.
 
-**From another device on the local network, only in development** (e.g. a phone on the same Wi-Fi): put `DEV_SIGNOZ_UI_HOST=0.0.0.0` (or the machine's LAN IP) in the `.env`, run `docker compose -f deploy/docker-compose.yml up -d` and open `http://<machine's LAN IP>:8080` (on Windows, `ipconfig` shows it). Only the UI opens: OTLP (14318) and the other ports stay on `127.0.0.1`. The SigNoz login is still required, but over plain HTTP: use it only on a trusted network. On Windows, the Rancher Desktop installation already lets `host-switch.exe` through the firewall (inbound, every profile), so with the variable on the UI answers on any network the machine joins. To close it, delete the line and run the same command. Changing the variable also restarts the agent, which receives the whole `.env`: do it outside a decision cycle. On a VPS, leave it unset.
+**From another device on the local network** (a phone on the same Wi-Fi, only in development): `DEV_SIGNOZ_UI_HOST`, see §1.
 
 **Dashboards** (under *Dashboards*, with the `projeto: trade-agent` tag):
 
