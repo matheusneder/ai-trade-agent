@@ -16,7 +16,7 @@ services:
     environment:
     - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN=tcp://signoz-telemetrystore-clickhouse-0-0:9000
     - SIGNOZ_OTEL_COLLECTOR_TIMEOUT=10m
-    image: signoz/signoz-otel-collector:v0.144.12
+    image: signoz/signoz-otel-collector:v0.144.13
     networks:
       signoz-network:
         aliases:
@@ -162,7 +162,7 @@ services:
     environment:
     - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN=tcp://signoz-telemetrystore-clickhouse-0-0:9000
     - SIGNOZ_OTEL_COLLECTOR_TIMEOUT=10m
-    image: signoz/signoz-otel-collector:v0.144.12
+    image: signoz/signoz-otel-collector:v0.144.13
     networks:
     - signoz-network
     restart: on-failure

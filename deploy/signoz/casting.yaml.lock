@@ -169,8 +169,8 @@ spec:
       enabled: true
       env:
         SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
-      image: signoz/signoz-otel-collector:v0.144.12
-      version: v0.144.12
+      image: signoz/signoz-otel-collector:v0.144.13
+      version: v0.144.13
     status:
       addresses:
         otlp:

@@ -104,7 +104,13 @@ async def test_sql_statements_are_children_of_the_task(
 # ============================================================================ LLM
 async def test_llm_span_has_usage_but_no_content(spans: Recorded) -> None:
     fake = FakeClaude()
-    fake.reply_json(TriageDraft(items=[]), usage={"input_tokens": 100, "output_tokens": 10})
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 10,
+        "cache_read_input_tokens": 300,
+        "cache_creation_input_tokens": 50,
+    }
+    fake.reply_json(TriageDraft(items=[]), usage=usage)
     with tracing.span("research", "analyst.triage"):
         await fake.claude().structured(
             purpose="triage",
@@ -118,10 +124,11 @@ async def test_llm_span_has_usage_but_no_content(spans: Recorded) -> None:
     assert component(chat) == "llm" and chat.kind is SpanKind.CLIENT
     attributes = chat.attributes or {}
     assert attributes["gen_ai.provider.name"] == "anthropic"
-    assert (attributes["gen_ai.usage.input_tokens"], attributes["gen_ai.usage.output_tokens"]) == (
-        100,
-        10,
-    )
+    # GenAI convention: the input includes the cache, which Anthropic reports apart
+    assert attributes["gen_ai.usage.input_tokens"] == 450
+    assert attributes["gen_ai.usage.output_tokens"] == 10
+    assert attributes["gen_ai.usage.cache_read.input_tokens"] == 300
+    assert attributes["gen_ai.usage.cache_creation.input_tokens"] == 50
     assert tuple(attributes["gen_ai.response.finish_reasons"]) == ("end_turn",)
     assert Decimal(str(attributes["trade_agent.cost_usd"])) > 0
     assert attributes["trade_agent.purpose"] == "triage"
