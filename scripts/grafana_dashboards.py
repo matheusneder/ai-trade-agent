@@ -155,6 +155,8 @@ def build() -> dict[str, dict[str, Any]]:
         stat("Posições ativas", f"SELECT active_positions AS posicoes, exposure::float AS exposicao FROM telemetry_snapshots WHERE {LATEST}"),
         panel("Patrimônio e pico", "SELECT at AS time, equity::float AS patrimonio, peak_equity::float AS pico FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="currencyUSD"),
         panel("Drawdown (%)", "SELECT at AS time, drawdown_pct AS drawdown FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="percent"),
+        # the result since the start (realized + open) of the whole agent and of each profile
+        panel("Ganhos e perdas por escopo (USDT)", "SELECT at AS time, 'global' AS metric, (realized_pnl + unrealized_pnl)::float AS value FROM telemetry_snapshots WHERE $__timeFilter(at) UNION ALL SELECT at AS time, key AS metric, (value->>'pnl')::float AS value FROM telemetry_snapshots, jsonb_each(profiles) WHERE $__timeFilter(at) AND value->>'pnl' IS NOT NULL ORDER BY 1, 2", unit="currencyUSD", w=24),
         table("Estado operacional", f"SELECT key AS escopo, value AS estado FROM telemetry_snapshots, jsonb_each_text(states) WHERE {LATEST} ORDER BY 1", w=8, h=8),
         table("Mudanças de estado (risco)", "SELECT created_at AS time, payload->>'scope' AS escopo, payload->>'state' AS estado, payload->>'reason' AS motivo, payload->>'source' AS origem FROM events WHERE kind = 'risk.state_changed' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50", w=16, h=8),
         table("Última execução por tarefa", "SELECT kind AS tarefa, max(created_at) AS ultima FROM events WHERE kind IN ('agent.started', 'decision.cycle', 'risk.state_changed') GROUP BY kind ORDER BY 2 DESC", h=6),

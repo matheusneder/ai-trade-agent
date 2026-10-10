@@ -59,6 +59,10 @@ class TelemetryRecorder:
                     clock_offset_ms=self._rest.time_offset_ms,
                     used_weight_1m=self._rest.usage.used_weight_1m,
                     states=await self._states(),
+                    scope_pnl={
+                        GLOBAL: snapshot.realized_pnl + snapshot.unrealized_pnl,
+                        **snapshot.profile_pnl,
+                    },
                 )
             )
         if self._recorded_at is not None and snapshot.now - self._recorded_at < self._interval:
@@ -77,6 +81,7 @@ class TelemetryRecorder:
             name: {
                 "daily_pnl": str(s.profile_daily_pnl.get(name, 0)),
                 "losing_streak": s.profile_consecutive_losses.get(name, 0),
+                "pnl": str(s.profile_pnl.get(name, 0)),
             }
             for name in s.profile_capital
         }

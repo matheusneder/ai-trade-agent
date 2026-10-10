@@ -26,6 +26,7 @@ READING = metrics.Reading(
     clock_offset_ms=-120,
     used_weight_1m=42,
     states={"global": "running", "conservador": "paused", "moderado": "desconhecido"},
+    scope_pnl={"global": D(-50), "conservador": D(-55), "moderado": D(5)},
 )
 
 
@@ -40,7 +41,9 @@ def test_without_configuration_nothing_is_recorded() -> None:
 
 def test_gauges_follow_the_latest_reading(measured: Measured) -> None:
     assert metrics.enabled()
-    assert "trade_agent.equity" not in measured.points()  # no reading: nothing to measure
+    points = measured.points()
+    assert "trade_agent.equity" not in points  # no reading: nothing to measure
+    assert "trade_agent.pnl.total" not in points
     metrics.observe(READING)
     assert measured.value("trade_agent.equity") == 950
     assert measured.value("trade_agent.equity.day_start") == 1000
@@ -56,6 +59,9 @@ def test_gauges_follow_the_latest_reading(measured: Measured) -> None:
     assert measured.value("trade_agent.risk.state", scope="global") == 0
     assert measured.value("trade_agent.risk.state", scope="conservador") == 1
     assert measured.value("trade_agent.risk.state", scope="moderado") == -1
+    assert measured.value("trade_agent.pnl.total", scope="global") == -50
+    assert measured.value("trade_agent.pnl.total", scope="conservador") == -55
+    assert measured.value("trade_agent.pnl.total", scope="moderado") == 5
     resource = measured.resource()
     assert (resource["service.name"], resource["deployment.environment"]) == ("trade-agent", "test")
 
@@ -72,6 +78,7 @@ def test_gauges_skip_unknown_values_and_zero_peak(measured: Measured) -> None:
     assert "trade_agent.binance.weight_used_1m" not in points  # weight still unknown
     assert measured.value("trade_agent.drawdown") == 0
     assert "trade_agent.risk.state" not in points
+    assert "trade_agent.pnl.total" not in points  # no scope in the reading
 
 
 def test_counters(measured: Measured) -> None:

@@ -213,6 +213,12 @@ async def test_monitor_snapshot(
     assert first.consecutive_losses == 3
     assert first.profile_consecutive_losses == {"conservador": 2, "moderado": 1, "agressivo": 0}
     assert first.profile_daily_pnl == {"conservador": D(-4), "moderado": D(-2), "agressivo": 0}
+    # since the start: realized (5 − 3 − 1) + the open position, which belongs to conservador
+    assert first.profile_pnl == {
+        "conservador": D(1) + unrealized,
+        "moderado": D(-2),
+        "agressivo": 0,
+    }
     assert first.btc_change_1h == pytest.approx(-0.05)
     assert first.quote_deviation == pytest.approx(abs(1 / 1.03 - 1))  # median 1.03
     assert (first.fear_greed, first.api_error_rate, first.reconcile_anomalies) == (22, 0.2, 2)

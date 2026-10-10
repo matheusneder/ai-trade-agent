@@ -103,7 +103,7 @@ SigNoz runs alongside Jaeger and Loki, for comparison (`http://127.0.0.1:8080`).
 |--------|------|------------------|
 | Traces | the agent, with the same spans as Jaeger | *Services*: latency, throughput and errors per component and operation, computed from the spans; *Service Map*; LLM cost per model (from the tokens in the spans) |
 | Logs | Alloy, with an OTLP copy of everything that goes to Loki | search by service, level and any field of the agent's JSON (`event`, `profile`, `symbol`...); each log with a `trace_id` opens the trace |
-| Agent metrics | the agent, every minute | `trade_agent.equity`, `.drawdown`, `.pnl.*`, `.exposure`, `.positions.active`, `.binance.error_rate`, `.binance.weight_used_1m`, `.clock.offset`, `.risk.state` (0 running, 1 paused, 2 halted, 3 flattening); counters `.llm.cost`, `.llm.tokens`, `.decision.cycles`, `.decision.entries`, `.decision.exits`, `.risk.state_changes` |
+| Agent metrics | the agent, every minute | `trade_agent.equity`, `.drawdown`, `.pnl.*` (`.pnl.total` per scope: `global` and each profile, realized + open), `.exposure`, `.positions.active`, `.binance.error_rate`, `.binance.weight_used_1m`, `.clock.offset`, `.risk.state` (0 running, 1 paused, 2 halted, 3 flattening); counters `.llm.cost`, `.llm.tokens`, `.decision.cycles`, `.decision.entries`, `.decision.exits`, `.risk.state_changes` |
 | Container metrics | `container-metrics` (OpenTelemetry Collector, `docker_stats` through the read-only proxy) | CPU, memory, network and disk of each project container |
 
 SigNoz's internal logs (ClickHouse, keeper, migrations) go neither to Loki nor to SigNoz: see them with `docker compose ... logs <service>`. The agent sends traces to both destinations with separate queues: one being down does not affect the other.
@@ -114,7 +114,7 @@ SigNoz's internal logs (ClickHouse, keeper, migrations) go neither to Loki nor t
 
 | Dashboard | What for |
 |-----------|----------|
-| Trade Agent · Operação (operation) | equity, the day's result, drawdown, exposure, positions and the worst risk state right now; equity history (with the day open and the peak) and result; risk state per scope; cycles, entries and exits per profile; the latest decision cycles |
+| Trade Agent · Operação (operation) | equity, the day's result, drawdown, exposure, positions and the worst risk state right now; equity history (with the day open and the peak) and result; gains and losses per scope (realized + open, since the start); risk state per scope; cycles, entries and exits per profile; the latest decision cycles |
 | Trade Agent · Saúde técnica (technical health) | Binance failures and weight, clock offset, errors in the logs and failed tasks; p95 latency per Binance endpoint, per task and per database operation; error responses by status; spans per component; warnings and errors per service and the agent's latest ones |
 | Trade Agent · LLM | cost, tokens, calls and latency in the period; cost per model and purpose, tokens per direction, p50/p95 latency and the latest calls |
 | Trade Agent · Contêineres (containers) | CPU, memory, network and disk per compose service; memory relative to the limit; log lines per service |

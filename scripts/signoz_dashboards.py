@@ -366,6 +366,21 @@ def _operation() -> Json:
                     ],
                     [
                         cell(
+                            "pnl-scope",
+                            series(
+                                "Ganhos e perdas por escopo (USDT)",
+                                metric("trade_agent.pnl.total", by=[scope], legend="{{scope}}"),
+                                description=(
+                                    "Resultado acumulado de cada escopo desde o início: realizado "
+                                    "(posições encerradas) + aberto (a preço de venda). global é "
+                                    "o agente todo."
+                                ),
+                            ),
+                            12,
+                        ),
+                    ],
+                    [
+                        cell(
                             "drawdown",
                             series("Drawdown", metric("trade_agent.drawdown"), unit="percent"),
                             4,

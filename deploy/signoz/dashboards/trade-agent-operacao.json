@@ -630,6 +630,70 @@
           "links": []
         }
       },
+      "pnl-scope": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ganhos e perdas por escopo (USDT)",
+            "description": "Resultado acumulado de cada escopo desde o início: realizado (posições encerradas) + aberto (a preço de venda). global é o agente todo."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "scope",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{scope}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.pnl.total",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
       "drawdown": {
         "kind": "Panel",
         "spec": {
@@ -1282,6 +1346,15 @@
             {
               "x": 0,
               "y": 6,
+              "width": 12,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/pnl-scope"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
               "width": 4,
               "height": 6,
               "content": {
@@ -1290,7 +1363,7 @@
             },
             {
               "x": 4,
-              "y": 6,
+              "y": 12,
               "width": 4,
               "height": 6,
               "content": {
@@ -1299,7 +1372,7 @@
             },
             {
               "x": 8,
-              "y": 6,
+              "y": 12,
               "width": 4,
               "height": 6,
               "content": {

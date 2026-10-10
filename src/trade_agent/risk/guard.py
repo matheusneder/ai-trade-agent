@@ -57,6 +57,9 @@ class RiskSnapshot:
     profile_consecutive_losses: Mapping[str, int] = field(default_factory=dict)
     profile_daily_pnl: Mapping[str, Decimal] = field(default_factory=dict)
     """Realized PnL for the day (UTC) per profile, in the quote asset."""
+    profile_pnl: Mapping[str, Decimal] = field(default_factory=dict)
+    """Result per profile since the start: realized (closed positions) + open, in the quote
+    asset."""
     profile_capital: Mapping[str, Decimal] = field(default_factory=dict)
     btc_change_1h: float | None = None
     quote_deviation: float | None = None

@@ -1,7 +1,8 @@
 """Agent metrics with OpenTelemetry, exported over OTLP/HTTP (to SigNoz).
 
 On every risk check (1 min), the latest reading feeds the gauges (equity, drawdown, PnL,
-exposure, positions, API errors, used weight, clock and the state of each scope).
+exposure, positions, API errors, used weight, clock, and the result and the state of each
+scope).
 Counters record what happens between readings: LLM cost and tokens, decision cycles,
 entries, exits and risk state changes.
 
@@ -43,6 +44,8 @@ class Reading:
     clock_offset_ms: int
     used_weight_1m: int | None = None
     states: Mapping[str, str] = field(default_factory=dict)
+    scope_pnl: Mapping[str, Decimal] = field(default_factory=dict)
+    """Result since the start (realized + open) per scope: ``global`` and each profile."""
 
     @property
     def drawdown_pct(self) -> float:
@@ -84,6 +87,12 @@ class AgentMetrics:
             meter.create_observable_gauge(
                 name, callbacks=[self._gauge(name)], unit=unit, description=description
             )
+        meter.create_observable_gauge(
+            "trade_agent.pnl.total",
+            callbacks=[self._scope_pnl],
+            unit="USD",
+            description="resultado acumulado por escopo (realizado + aberto)",
+        )
         meter.create_observable_gauge(
             "trade_agent.risk.state",
             callbacks=[self._states],
@@ -142,6 +151,15 @@ class AgentMetrics:
         return [
             Observation(STATE_CODES.get(state, -1), {"scope": scope})
             for scope, state in reading.states.items()
+        ]
+
+    def _scope_pnl(self, _options: CallbackOptions) -> Iterable[Observation]:
+        reading = self._latest
+        if reading is None:
+            return []
+        return [
+            Observation(float(value), {"scope": scope})
+            for scope, value in reading.scope_pnl.items()
         ]
 
     def observe(self, reading: Reading) -> None:
