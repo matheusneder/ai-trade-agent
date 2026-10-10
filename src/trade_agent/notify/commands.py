@@ -27,7 +27,7 @@ log = structlog.get_logger(__name__)
 
 OFFSET_KEY = "telegram.offset"
 CONFIRMATION_TTL = timedelta(minutes=2)
-CONTROL = "/pause [escopo] · /resume [escopo] · /halt [escopo] · /flatten [escopo]"
+CONTROL = "/pause [scope] · /resume [scope] · /halt [scope] · /flatten [scope]"
 
 type Query = Callable[[list[str]], Awaitable[str]]
 
@@ -80,10 +80,7 @@ class CommandCenter:
     @property
     def help(self) -> str:
         queries = " · ".join(sorted(self._queries))
-        return (
-            f"Consultas: {queries}. Controle: {CONTROL}. "
-            "Escopo: global (padrão) ou o nome de um perfil."
-        )
+        return f"Queries: {queries}. Control: {CONTROL}. Scope: global (default) or a profile name."
 
     def _scope(self, args: list[str]) -> str | None:
         scope = args[0].lower() if args else GLOBAL
@@ -100,22 +97,22 @@ class CommandCenter:
             return self.help
         scope = self._scope(args)
         if scope is None:
-            return f"Escopo inválido. Use: {', '.join(sorted(self._scopes))}."
+            return f"Invalid scope. Use: {', '.join(sorted(self._scopes))}."
         if command == "/pause":
-            await self._guard.pause(scope, "comando /pause")
-            return f"{scope}: pausado (sem novas entradas; proteções mantidas)."
+            await self._guard.pause(scope, "/pause command")
+            return f"{scope}: paused (no new entries; protections kept)."
         if command == "/halt":
-            await self._guard.halt(scope, "comando /halt")
-            return f"{scope}: parado (proteções mantidas na Binance). Retome com /resume."
+            await self._guard.halt(scope, "/halt command")
+            return f"{scope}: halted (protections kept on Binance). Resume with /resume."
         if command == "/resume":
             if not await self._guard.resume(scope):
-                return f"{scope}: flatten em andamento; aguarde o término."
+                return f"{scope}: flatten in progress; wait for it to finish."
             active = "; ".join(record.reason for record in await self._guard.fired(scope))
             if not active:
-                return f"{scope}: retomado."
+                return f"{scope}: resumed."
             return (
-                f"{scope}: retomado. Ainda valendo, só voltam a disparar se piorarem mais um "
-                f"limite: {active}."
+                f"{scope}: resumed. Still holding, they fire again only if they worsen by another "
+                f"full limit: {active}."
             )
         return await self._flatten(scope, args[1:])
 
@@ -124,15 +121,15 @@ class CommandCenter:
         pending = self._pending
         if args and pending and pending.scope == scope and pending.expires > now:
             if args[0].upper() != pending.code:
-                return "Código incorreto. Envie /flatten novamente para gerar outro."
+                return "Wrong code. Send /flatten again to get a new one."
             self._pending = None
-            closed = await self._guard.flatten(scope, "comando /flatten")
-            return f"{scope}: flatten concluído ({closed} posições). Estado: halted."
+            closed = await self._guard.flatten(scope, "/flatten command")
+            return f"{scope}: flatten done, positions closed: {closed}. State: halted."
         code = self._new_code()
         self._pending = _Pending(scope, code, now + CONFIRMATION_TTL)
         return (
-            f"⚠️ Isto cancela as proteções e VENDE a mercado as posições de '{scope}'. "
-            f"Confirme em 2 min com: /flatten {scope} {code}"
+            f"⚠️ This cancels the protections and SELLS the positions of '{scope}' at market. "
+            f"Confirm within 2 min with: /flatten {scope} {code}"
         )
 
     @tracing.traced("telegram", "telegram.command")

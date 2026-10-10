@@ -2,7 +2,7 @@
 
 > Procedures for whoever operates the agent. The current status and the production checklist are in [doc 04](04-status-and-go-live.md). **Golden rule:** the protections (OCO) live on Binance and keep working with the agent stopped. When in doubt, prefer `/halt` (keeps the protections) over `/flatten` (sells everything).
 >
-> The agent's interface is in Portuguese: Telegram replies, dashboard and panel names and alert titles are quoted here as they appear on screen.
+> The replies to the Telegram commands are in English. The rest of the agent's interface is in Portuguese: alerts, dashboard and panel names and alert titles are quoted here as they appear on screen.
 
 ## 1. Start and check
 
@@ -14,7 +14,7 @@ docker compose -f deploy/docker-compose.yml logs -f agent
 | Check | Where | Expected |
 |-------|-------|----------|
 | Agent started | `agent.started` log / Telegram `/status` | reconciliation without orphans; state `running` |
-| Mode | `/status` (1st line) | "SIMULAÇÃO" (simulation) while `TA_TRADING_ENABLED=false` |
+| Mode | `/status` (1st line) | "SIMULATION" while `TA_TRADING_ENABLED=false` |
 | Telemetry | Grafana → *Saúde técnica* → "Segundos desde a última foto" | below 360 s |
 | Heartbeat | Healthchecks.io dashboard (only with `TA_HEALTHCHECK_URL` set) | a ping every minute |
 | Logs | Grafana → *Logs* | lines arriving from every service, no tracebacks |
@@ -186,7 +186,7 @@ A large, persistent *offset* in the "Offset de relógio (ms)" panel (the `trade_
 | Command | Effect |
 |---------|--------|
 | `/status` | mode, states (global and per profile), positions and the analyst's latest reading |
-| `/positions` · `/pnl [dia\|semana\|mes]` · `/report` · `/config` | queries (`dia`, `semana`, `mes`: day, week, month) |
+| `/positions` · `/pnl [day\|week\|month]` · `/report` · `/config` | queries (`/pnl` without an argument: the last day) |
 | `/pause [scope]` | no new entries; protections and rule-based exits go on |
 | `/halt [scope]` | neither entries nor rule-based exits; protections kept |
 | `/resume [scope]` | back to `running` (refused during a flatten) and lists the triggers that still hold (§2.3) |

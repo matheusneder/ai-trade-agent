@@ -78,41 +78,41 @@ def _center(store: Store, http: httpx.AsyncClient, clock: Clock) -> tuple[Comman
 async def test_commands_change_operational_states(store: Store, http: httpx.AsyncClient) -> None:
     clock = Clock()
     center, guard = _center(store, http, clock)
-    assert (await center.handle("oi")).startswith("Consultas: /status. Controle:")
-    assert (await center.handle("/desconhecido")).startswith("Consultas:")
+    assert (await center.handle("oi")).startswith("Queries: /status. Control:")
+    assert (await center.handle("/desconhecido")).startswith("Queries:")
     assert await center.handle("/status@meubot x") == "tudo certo ['x']"
-    assert "Escopo inválido" in await center.handle("/pause marte")
-    assert "pausado" in await center.handle("/pause conservador")
+    assert "Invalid scope" in await center.handle("/pause marte")
+    assert "paused" in await center.handle("/pause conservador")
     assert (await guard.state("conservador")).state is OpState.PAUSED
-    assert "parado" in await center.handle("/halt")
+    assert "halted" in await center.handle("/halt")
     assert (await guard.state(GLOBAL)).state is OpState.HALTED
-    assert await center.handle("/resume") == "global: retomado."
-    assert await center.handle("/resume conservador") == "conservador: retomado."
+    assert await center.handle("/resume") == "global: resumed."
+    assert await center.handle("/resume conservador") == "conservador: resumed."
     assert (await guard.effective("conservador")) is OpState.RUNNING
     await guard.apply(evaluate(CONDITIONS, snapshot(consecutive_losses=4)))
     assert await center.handle("/resume") == (
-        "global: retomado. Ainda valendo, só voltam a disparar se piorarem mais um limite: "
-        "max_consecutive_losses: 4 (limite 4)."
+        "global: resumed. Still holding, they fire again only if they worsen by another full "
+        "limit: max_consecutive_losses: 4 (limite 4)."
     )
-    assert await center.handle("/resume conservador") == "conservador: retomado."
+    assert await center.handle("/resume conservador") == "conservador: resumed."
 
     await StateStore(store).put("moderado", ScopeState(OpState.FLATTENING))
-    assert "aguarde" in await center.handle("/resume moderado")
+    assert "in progress" in await center.handle("/resume moderado")
 
 
 async def test_flatten_requires_confirmation_code(store: Store, http: httpx.AsyncClient) -> None:
     clock = Clock()
     center, guard = _center(store, http, clock)
     prompt = await center.handle("/flatten moderado")
-    assert "/flatten moderado ABC123" in prompt and "VENDE" in prompt
-    assert "incorreto" in await center.handle("/flatten moderado XXXXXX")
-    assert "Confirme" in await center.handle("/flatten moderado")  # new code
+    assert "/flatten moderado ABC123" in prompt and "SELLS" in prompt
+    assert "Wrong code" in await center.handle("/flatten moderado XXXXXX")
+    assert "Confirm" in await center.handle("/flatten moderado")  # new code
     clock.now += timedelta(minutes=3)
-    assert "Confirme" in await center.handle("/flatten moderado ABC123")  # expired: asks again
+    assert "Confirm" in await center.handle("/flatten moderado ABC123")  # expired: asks again
     confirmed = await center.handle("/flatten moderado abc123")
-    assert confirmed == "moderado: flatten concluído (1 posições). Estado: halted."
+    assert confirmed == "moderado: flatten done, positions closed: 1. State: halted."
     assert (await guard.state("moderado")).state is OpState.HALTED
-    assert "Confirme" in await center.handle("/flatten moderado ABC123")  # code already used
+    assert "Confirm" in await center.handle("/flatten moderado ABC123")  # code already used
 
 
 async def test_polling_authorization_and_offset(store: Store, http: httpx.AsyncClient) -> None:
@@ -205,13 +205,13 @@ async def test_status_text(db: Database, store: Store, service: PositionService)
         guard=guard, store=store, research=research, strategy=PROFILES, trading_enabled=False
     )
     assert empty.splitlines() == [
-        "Ordens: SIMULAÇÃO (trava desligada)",
+        "Orders: SIMULATION (lock off)",
         "global: running",
         "conservador: running",
         "moderado: running",
-        "agressivo: running [desabilitado]",
-        "Posições ativas: 0",
-        "Analista: sem leitura válida",
+        "agressivo: running [disabled]",
+        "Active positions: 0",
+        "Analyst: no valid reading",
     ]
     await guard.pause("moderado", "manual")
     await StateStore(store).put(
@@ -232,8 +232,8 @@ async def test_status_text(db: Database, store: Store, service: PositionService)
         guard=guard, store=store, research=research, strategy=PROFILES, trading_enabled=True
     )
     lines = text.splitlines()
-    assert lines[0] == "Ordens: habilitadas"
-    assert lines[1] == "global: paused (até 26/09 16:00 UTC) — btc"
+    assert lines[0] == "Orders: enabled"
+    assert lines[1] == "global: paused (until 2026-09-26 16:00 UTC) — btc"
     assert lines[3] == "moderado: paused — manual"
-    assert lines[6] == "• BTCUSDT [con] protected entrada 63000 qtd 0.00099"  # net of the fee
-    assert lines[7] == "Analista (26/09 12:00 UTC): regime risk_off, exposição 0.5"
+    assert lines[6] == "• BTCUSDT [con] protected entry 63000 qty 0.00099"  # net of the fee
+    assert lines[7] == "Analyst (2026-09-26 12:00 UTC): regime risk_off, exposure 0.5"
