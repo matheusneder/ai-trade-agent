@@ -1,7 +1,8 @@
 """Grafana as code: dashboards in sync with the generator and queries valid on the real schema.
 
-The check on a real Grafana 12.2 (provisioning, 34 queries through the API and evaluation
-of the rules) was done manually; the guarantees against regressions live here.
+The check on a real Grafana 12.4 (provisioning, the 42 panel queries through the API, the
+rules and the Jaeger source: services, search and dependency graph) was done manually; the
+guarantees against regressions live here.
 The logs dashboard (Loki) is tested in ``test_logs.py``.
 """
 
