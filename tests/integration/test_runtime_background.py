@@ -198,11 +198,11 @@ async def test_assemble_with_telegram_and_decision_job(
         assert parts.commands is not None and parts.services == [parts.commands.run]
         assert parts.heartbeat is not None
         status = await parts.commands.handle("/status")
-        assert status.startswith("Ordens: habilitadas")
-        assert (await parts.commands.handle("/positions")) == "Posições ativas: 0"
-        assert (await parts.commands.handle("/pnl semana")).startswith("PnL realizado (semana)")
-        assert (await parts.commands.handle("/report")) == "Analista: sem leitura válida."
-        assert (await parts.commands.handle("/config")).startswith("Configuração ")
+        assert status.startswith("Orders: enabled")
+        assert (await parts.commands.handle("/positions")) == "Active positions: 0"
+        assert (await parts.commands.handle("/pnl week")).startswith("Realized PnL (week)")
+        assert (await parts.commands.handle("/report")) == "Analyst: no valid reading."
+        assert (await parts.commands.handle("/config")).startswith("Configuration ")
 
         async def fake_cycle(name: str) -> str:
             return f"ciclo {name}"

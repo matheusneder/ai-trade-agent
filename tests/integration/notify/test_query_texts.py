@@ -16,27 +16,27 @@ PROFILES = load_strategy_config(ROOT / "tests" / "fixtures" / "profiles.yaml")
 
 
 async def test_pnl_by_period_and_profile(store: Store) -> None:
-    assert "Período inválido" in await pnl_text(store, PROFILES, ["ano"], NOW)
+    assert "Invalid period" in await pnl_text(store, PROFILES, ["ano"], NOW)
     await closed_position(store, profile="con", pnl="5", closed_at=NOW - timedelta(hours=2))
     await closed_position(store, profile="mod", pnl="-2", closed_at=NOW - timedelta(hours=3))
     await closed_position(store, profile="xyz", pnl="1", closed_at=NOW - timedelta(days=3))
     await closed_position(store, profile="con", pnl="-9", closed_at=NOW - timedelta(days=20))
     day = await pnl_text(store, PROFILES, [], NOW)
     assert day.splitlines() == [
-        "PnL realizado (dia): 3 USDT em 2 trades (1 com ganho)",
+        "Realized PnL (day): 3 USDT over 2 trades (1 winning)",
         "• conservador: 5",
         "• moderado: -2",
     ]
-    week = await pnl_text(store, PROFILES, ["SEMANA"], NOW)
-    assert week.splitlines()[0] == "PnL realizado (semana): 4 USDT em 3 trades (2 com ganho)"
+    week = await pnl_text(store, PROFILES, ["WEEK"], NOW)
+    assert week.splitlines()[0] == "Realized PnL (week): 4 USDT over 3 trades (2 winning)"
     assert "• xyz: 1" in week  # a code with no configured profile shows up as it is
-    month = await pnl_text(store, PROFILES, ["mes"], NOW)
-    assert month.splitlines()[0] == "PnL realizado (mes): -5 USDT em 4 trades (2 com ganho)"
+    month = await pnl_text(store, PROFILES, ["month"], NOW)
+    assert month.splitlines()[0] == "Realized PnL (month): -5 USDT over 4 trades (2 winning)"
 
 
 async def test_report_text(db: Database) -> None:
     research = ResearchStore(db)
-    assert await report_text(research) == "Analista: sem leitura válida."
+    assert await report_text(research) == "Analyst: no valid reading."
     view = {
         "market_regime": "risk_off", "exposure_multiplier": 0.5, "global_sentiment": -0.4,
         "global_risk_flags": ["FOMC hoje"],
@@ -55,11 +55,11 @@ async def test_report_text(db: Database) -> None:
         )
     )  # fmt: skip
     assert (await report_text(research)).splitlines() == [
-        "Leitura de 26/09 12:00 UTC (claude-opus-5, US$ 0.0312): regime risk_off, "
-        "exposição 0.5, sentimento -0.4",
+        "Reading of 2026-09-26 12:00 UTC (claude-opus-5, US$ 0.0312): regime risk_off, "
+        "exposure 0.5, sentiment -0.4",
         "⚠️ FOMC hoje",
-        "• SOL VETO: -0.80 (confiança 0.90) — exploit confirmado",
-        "• BTC: +0.10 (confiança 0.40) — neutro",
+        "• SOL VETO: -0.80 (confidence 0.90) — exploit confirmado",
+        "• BTC: +0.10 (confidence 0.40) — neutro",
     ]
 
 
@@ -72,6 +72,6 @@ def test_config_text_and_hash(tmp_path: Path) -> None:
     assert config_hash([first]) != digest
     text = config_text(PROFILES, CONDITIONS, "abc123")
     lines = text.splitlines()
-    assert lines[0] == "Configuração abc123 — capital gerido 1000"
-    assert lines[1].startswith("• conservador (con): 4h, capital 500.0, risco/trade 0.5%, TP 3%")
+    assert lines[0] == "Configuration abc123 — managed capital 1000"
+    assert lines[1].startswith("• conservador (con): 4h, capital 500.0, risk/trade 0.5%, TP 3%")
     assert "quote_depeg_pct" in lines[-1] and "profit_target_pct" not in lines[-1]

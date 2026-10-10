@@ -530,7 +530,7 @@ The other high and critical events (failure to re-protect, orphan, unknown order
 
 ### 12.3 Telegram commands
 
-`/status` · `/positions` · `/pnl [dia|semana|mes]` · `/pause [scope]` · `/resume [scope]` · `/halt [scope]` · `/flatten [scope]` (requires a confirmation code) · `/report` (latest `MarketView`) · `/config` (active profiles and the configuration *hash*). The scope is `global` (default) or a profile name.
+`/status` · `/positions` · `/pnl [day|week|month]` · `/pause [scope]` · `/resume [scope]` · `/halt [scope]` · `/flatten [scope]` (requires a confirmation code) · `/report` (latest `MarketView`) · `/config` (active profiles and the configuration *hash*). The scope is `global` (default) or a profile name.
 Only one authorized `chat_id`. Every command is audited in `events`.
 
 ## 13. Security

@@ -4,7 +4,7 @@ Autonomous cryptocurrency trading agent for **Binance Spot**. It decides based o
 
 - Documentation: [`doc/`](doc/README.md) (architecture, operation and lab)
 - Current status: *paper trading* in Demo Mode since 2026-09-29; what is missing for production is in [`doc/04-status-and-go-live.md`](doc/04-status-and-go-live.md)
-- Language: code, comments and documentation are in English; the agent's interface for its operator (Telegram messages, Grafana and SigNoz dashboards, log messages, the analyst's prompts) is in Portuguese.
+- Language: code, comments and documentation are in English, and so are the replies to the Telegram commands (`/status`, `/pnl`, `/pause`...). The rest of the operator interface (Telegram alerts, Grafana and SigNoz dashboards, log messages, the analyst's prompts) is in Portuguese.
 
 > ⚠️ Experimental software. It does not constitute investment advice. Use Testnet/Demo and, in production, only capital you accept losing.
 
