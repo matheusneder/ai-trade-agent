@@ -379,8 +379,8 @@ spec:
         SIGNOZ_SQLSTORE_PROVIDER: postgres
         SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
         SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
-      image: signoz/signoz:v0.144.0
-      version: v0.144.0
+      image: signoz/signoz:v0.145.0
+      version: v0.145.0
     status:
       addresses:
         apiserver:
