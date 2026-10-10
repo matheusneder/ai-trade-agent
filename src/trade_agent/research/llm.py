@@ -180,9 +180,16 @@ class ClaudeClient:
         )
         current = trace.get_current_span()
         current.set_attribute("gen_ai.response.finish_reasons", [str(response.stop_reason)])
-        current.set_attribute("gen_ai.usage.input_tokens", record.input_tokens)
+        # GenAI convention: input_tokens includes the cached tokens, which Anthropic reports
+        # apart. SigNoz (collector v0.144.13+) subtracts cache_read and cache_creation from it
+        # to price each bucket: without the sum, it would bill part of the input twice as cache.
+        current.set_attribute(
+            "gen_ai.usage.input_tokens",
+            record.input_tokens
+            + record.cache_read_input_tokens
+            + record.cache_creation_input_tokens,
+        )
         current.set_attribute("gen_ai.usage.output_tokens", record.output_tokens)
-        # GenAI convention names: SigNoz computes the cost per model with them
         current.set_attribute(
             "gen_ai.usage.cache_read.input_tokens", record.cache_read_input_tokens
         )

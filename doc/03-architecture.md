@@ -78,7 +78,7 @@ flowchart TB
 | Logs | `structlog` in JSON, with the `trace_id` on every line | Structured logs linked to the traces |
 | Traces and metrics | **OpenTelemetry** (OTLP/HTTP) to Jaeger and SigNoz | Each component is a service; agent metrics every minute (§12.1) |
 | Alerts and commands | **Thin in-house client** for the Telegram Bot API, over `httpx` | Push on the phone and a remote *kill switch* (D-022) |
-| Dashboards and metric alerts | **Grafana 12.2** (Postgres, Loki and Jaeger; Telegram *contact point*) | Business metrics are low frequency and already in the database |
+| Dashboards and metric alerts | **Grafana 12.4** (Postgres, Loki and Jaeger; Telegram *contact point*) | Business metrics are low frequency and already in the database |
 | Centralized logs | **Loki**, collected by **Grafana Alloy** | Logs of every container for 30 days |
 | Traces | **Jaeger** (7 days on disk) | Dependency graph between the components |
 | Parallel observability | **SigNoz** (ClickHouse) | Traces, logs and metrics in one place, for comparison (§12.1) |
@@ -552,7 +552,7 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 |---------|-------|------|-------------------------|
 | `agent` | built from the repository | the agent (`trade-agent run`); reads the `.env` and mounts `config/` read-only | — |
 | `postgres` | `postgres:18` | the agent's database; creates the `grafana_ro` user on the first initialization | 5432 |
-| `grafana` | `grafana/grafana:12.2.0` | dashboards, datasources and alerts provisioned as code | 3000 |
+| `grafana` | `grafana/grafana:12.4.12` | dashboards, datasources and alerts provisioned as code | 3000 |
 | `loki` | `grafana/loki:3.7.8` | logs for 30 days | — |
 | `alloy` | `grafana/alloy:v1.20.1` | collects the container logs for Loki and SigNoz | 12345 |
 | `docker-proxy` | `tecnativa/docker-socket-proxy:v0.5.0` | read-only Docker API, for Alloy and `container-metrics` | — |

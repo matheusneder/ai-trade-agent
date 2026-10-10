@@ -279,7 +279,7 @@ async def test_live_cycle_traces_decision_through_execution(
     cycle = spans.one("decision.cycle")
     attributes = cycle.attributes or {}
     assert attributes["trade_agent.profile"] == "conservador"
-    assert tuple(attributes["trade_agent.opened"]) == ("SOLUSDT",)
+    assert attributes["trade_agent.opened"] == ("SOLUSDT",)
     assert attributes["trade_agent.dry_run"] is False
     opened = spans.one("position.open")
     assert (opened.attributes or {})["trade_agent.symbol"] == "SOLUSDT"

@@ -4,7 +4,9 @@
 # The `jaeger` volume is mounted on /tmp: Docker copies the image's /tmp permissions to it,
 # writable by the Jaeger user (10001); a new directory would be root-only.
 # Version pinned at 2.20: 2.21 removed the v1 HTTP API (/api/services, /api/traces), which
-# Grafana's Jaeger datasource (12.2 and 12.4) still uses.
+# Grafana's Jaeger datasource still uses (checked up to Grafana 13.2 and the plugin 13.0.5:
+# the jaegerEnableGrpcEndpoint toggle moves services, operations and the trace by ID to
+# /api/v3, but the search and the dependency graph stay on v1, pending jaeger#7594/#7595).
 service:
   extensions: [jaeger_storage, jaeger_query, healthcheckv2]
   pipelines:
