@@ -129,7 +129,7 @@ async def test_llm_span_has_usage_but_no_content(spans: Recorded) -> None:
     assert attributes["gen_ai.usage.output_tokens"] == 10
     assert attributes["gen_ai.usage.cache_read.input_tokens"] == 300
     assert attributes["gen_ai.usage.cache_creation.input_tokens"] == 50
-    assert tuple(attributes["gen_ai.response.finish_reasons"]) == ("end_turn",)
+    assert attributes["gen_ai.response.finish_reasons"] == ("end_turn",)
     assert Decimal(str(attributes["trade_agent.cost_usd"])) > 0
     assert attributes["trade_agent.purpose"] == "triage"
     text_ = spans.attribute_text()
