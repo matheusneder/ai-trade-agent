@@ -186,7 +186,7 @@ services:
 
   # CPU, memory, network and disk of each project container → SigNoz (docker_stats).
   container-metrics:
-    image: otel/opentelemetry-collector-contrib:0.161.0
+    image: otel/opentelemetry-collector-contrib:0.162.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
