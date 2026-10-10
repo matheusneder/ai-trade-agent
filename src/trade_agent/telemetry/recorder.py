@@ -59,6 +59,10 @@ class TelemetryRecorder:
                     clock_offset_ms=self._rest.time_offset_ms,
                     used_weight_1m=self._rest.usage.used_weight_1m,
                     states=await self._states(),
+                    scope_pnl={
+                        GLOBAL: snapshot.realized_pnl + snapshot.unrealized_pnl,
+                        **snapshot.profile_pnl,
+                    },
                 )
             )
         if self._recorded_at is not None and snapshot.now - self._recorded_at < self._interval:

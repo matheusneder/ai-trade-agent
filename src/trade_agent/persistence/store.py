@@ -229,14 +229,15 @@ class Store:
             )
             return [_to_position(r) for r in records]
 
-    async def realized_pnl_total(self) -> Decimal:
+    async def realized_pnl_by_profile(self) -> dict[str, Decimal]:
+        """Realized PnL of the closed positions, per profile code."""
         async with self.db.session() as session:
-            total = await session.scalar(
-                select(func.coalesce(func.sum(PositionRecord.realized_pnl), 0)).where(
-                    PositionRecord.state == PositionState.CLOSED.value
-                )
+            rows = await session.execute(
+                select(PositionRecord.profile, func.sum(PositionRecord.realized_pnl))
+                .where(PositionRecord.state == PositionState.CLOSED.value)
+                .group_by(PositionRecord.profile)
             )
-            return Decimal(total or 0)
+            return {profile: Decimal(total or 0) for profile, total in rows}
 
     async def update_position(self, position_id: int, **changes: Any) -> Position:
         """Updates position fields, validating the state transition (with ``FOR UPDATE``)."""

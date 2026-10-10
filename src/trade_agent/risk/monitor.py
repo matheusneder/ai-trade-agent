@@ -7,7 +7,7 @@ together with the managed capital in force when they were recorded.
 """
 
 import statistics
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -36,6 +36,14 @@ STABLE_PAIRS = ("USDCUSDT", "FDUSDUSDT")
 
 def _mid(book: BookTicker) -> Decimal:
     return (book.bid_price + book.ask_price) / 2
+
+
+def open_pnl(position: Position, books: Mapping[str, BookTicker]) -> Decimal:
+    """Result of an open position at the sell price (bid); zero without an entry or a book."""
+    if position.entry_price is None or position.symbol not in books:
+        return Decimal(0)
+    qty = position.protected_qty or position.entry_qty or 0
+    return (books[position.symbol].bid_price - position.entry_price) * qty
 
 
 def consecutive_losses(closed: Sequence[Position]) -> int:
@@ -141,16 +149,10 @@ class RiskMonitor:
         closed = await self._store.closed_positions()
         wanted = {p.symbol for p in active} | {BENCHMARK, *STABLE_PAIRS}
         books = {b.symbol: b for b in await self._api.book_tickers() if b.symbol in wanted}
-        unrealized = sum(
-            (
-                (books[p.symbol].bid_price - p.entry_price) * (p.protected_qty or p.entry_qty or 0)
-                for p in active
-                if p.entry_price is not None and p.symbol in books
-            ),
-            Decimal(0),
-        )
+        unrealized = sum((open_pnl(p, books) for p in active), Decimal(0))
         baseline = self._strategy.account.managed_capital
-        realized = await self._store.realized_pnl_total()
+        realized_by_code = await self._store.realized_pnl_by_profile()
+        realized = sum(realized_by_code.values(), Decimal(0))
         equity = baseline + realized + unrealized
         day_start, peak = await self._equity_marks(equity, baseline, now)
         exposure = sum(
@@ -160,9 +162,13 @@ class RiskMonitor:
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         daily: dict[str, Decimal] = {}
         streaks: dict[str, int] = {}
+        results: dict[str, Decimal] = {}
         for code, name in self._names.items():
             own = [p for p in closed if p.profile == code]
             streaks[name] = consecutive_losses(own)
+            results[name] = realized_by_code.get(code, Decimal(0)) + sum(
+                (open_pnl(p, books) for p in active if p.profile == code), Decimal(0)
+            )
             daily[name] = sum(
                 (
                     p.realized_pnl or Decimal(0)
@@ -180,6 +186,7 @@ class RiskMonitor:
             consecutive_losses=consecutive_losses(closed),
             profile_consecutive_losses=streaks,
             profile_daily_pnl=daily,
+            profile_pnl=results,
             profile_capital={
                 name: self._strategy.profile_capital(name) for name in self._strategy.profiles
             },

@@ -7,7 +7,7 @@ from typing import Any
 from tests.support.claude import FakeClaude
 from tests.support.fake_binance import FakeBinance
 from tests.support.metrics import Measured
-from tests.support.risk import CONDITIONS
+from tests.support.risk import CONDITIONS, NOW, closed_position
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.store import Severity, Store
@@ -34,14 +34,20 @@ async def test_risk_check_feeds_the_gauges(
     measured: Measured, db: Database, api: BinanceSpotApi, store: Store, fake: FakeBinance
 ) -> None:
     fake.candles[("BTCUSDT", "1m")] = _klines([60000.0] * 61)
+    await closed_position(store, profile="con", pnl="5", closed_at=NOW)
+    await closed_position(store, profile="mod", pnl="-2", closed_at=NOW)
     guard = RiskGuard(conditions=CONDITIONS, states=StateStore(store), store=store, notify=_ignore)
     await guard.pause("conservador", "teste")  # counts one state change
     monitor = RiskMonitor(api=api, store=store, strategy=PROFILES, health=api.rest.health)
     recorder = TelemetryRecorder(db=db, guard=guard, rest=api.rest, scopes=list(PROFILES.profiles))
     await api.rest.sync_time()
     await recorder.observe(await monitor.snapshot())
-    assert measured.value("trade_agent.equity") == 1000  # managed capital, no positions
+    assert measured.value("trade_agent.equity") == 1003  # managed capital + realized
     assert measured.value("trade_agent.positions.active") == 0
+    assert measured.value("trade_agent.pnl.total", scope="global") == 3
+    assert measured.value("trade_agent.pnl.total", scope="conservador") == 5
+    assert measured.value("trade_agent.pnl.total", scope="moderado") == -2
+    assert measured.value("trade_agent.pnl.total", scope="agressivo") == 0
     assert measured.value("trade_agent.risk.state", scope="global") == 0
     assert measured.value("trade_agent.risk.state", scope="conservador") == 1  # paused
     assert measured.value("trade_agent.clock.offset") == api.rest.time_offset_ms
