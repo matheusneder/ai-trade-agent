@@ -81,6 +81,7 @@ class TelemetryRecorder:
             name: {
                 "daily_pnl": str(s.profile_daily_pnl.get(name, 0)),
                 "losing_streak": s.profile_consecutive_losses.get(name, 0),
+                "pnl": str(s.profile_pnl.get(name, 0)),
             }
             for name in s.profile_capital
         }

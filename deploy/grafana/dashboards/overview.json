@@ -223,6 +223,41 @@
       "id": 6
     },
     {
+      "type": "timeseries",
+      "title": "Ganhos e perdas por escopo (USDT)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 8,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT at AS time, 'global' AS metric, (realized_pnl + unrealized_pnl)::float AS value FROM telemetry_snapshots WHERE $__timeFilter(at) UNION ALL SELECT at AS time, key AS metric, (value->>'pnl')::float AS value FROM telemetry_snapshots, jsonb_each(profiles) WHERE $__timeFilter(at) AND value->>'pnl' IS NOT NULL ORDER BY 1, 2"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 7
+    },
+    {
       "type": "table",
       "title": "Estado operacional",
       "datasource": {
@@ -233,7 +268,7 @@
         "w": 8,
         "h": 8,
         "x": 0,
-        "y": 12
+        "y": 20
       },
       "targets": [
         {
@@ -253,7 +288,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 7
+      "id": 8
     },
     {
       "type": "table",
@@ -266,7 +301,7 @@
         "w": 16,
         "h": 8,
         "x": 8,
-        "y": 12
+        "y": 20
       },
       "targets": [
         {
@@ -286,7 +321,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 8
+      "id": 9
     },
     {
       "type": "table",
@@ -299,7 +334,7 @@
         "w": 24,
         "h": 6,
         "x": 0,
-        "y": 20
+        "y": 28
       },
       "targets": [
         {
@@ -319,7 +354,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 9
+      "id": 10
     }
   ]
 }

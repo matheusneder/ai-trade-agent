@@ -48,6 +48,13 @@ async def test_risk_check_feeds_the_gauges(
     assert measured.value("trade_agent.pnl.total", scope="conservador") == 5
     assert measured.value("trade_agent.pnl.total", scope="moderado") == -2
     assert measured.value("trade_agent.pnl.total", scope="agressivo") == 0
+    saved = await recorder.last_recorded()  # the same result per profile, for Grafana
+    assert saved is not None and saved.realized_pnl + saved.unrealized_pnl == 3
+    assert {name: Decimal(p["pnl"]) for name, p in saved.profiles.items()} == {
+        "conservador": 5,
+        "moderado": -2,
+        "agressivo": 0,
+    }
     assert measured.value("trade_agent.risk.state", scope="global") == 0
     assert measured.value("trade_agent.risk.state", scope="conservador") == 1  # paused
     assert measured.value("trade_agent.clock.offset") == api.rest.time_offset_ms

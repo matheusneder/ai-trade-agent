@@ -223,7 +223,8 @@ class TelemetrySnapshotRecord(Base):
     states: Mapped[dict[str, Any]]
     """Operating state per scope (``global`` and the profiles)."""
     profiles: Mapped[dict[str, Any]]
-    """Per profile: realized PnL for the day and consecutive losses."""
+    """Per profile: realized PnL for the day, consecutive losses and the result since the start
+    (realized + open, ``pnl``)."""
 
 
 class LlmUsageRecord(Base):
