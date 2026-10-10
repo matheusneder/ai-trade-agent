@@ -113,7 +113,7 @@ def test_annotate_converts_values(spans: Recorded) -> None:
     attributes = spans.one("x").attributes or {}
     assert attributes["trade_agent.equity"] == "1000.5"
     assert attributes["trade_agent.state"] == "vermelho"
-    assert tuple(attributes["trade_agent.hits"]) == ("a", "b")
+    assert attributes["trade_agent.hits"] == ("a", "b")  # the SDK keeps sequences as tuples
     assert (attributes["trade_agent.positions"], attributes["trade_agent.ratio"]) == (2, 0.5)
     assert attributes["trade_agent.ok"] is True and attributes["trade_agent.name"] == "texto"
     assert "trade_agent.missing" not in attributes
