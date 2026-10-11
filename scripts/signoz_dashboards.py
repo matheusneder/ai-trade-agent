@@ -29,6 +29,9 @@ SCHEMA_VERSION = "v6"
 GRID_COLUMNS = 12
 TAGS = [{"key": "projeto", "value": "trade-agent"}]
 RED, YELLOW = "#F24769", "#FFCD56"
+# Series colors that stay apart from each other, also with the common color vision deficiencies
+# and on the dark and light themes (Okabe-Ito palette: sky blue, orange, reddish purple).
+SKY_BLUE, ORANGE, PURPLE = "#56B4E9", "#E69F00", "#CC79A7"
 
 AGENT_LOGS = "service.name = 'agent'"
 JOBS = "service.name = 'trade-agent.runtime' AND name LIKE 'job %'"
@@ -154,11 +157,19 @@ def series(
     decimals: int = 2,
     steps: bool = False,
     description: str = "",
+    colors: Sequence[str] = (),
 ) -> Json:
+    """``colors``: one per query, in order, for the line and its legend (by the legend text)."""
+    legend: Json = {"position": "bottom"}
+    if colors:
+        legends = [q["legend"] for q in queries]
+        if len(colors) != len(legends) or not all(legends):
+            raise ValueError(f"{title}: one color per named series")
+        legend["customColors"] = dict(zip(legends, colors, strict=True))
     spec: Json = {
         "visualization": {"timePreference": "global_time"},
         "formatting": _formatting(unit, decimals),
-        "legend": {"position": "bottom"},
+        "legend": legend,
     }
     if steps:  # states and counts change in steps, not in curves
         spec["chartAppearance"] = {"lineInterpolation": "step_after"}
@@ -350,6 +361,7 @@ def _operation() -> Json:
                                     query="B",
                                 ),
                                 metric("trade_agent.equity.peak", legend="pico", query="C"),
+                                colors=(SKY_BLUE, ORANGE, PURPLE),
                             ),
                             6,
                         ),
@@ -360,6 +372,7 @@ def _operation() -> Json:
                                 metric("trade_agent.pnl.daily", legend="do dia"),
                                 metric("trade_agent.pnl.realized", legend="realizado", query="B"),
                                 metric("trade_agent.pnl.unrealized", legend="aberto", query="C"),
+                                colors=(SKY_BLUE, ORANGE, PURPLE),
                             ),
                             6,
                         ),
