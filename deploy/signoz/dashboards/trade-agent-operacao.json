@@ -408,7 +408,12 @@
                 "decimalPrecision": "2"
               },
               "legend": {
-                "position": "bottom"
+                "position": "bottom",
+                "customColors": {
+                  "patrimônio": "#56B4E9",
+                  "abertura do dia": "#E69F00",
+                  "pico": "#CC79A7"
+                }
               }
             }
           },
@@ -528,7 +533,12 @@
                 "decimalPrecision": "2"
               },
               "legend": {
-                "position": "bottom"
+                "position": "bottom",
+                "customColors": {
+                  "do dia": "#56B4E9",
+                  "realizado": "#E69F00",
+                  "aberto": "#CC79A7"
+                }
               }
             }
           },

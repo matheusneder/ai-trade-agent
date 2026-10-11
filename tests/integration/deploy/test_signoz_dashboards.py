@@ -26,7 +26,9 @@ from scripts.signoz_dashboards import (
     build,
     check,
     client,
+    metric,
     render,
+    series,
 )
 
 from trade_agent import tracing
@@ -39,6 +41,7 @@ COMPOSE: dict[str, Any] = yaml.safe_load(
 BOARDS = build()
 SIGNOZ = "http://signoz.test"
 RESERVED_TAG_KEYS = {"name", "description", "created_at", "updated_at", "created_by", "locked"}
+HEX_COLOR = re.compile(r"#[0-9A-F]{6}")
 REQUEST_BY_PANEL = {  # the request type each panel type draws
     "signoz/TimeSeriesPanel": "time_series",
     "signoz/BarChartPanel": "time_series",
@@ -121,6 +124,29 @@ def test_each_panel_has_one_query_of_the_kind_it_draws() -> None:
             for aggregation in spec.get("aggregations", []):
                 if "expression" in aggregation:  # a single function per aggregation
                     assert re.fullmatch(r"\w+\(\w*\)", aggregation["expression"]), name
+
+
+def test_series_colors_name_the_panel_series_and_stay_apart() -> None:
+    """SigNoz finds each line's color by the legend text: every key must be a series of the panel,
+    and the colors of one chart must differ from each other."""
+    colored: dict[str, dict[str, str]] = {}
+    for name, panel in _panels():
+        colors = panel["spec"]["plugin"]["spec"].get("legend", {}).get("customColors")
+        if colors is None:
+            continue
+        assert set(colors) == {q["legend"] for q in _builder_specs(panel)}, name
+        assert len(set(colors.values())) == len(colors), name
+        assert all(HEX_COLOR.fullmatch(color) for color in colors.values()), name
+        colored[panel["spec"]["display"]["name"]] = colors
+    assert {"Patrimônio, abertura do dia e pico (USDT)", "Resultado (USDT)"} <= set(colored)
+
+
+def test_series_colors_need_one_per_named_series() -> None:
+    two = (metric("a", legend="a"), metric("b", legend="b", query="B"))
+    with pytest.raises(ValueError, match="one color per named series"):
+        series("x", *two, colors=("#000000",))
+    with pytest.raises(ValueError, match="one color per named series"):
+        series("x", metric("a"), colors=("#000000",))  # no legend: no key for the color
 
 
 def test_agent_metrics_exist() -> None:
