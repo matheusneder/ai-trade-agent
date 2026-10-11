@@ -25,7 +25,7 @@ from trade_agent.exchange.user_stream import (
     UserEvent,
 )
 from trade_agent.execution.ids import parse_client_id
-from trade_agent.persistence.db import Database
+from trade_agent.persistence.db import DATABASE_UNAVAILABLE, Database
 from trade_agent.persistence.migrate import upgrade_to_head
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.reconcile.reconciler import Reconciler, ReconcileReport
@@ -156,7 +156,12 @@ class AgentRuntime:
                 await asyncio.gather(
                     *periodic, *([consumer] if consumer else []), return_exceptions=True
                 )
-                await self.store.record_event("agent.stopped", Severity.INFO)
+                try:
+                    await self.store.record_event("agent.stopped", Severity.INFO)
+                except DATABASE_UNAVAILABLE as exc:
+                    # PostgreSQL may stop before the agent (every container stopped at once):
+                    # the stop still ends cleanly, logged without the event in the database
+                    log.warning("agent.stop_unrecorded", error=type(exc).__name__)
                 log.info("agent.stopped")
 
     async def _reconcile(self) -> ReconcileReport:

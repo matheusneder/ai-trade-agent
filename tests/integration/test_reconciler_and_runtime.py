@@ -7,7 +7,9 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
+from tests.support.database import terminate_lock_holder
 from tests.support.fake_binance import FakeBinance, Fault
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.models import Balance
@@ -22,7 +24,7 @@ from trade_agent.execution.ids import order_ids
 from trade_agent.execution.orders import EntryOrder, ProtectionPolicy, StopMode, TakeProfitMode
 from trade_agent.execution.positions import PositionState
 from trade_agent.execution.service import PositionService
-from trade_agent.persistence.db import AlreadyRunningError, Database
+from trade_agent.persistence.db import AGENT_LOCK_KEY, AlreadyRunningError, Database
 from trade_agent.persistence.store import IntentKind, IntentStatus, Store
 from trade_agent.reconcile.reconciler import CHECKPOINT_KEY, Reconciler
 from trade_agent.runtime import AgentRuntime, affected_decision
@@ -267,6 +269,40 @@ async def test_runtime_refuses_second_instance(
         stop.set()
         await first
         await other_db.dispose()
+
+
+async def test_runtime_stops_cleanly_when_the_database_stops_first(
+    db: Database,
+    service: PositionService,
+    store: Store,
+    api: BinanceSpotApi,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With every container stopped at once, PostgreSQL may end before the agent: the
+    agent.stopped record and the unlock fail, and the stop still ends cleanly."""
+    record = store.record_event
+
+    async def refused_at_stop(kind: str, *args: Any, **kwargs: Any) -> None:
+        if kind == "agent.stopped":
+            raise ConnectionRefusedError(111, "Connect call failed")
+        await record(kind, *args, **kwargs)
+
+    monkeypatch.setattr(store, "record_event", refused_at_stop)
+    stop = asyncio.Event()
+    run = asyncio.create_task(_runtime(db, api, store, service).run(stop))
+    for _ in range(100):
+        if "agent.started" in [e.kind for e in await store.recent_events(10)]:
+            break
+        await asyncio.sleep(0.05)
+    await terminate_lock_holder(db, AGENT_LOCK_KEY)
+    with capture_logs() as logs:
+        stop.set()
+        await asyncio.wait_for(run, timeout=10)  # returns: no exception up to the CLI
+    events = {e["event"]: e for e in logs}
+    assert events["agent.stop_unrecorded"]["error"] == "ConnectionRefusedError"
+    assert "db.unlock_skipped" in events and "agent.stopped" in events
+    async with db.exclusive_lock():  # the lock went with the session
+        pass
 
 
 async def test_guarded_swallows_even_event_recording_failures(

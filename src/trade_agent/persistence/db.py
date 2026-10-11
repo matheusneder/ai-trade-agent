@@ -9,9 +9,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import structlog
 from opentelemetry.trace import SpanKind
 from sqlalchemy import event, text
 from sqlalchemy.engine import Engine, ExceptionContext
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -22,6 +24,10 @@ from sqlalchemy.ext.asyncio import (
 from trade_agent import tracing
 
 AGENT_LOCK_KEY = 0x7A_61_67_65_6E_74  # "zagent": key of the instance's pg_advisory_lock
+DATABASE_UNAVAILABLE = (SQLAlchemyError, OSError)
+"""What a call raises when PostgreSQL went away (a refused connection, a closed one)."""
+
+log = structlog.get_logger(__name__)
 MAX_QUERY_TEXT = 2000
 _TARGET = re.compile(r"\b(?:FROM|INTO|UPDATE|TRUNCATE|JOIN)\s+([a-z_][\w.]*)", re.IGNORECASE)
 _SPAN_ATTR = "_trade_agent_span"
@@ -112,7 +118,9 @@ class Database:
         The *lock* belongs to the connection: if the process dies, PostgreSQL releases it on
         its own. The connection holds no transaction (*autocommit*): open for the agent's
         whole run, a transaction would pin the VACUUM horizon, and the dead rows of every
-        table would never be cleaned up.
+        table would never be cleaned up. If PostgreSQL stops before the agent (every container
+        stopped at once), the unlock fails with the connection already closed: the lock went
+        with it, and the exit goes on.
         """
         conn = await self.engine.connect()
         try:
@@ -125,6 +133,9 @@ class Database:
             try:
                 yield
             finally:
-                await conn.execute(text("SELECT pg_advisory_unlock(:key)").bindparams(key=key))
+                try:
+                    await conn.execute(text("SELECT pg_advisory_unlock(:key)").bindparams(key=key))
+                except DATABASE_UNAVAILABLE as exc:
+                    log.warning("db.unlock_skipped", error=type(exc).__name__)
         finally:
             await conn.close()
