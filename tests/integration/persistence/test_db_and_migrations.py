@@ -9,7 +9,9 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+from structlog.testing import capture_logs
 
+from tests.support.database import terminate_lock_holder
 from trade_agent.persistence.db import AlreadyRunningError, Database
 from trade_agent.persistence.migrate import alembic_config, downgrade_to_base, upgrade_to_head
 from trade_agent.persistence.models import Base
@@ -53,6 +55,18 @@ async def test_the_instance_lock_leaves_no_open_transaction(db: Database) -> Non
             )
         )
         assert holder.one() == ("idle", None)
+
+
+async def test_exclusive_lock_tolerates_the_database_going_away(db: Database) -> None:
+    """If PostgreSQL stops before the agent, the unlock finds the connection closed: the lock
+    went with the session, and leaving the block does not raise."""
+    with capture_logs() as logs:
+        async with db.exclusive_lock(key=4244):
+            await terminate_lock_holder(db, 4244)
+    warnings = [e for e in logs if e["log_level"] == "warning"]
+    assert [e["event"] for e in warnings] == ["db.unlock_skipped"]
+    async with db.exclusive_lock(key=4244):  # free again
+        pass
 
 
 async def test_pool_recovers_after_connection_is_killed(db: Database) -> None:

@@ -42,3 +42,15 @@ async def fresh_database(url: str) -> AsyncIterator[Database]:
         async with database.engine.begin() as conn:
             await conn.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
         await database.dispose()
+
+
+async def terminate_lock_holder(db: Database, key: int) -> None:
+    """What PostgreSQL does to every session when it stops, only to the lock's session."""
+    async with db.engine.connect() as admin:
+        await admin.execute(
+            text(
+                "SELECT pg_terminate_backend(pid) FROM pg_locks"
+                " WHERE locktype = 'advisory' AND objid = :low AND classid = :high"
+            ).bindparams(low=key & 0xFFFFFFFF, high=key >> 32)
+        )
+        await admin.commit()
