@@ -103,6 +103,15 @@ def timerange(start: date, end: date) -> str:
     return f"{start:%Y%m%d}-{end:%Y%m%d}"
 
 
+def detail_args(detail: str | None) -> list[str]:
+    """Freqtrade's ``--timeframe-detail``: the exits follow the price inside each candle.
+
+    Without it, the stop and the trailing take-profit only see the candle's high and low, and
+    Freqtrade assumes the high came first: a 4h candle that touched both reads as a win.
+    """
+    return ["--timeframe-detail", detail] if detail else []
+
+
 def train_range(start: date, months: int) -> tuple[date, date]:
     """Training window right before the validation window."""
     if months < 1:
@@ -118,15 +127,22 @@ def profile_pairs(profile: ProfileConfig) -> list[str]:
     return pairs
 
 
-def lab_config(base: dict[str, Any], profile: ProfileConfig, capital: Decimal) -> dict[str, Any]:
-    """Freqtrade configuration for the profile (timeframe, slots, reserve, pairs, wallet)."""
+def lab_config(
+    base: dict[str, Any],
+    profile: ProfileConfig,
+    capital: Decimal,
+    pairs: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Freqtrade configuration for the profile (timeframe, slots, reserve, pairs, wallet).
+
+    ``pairs`` replaces the tier lists (e.g. to test the strategy on another universe)."""
     config: dict[str, Any] = json.loads(json.dumps(base))
     config.pop("$comment", None)
     config["timeframe"] = profile.timeframe
     config["max_open_trades"] = profile.allocation.max_open_positions
     config["tradable_balance_ratio"] = float(1 - profile.allocation.cash_reserve_pct)
     config["dry_run_wallet"] = float(capital)
-    config["exchange"]["pair_whitelist"] = profile_pairs(profile)
+    config["exchange"]["pair_whitelist"] = list(pairs) if pairs else profile_pairs(profile)
     return config
 
 
@@ -324,11 +340,11 @@ def _write_params(params: dict[str, Any]) -> None:
     _params_file().write_text(json.dumps(params, indent=2), encoding="utf-8")
 
 
-def prepare(config: StrategyConfig, profile_name: str) -> str:
+def prepare(config: StrategyConfig, profile_name: str, pairs: Sequence[str] | None = None) -> str:
     """Writes ``config.<profile>.json`` and ``trade_agent_strategy.json``; returns its path."""
     profile = config.profiles[profile_name]
     base = json.loads((USER_DATA / "config.base.json").read_text(encoding="utf-8"))
-    generated = lab_config(base, profile, config.profile_capital(profile_name))
+    generated = lab_config(base, profile, config.profile_capital(profile_name), pairs)
     config_file = USER_DATA / f"config.{profile_name}.json"
     config_file.write_text(json.dumps(generated, indent=2), encoding="utf-8")
     _write_params(strategy_params(profile))
@@ -346,6 +362,7 @@ def optimize(
         "--timerange", timerange(*train), "--spaces", *OPTIMIZED_SPACES,
         "--hyperopt-loss", args.loss, "--epochs", str(args.epochs),
         "--random-state", str(args.seed), "--min-trades", str(args.min_trades),
+        *detail_args(args.detail),
     )  # fmt: skip
     exported = json.loads(_params_file().read_text(encoding="utf-8"))
     _write_params(merge_optimized(base, exported))
@@ -366,11 +383,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--loss", default="SharpeHyperOptLossDaily")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min-trades", type=int, default=20)
+    parser.add_argument(
+        "--pairs", nargs="+", help="pares do teste (ex.: SOL/USDT), no lugar das listas por tier"
+    )
+    parser.add_argument(
+        "--detail",
+        help="timeframe das saídas dentro do candle (ex.: 5m): stop e TP seguem o preço",
+    )
     args = parser.parse_args(argv)
 
     strategy_config = load_strategy_config(args.profiles_file)
     profile = strategy_config.profiles[args.profile]
-    config_path = prepare(strategy_config, args.profile)
+    config_path = prepare(strategy_config, args.profile, args.pairs)
     periods = windows(args.start, args.end, args.window_months)
     if args.download:
         history = 3 + (args.train_months if args.optimize else 0)
@@ -378,9 +402,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         _freqtrade(
             "download-data", "--config", config_path, "--timerange",
             f"{warmup_start:%Y%m%d}-{args.end:%Y%m%d}", "-t", profile.timeframe,
-            "--pairs", *dict.fromkeys([*profile_pairs(profile), BENCHMARK]),
+            *([args.detail] if args.detail else []),
+            "--pairs", *dict.fromkeys([*(args.pairs or profile_pairs(profile)), BENCHMARK]),
         )  # fmt: skip
-    mode = "otimizado" if args.optimize else "fixo"
+    mode = (
+        ("otimizado" if args.optimize else "fixo")
+        + (f"-detalhe{args.detail}" if args.detail else "")
+        + ("-pares" if args.pairs else "")
+    )
     btc_file = DATA / f"{BENCHMARK.replace('/', '_')}-{profile.timeframe}.json.gz"
     results: list[WindowResult] = []
     for index, (start, end) in enumerate(periods):
@@ -392,7 +421,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _freqtrade(
             "backtesting", "--config", config_path, "--strategy", STRATEGY,
             "--timerange", timerange(start, end), "--export", "trades",
-            "--backtest-directory", directory, "--cache", "none",
+            "--backtest-directory", directory, "--cache", "none", *detail_args(args.detail),
         )  # fmt: skip
         result = parse_result(latest_result(LAB / directory), start, end)
         btc = buy_and_hold_pct(btc_file, start, end)
@@ -403,12 +432,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.optimize
         else "Parâmetros fixos do perfil (`config/profiles.yaml`)."
     )
+    if args.detail:
+        subtitle += f" Saídas simuladas dentro do candle com candles de {args.detail}."
+    if args.pairs:
+        subtitle += f" Pares: {', '.join(args.pairs)}."
     report = summarize(args.profile, results, subtitle)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     name = f"walk-forward-{args.profile}-{mode}-{stamp}.md"
     (OUTPUT / name).write_text(report, encoding="utf-8")
-    sys.stdout.write(report)
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"  # e.g. cp1252 on Windows
+    sys.stdout.write(report.encode(encoding, errors="replace").decode(encoding))
     return 0
 
 
