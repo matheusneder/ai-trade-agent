@@ -54,6 +54,13 @@ def test_lab_config_from_profile() -> None:
     assert config["dry_run_wallet"] == 300.0
     assert "ATOM/USDT" in config["exchange"]["pair_whitelist"]
     assert BASE["exchange"]["pair_whitelist"] == []  # the base is not changed
+    custom = wf.lab_config(BASE, CONFIG.profiles["moderado"], Decimal("300"), ["SOL/USDT"])
+    assert custom["exchange"]["pair_whitelist"] == ["SOL/USDT"]
+
+
+def test_detail_args() -> None:
+    assert wf.detail_args("5m") == ["--timeframe-detail", "5m"]
+    assert wf.detail_args(None) == []
 
 
 def test_strategy_params_fixed_and_trailing_stop() -> None:
@@ -275,6 +282,27 @@ def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
     assert "| 2025-01-01 | 25 | 0.45 | 0.07 | 0.02 |" in text
 
 
+def test_main_with_custom_pairs_and_candle_detail(lab: FakeLab) -> None:
+    code = wf.main(
+        [
+            "--profile", "conservador", "--start", "2025-01-01", "--end", "2025-04-01",
+            "--optimize", "--epochs", "5", "--download", "--pairs", "SOL/USDT", "ETH/USDT",
+            "--detail", "5m", "--profiles-file", str(PROFILES),
+        ]
+    )  # fmt: skip
+    assert code == 0
+    download = lab.calls[0]
+    assert download[download.index("-t") + 1 : download.index("-t") + 3] == ("4h", "5m")
+    assert download[download.index("--pairs") + 1 :] == ("SOL/USDT", "ETH/USDT", "BTC/USDT")
+    for call in lab.calls[1:]:  # hyperopt and backtesting
+        assert call[call.index("--timeframe-detail") + 1] == "5m"
+    config = json.loads((lab.root / "user_data" / "config.conservador.json").read_text())
+    assert config["exchange"]["pair_whitelist"] == ["SOL/USDT", "ETH/USDT"]
+    reports = lab.reports("walk-forward-conservador-otimizado-detalhe5m-pares-*.md")
+    text = reports[0].read_text(encoding="utf-8")
+    assert "Saídas simuladas dentro do candle com candles de 5m. Pares: SOL/USDT, ETH/USDT." in text
+
+
 def test_optimize_writes_merged_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "strategies").mkdir()
     monkeypatch.setattr(wf, "USER_DATA", tmp_path)
@@ -285,7 +313,7 @@ def test_optimize_writes_merged_params(tmp_path: Path, monkeypatch: pytest.Monke
         params_file.write_text(json.dumps(_exported()), encoding="utf-8")
 
     monkeypatch.setattr(wf, "_freqtrade", fake_freqtrade)
-    args = argparse.Namespace(loss="L", epochs=5, seed=1, min_trades=3)
+    args = argparse.Namespace(loss="L", epochs=5, seed=1, min_trades=3, detail=None)
     chosen = wf.optimize(
         CONFIG.profiles["moderado"], "cfg", (date(2024, 1, 1), date(2025, 1, 1)), args
     )
