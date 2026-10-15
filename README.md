@@ -102,7 +102,11 @@ Freqtrade's "shell" strategy imports the same signals package used in production
 uv run python -m lab.walk_forward --profile swing_trend --optimize --download
 # with the profile's current parameters, no optimization
 uv run python -m lab.walk_forward --profile momentum_alpha
+# exits simulated inside each candle (5m detail) on a custom pair list instead of the tiers
+uv run python -m lab.walk_forward --profile swing_trend --download --detail 5m --pairs SOL/USDT ETH/USDT
 ```
+
+Without `--detail`, the stop and the trailing take-profit only see each candle's high and low, and Freqtrade assumes the high came first, so a candle that touched both counts as a win.
 
 To compare another version of the code (A/B), point `TA_LAB_SRC` to that version's `src/` folder (e.g. a `git worktree`).
 
