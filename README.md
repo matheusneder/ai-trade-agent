@@ -150,3 +150,9 @@ evals/                labeled cases to evaluate the LLM analyst
 deploy/               docker-compose and provisioning
 doc/                  architecture, plan and decisions
 ```
+
+## Dashboard's live smoke tests examples
+
+```bash
+uv run pytest tests/grafana-dashboard-smoke-tests --headed --slowmo=400
+```
