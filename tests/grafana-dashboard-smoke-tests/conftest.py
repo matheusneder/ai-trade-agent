@@ -6,11 +6,15 @@ database with the project's Alembic migrations, writes the synthetic day of
 
 The E2E tests (Docker and a browser) only run when the run targets this folder, e.g.
 ``uv run pytest tests/grafana-dashboard-smoke-tests`` or a test of it in VS Code, or with
-``-m e2e``/``-m grafana``; a plain ``uv run pytest`` deselects them. ``test_seed.py`` needs
-neither and always runs.
+``-m e2e``/``-m grafana``; a plain ``uv run pytest`` deselects them. ``test_seed.py`` and
+``test_stack_hygiene.py`` need neither and always run. ``--collect-only`` (VS Code's discovery)
+keeps them all.
+
+The browser fixtures come from ``tests/support/playwright_fixtures.py``: module scope, so
+Playwright never outlives the module's browser tests (see that module's docstring).
 
 Environment: ``GRAFANA_SMOKE_SEED`` (default 42) and ``GRAFANA_SMOKE_HOURS`` (default 24)
-choose the synthetic day; ``GRAFANA_SMOKE_KEEP=1`` keeps the stack after the run.
+choose the synthetic day; ``GRAFANA_SMOKE_KEEP=1`` keeps the stack until the next run.
 """
 
 import os

@@ -4,6 +4,11 @@
 a unique project name, generated credentials and ports chosen by Docker on 127.0.0.1. The
 real stack (project ``trade-agent``, ports 3000/5432) is never touched: every command here
 carries ``-p <unique name>``.
+
+The project name carries the PID of the pytest process that owns it
+(``ta-grafana-smoke-<pid>-<random>``). A run killed before its teardown (a run stopped in
+VS Code, a closed terminal) leaves its containers behind; the next run removes every smoke
+stack whose owner process no longer exists, and never the stack of a run still going.
 """
 
 import asyncio
@@ -11,9 +16,11 @@ import contextlib
 import json
 import math
 import os
+import re
 import secrets
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Coroutine, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +41,7 @@ SUITE = ROOT / "tests" / "grafana-dashboard-smoke-tests"
 COMPOSE_FILE = SUITE / "compose.yaml"
 STACK = yaml.safe_load((ROOT / "deploy" / "stack.yml").read_text("utf-8"))
 PROJECT_PREFIX = "ta-grafana-smoke-"
+PROJECT = re.compile(rf"{PROJECT_PREFIX}(?P<pid>\d+)-[0-9a-f]+")
 KEEP_ENV = "GRAFANA_SMOKE_KEEP"
 """``GRAFANA_SMOKE_KEEP=1`` leaves the stack running after the tests (debugging)."""
 
@@ -111,11 +119,60 @@ def _env(admin: str, postgres: str, grafana_db: str) -> dict[str, str]:
     }
 
 
+if sys.platform == "win32":
+    import ctypes
+
+    def _process_alive(pid: int) -> bool:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: it exists, not ours
+        try:
+            code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+else:
+
+    def _process_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)  # signal 0: only checks that the process exists
+        except ProcessLookupError:
+            return False
+        except PermissionError:  # it exists, owned by another user
+            return True
+        return True
+
+
+def remove_stale_stacks() -> list[str]:
+    """Removes the smoke stacks left by runs whose pytest process is gone."""
+    listed = subprocess.run(
+        ["docker", "ps", "-a", "--filter", "label=com.docker.compose.project",  # noqa: S607
+         "--format", '{{.Label "com.docker.compose.project"}}'],
+        capture_output=True, text=True, encoding="utf-8", timeout=60, check=True,
+    ).stdout.split()  # fmt: skip
+    stale = sorted(
+        project
+        for project in set(listed)
+        if (match := PROJECT.fullmatch(project)) and not _process_alive(int(match["pid"]))
+    )
+    for project in stale:  # no -f: Compose finds the containers by the project label
+        subprocess.run(  # noqa: S603 - project names matched above
+            ["docker", "compose", "-p", project, "down", "-v", "--remove-orphans",  # noqa: S607
+             "--timeout", "5"],
+            cwd=ROOT, capture_output=True, timeout=300, check=True,
+        )  # fmt: skip
+    return stale
+
+
 def ephemeral_stack() -> Iterator[Stack]:
     """Starts the stack, migrates the database (Alembic) and removes everything at the end."""
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível: smoke tests do Grafana ignorados")
-    project = PROJECT_PREFIX + secrets.token_hex(4)
+    remove_stale_stacks()
+    project = f"{PROJECT_PREFIX}{os.getpid()}-{secrets.token_hex(4)}"
     admin, postgres, grafana_db = (secrets.token_urlsafe(18) for _ in range(3))
     env = _env(admin, postgres, grafana_db)
     try:
@@ -130,7 +187,7 @@ def ephemeral_stack() -> Iterator[Stack]:
         yield Stack(project, grafana, loki, url, "admin", admin)
     finally:
         if os.environ.get(KEEP_ENV) == "1":
-            print(f"\n{KEEP_ENV}=1: stack kept (docker compose -p {project} down -v to remove)")
+            print(f"\n{KEEP_ENV}=1: {project} kept until the next run (or `down -v` it)")
         else:
             _compose(project, env, "down", "-v", "--remove-orphans", "--timeout", "5")
 
