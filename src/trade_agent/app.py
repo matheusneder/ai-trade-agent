@@ -141,8 +141,8 @@ def assemble(
 
     async def check_risk() -> None:
         snapshot = await monitor.snapshot()
-        await telemetry.observe(snapshot)
-        await guard.apply(evaluate(conditions, snapshot))
+        await guard.apply(evaluate(conditions, snapshot))  # before telemetry: a failure there
+        await telemetry.observe(snapshot)  # must not keep the guard from acting
 
     symbols = [f"{asset}{strategy.account.quote_asset}" for asset in names]
 
