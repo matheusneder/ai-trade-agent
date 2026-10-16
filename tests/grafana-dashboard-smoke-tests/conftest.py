@@ -24,6 +24,13 @@ from playwright.sync_api import Page
 from tests.support.grafana_seed import Dataset, generate, insert, loki_streams
 from tests.support.grafana_stack import Stack, ephemeral_stack, push_logs, run_async
 from tests.support.grafana_ui import Watch
+from tests.support.playwright_fixtures import (  # noqa: F401 - fixtures: a browser per module
+    browser,
+    browser_context_args,
+    browser_type,
+    launch_browser,
+    playwright,
+)
 
 HERE = Path(__file__).parent
 E2E_FILES = {"test_provisioning.py", "test_dashboards.py", "test_interactions.py"}
@@ -79,14 +86,9 @@ def base_url(stack: Stack) -> str:
 
 
 @pytest.fixture(scope="session")
-def browser_context_args(browser_context_args: dict[str, Any], base_url: str) -> dict[str, Any]:
+def browser_context_overrides() -> dict[str, Any]:
     # tall enough for every panel of the longest dashboard (Grafana loads panels lazily)
-    return browser_context_args | {
-        "base_url": base_url,
-        "viewport": {"width": 1600, "height": 2400},
-        "timezone_id": "UTC",
-        "locale": "en-US",
-    }
+    return {"viewport": {"width": 1600, "height": 2400}, "timezone_id": "UTC", "locale": "en-US"}
 
 
 @pytest.fixture
