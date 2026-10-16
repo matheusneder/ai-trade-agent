@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from tests.support.claude import FakeClaude
+from tests.support.clients import fake_api
 from tests.support.fake_binance import FakeBinance
 from tests.support.metrics import Measured
 from tests.support.risk import CONDITIONS, NOW, closed_position
@@ -64,6 +65,27 @@ async def test_risk_check_feeds_the_gauges(
         )
         == 1
     )
+
+
+async def test_telemetry_records_a_clock_offset_beyond_int32(
+    db: Database, store: Store, fake: FakeBinance
+) -> None:
+    """Regression: an offset over ~24.8 days in ms overflowed the int4 column and failed
+    ``check_risk``."""
+    fake.candles[("BTCUSDT", "1m")] = _klines([60000.0] * 61)
+    local = fake.clock
+    fake.clock = lambda: local() - 30 * 86_400_000  # Binance 30 days behind the agent
+    async with fake_api(fake, clock=local) as api:
+        await api.rest.sync_time()
+        assert api.rest.time_offset_ms < -(2**31)
+        guard = RiskGuard(
+            conditions=CONDITIONS, states=StateStore(store), store=store, notify=_ignore
+        )
+        monitor = RiskMonitor(api=api, store=store, strategy=PROFILES, health=api.rest.health)
+        recorder = TelemetryRecorder(db=db, guard=guard, rest=api.rest, scopes=[])
+        assert await recorder.observe(await monitor.snapshot()) is True
+    saved = await recorder.last_recorded()
+    assert saved is not None and saved.clock_offset_ms == api.rest.time_offset_ms
 
 
 async def test_llm_calls_count_cost_and_tokens(measured: Measured) -> None:
