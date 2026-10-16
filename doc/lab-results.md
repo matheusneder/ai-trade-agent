@@ -62,6 +62,22 @@ Method of the revision (D-034): **fixed parameters** (no *hyperopt* per window),
 
 The holdout has been used, so any new variant tested on 2025–2026 no longer has a clean out-of-sample check: the Demo is the next validation.
 
+### 2.1 ATR-based take-profit activation (2026-10-16)
+
+Hypothesis: the fixed 13% activation won in 2023–2024 and lost in 2025–2026 because the moves were smaller, so an activation proportional to the entry's volatility (`take_profit.activation_atr_mult`: k × the ATR% of the signal candle, between `activation_pct` and `activation_max_pct`, D-035) could adapt to the regime. The median ATR% (4h) of the `swing_trend` entries was 2.41% in the design period and 1.99% in the holdout, so 9.7% is about 4–5 × ATR.
+
+Same method (fixed parameters, `--detail 5m`, *break-even* and maximum holding), only the activation changes:
+
+| `swing_trend` | Design (2023–2024) | Holdout (2025–2026) | 15 windows | Worst window DD | Trades |
+|---|--:|--:|--:|--:|--:|
+| Fixed 9.7% (current) | **+33.26%** | +26.86% | **+69.04%** | 12.57% | 265 |
+| 4 × ATR, 7–16% | +25.80% | +23.71% | +55.63% | 12.69% | 268 |
+| 5 × ATR, 7–16% | +15.31% | +21.88% | +40.54% | 12.65% | 256 |
+| 6 × ATR, 7–16% | +23.91% | **+29.69%** | +60.69% | 12.65% | 252 |
+| 5 × ATR, 9.7–13% | +24.66% | +18.74% | +48.02% | 12.57% | 256 |
+
+**Rejected:** no variant beats the fixed activation on the design period, and the results are not monotonic in k (5 × ATR is worse than both 4 and 6), which points to noise rather than an effect. The ATR at the entry does not predict how far the trade will go: high-volatility entries get a higher activation, hold their slot longer and block new entries (2024-Q4: 50 trades and +26.72% with the fixed activation, 41 trades and +15.46% with 5 × ATR). The regime effect seen with the fixed 13% is not a per-trade volatility effect. The holdout was already used in this section, so the +29.69% of 6 × ATR is not an out-of-sample result either. The mode stays available (off by default) for future tests.
+
 ## 3. Out-of-sample results (2026-10-01)
 
 > **Superseded by section 2:** these numbers come from 4h backtests without intra-candle exits and are inflated by the tight trailings that *hyperopt* chose.

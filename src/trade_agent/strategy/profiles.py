@@ -60,13 +60,30 @@ class StopConfig(_Strict):
 class TakeProfitConfig(_Strict):
     mode: TakeProfitMode
     activation_pct: Percent
+    """Fixed activation; with ``activation_atr_mult``, the floor of the ATR-based one."""
     trailing_delta_bps: int | None = Field(default=None, ge=10, le=2000)
+    activation_atr_mult: float | None = Field(default=None, gt=0)
+    """Optional: activation at this multiple of the entry's ATR%, clipped to
+    [``activation_pct``, ``activation_max_pct``]."""
+    activation_max_pct: Percent | None = None
 
     @model_validator(mode="after")
     def _check(self) -> "TakeProfitConfig":
         if self.mode is TakeProfitMode.TRAILING and self.trailing_delta_bps is None:
             raise ValueError("take-profit trailing exige trailing_delta_bps")
+        if (self.activation_atr_mult is None) != (self.activation_max_pct is None):
+            raise ValueError("ativação por ATR exige activation_atr_mult e activation_max_pct")
+        if self.activation_max_pct is not None and self.activation_max_pct < self.activation_pct:
+            raise ValueError("activation_max_pct deve ser >= activation_pct")
         return self
+
+    def activation_for(self, atr_pct: Decimal | None) -> Decimal:
+        """Activation (percentage) for an entry with ``atr_pct`` (percentage); the fixed one
+        when the ATR mode is off or the ATR is unknown."""
+        if self.activation_atr_mult is None or self.activation_max_pct is None or not atr_pct:
+            return self.activation_pct
+        activation = Decimal(str(self.activation_atr_mult)) * atr_pct
+        return min(max(activation, self.activation_pct), self.activation_max_pct)
 
 
 class ProtectionConfig(_Strict):
@@ -83,19 +100,21 @@ class ProtectionConfig(_Strict):
             return timedelta(hours=amount) if value.endswith("h") else timedelta(days=amount)
         return value
 
-    def policy(self, stop_pct: Decimal) -> ProtectionPolicy:
-        """Concrete policy; ``stop_pct`` comes from the signal (ATR), capped by ``max_pct``."""
+    def policy(self, stop_pct: Decimal, atr_pct: Decimal | None = None) -> ProtectionPolicy:
+        """Concrete policy; ``stop_pct`` comes from the signal (ATR), capped by ``max_pct``;
+        ``atr_pct`` (percentage) sets the take-profit activation in the ATR mode."""
+        activation = self.take_profit.activation_for(atr_pct)
         if self.stop.mode is StopMode.FIXED:
             return ProtectionPolicy(
                 take_profit_mode=self.take_profit.mode,
-                take_profit_pct=self.take_profit.activation_pct,
+                take_profit_pct=activation,
                 take_profit_trailing_bips=self.take_profit.trailing_delta_bps,
                 stop_mode=StopMode.FIXED,
                 stop_pct=min(stop_pct, self.stop.max_pct or stop_pct),
             )
         return ProtectionPolicy(
             take_profit_mode=self.take_profit.mode,
-            take_profit_pct=self.take_profit.activation_pct,
+            take_profit_pct=activation,
             take_profit_trailing_bips=self.take_profit.trailing_delta_bps,
             stop_mode=StopMode.TRAILING,
             stop_trailing_bips=self.stop.trailing_delta_bps,

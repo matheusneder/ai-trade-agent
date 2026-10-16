@@ -115,9 +115,13 @@ def config_text(strategy: StrategyConfig, conditions: StopConditions, digest: st
     lines = [f"Configuration {digest} — managed capital {strategy.account.managed_capital}"]
     for name, p in strategy.enabled_profiles().items():
         take = p.protection.take_profit
+        tp = f"{take.activation_pct}%"
+        if take.activation_atr_mult is not None:
+            limits = f"{take.activation_pct}–{take.activation_max_pct}%"
+            tp = f"{take.activation_atr_mult}×ATR ({limits})"
         lines.append(
             f"• {name} ({p.code}): {p.timeframe}, capital {strategy.profile_capital(name)}, "
-            f"risk/trade {p.allocation.risk_per_trade_pct}%, TP {take.activation_pct}%"
+            f"risk/trade {p.allocation.risk_per_trade_pct}%, TP {tp}"
         )
     active = [name for name, t in conditions.global_ if t is not None]
     lines.append(f"Active stop conditions: {', '.join(active)}")

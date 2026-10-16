@@ -155,7 +155,9 @@ def plan_entries(
                 setup=candidate.signal.setup or "",
                 score=score,
                 entry=EntryOrder(symbol, qty, price, profile.entry.order),
-                policy=profile.protection.policy(stop_pct),
+                policy=profile.protection.policy(
+                    stop_pct, Decimal(str(candidate.signal.atr_pct)) * PCT
+                ),
                 notional=cost,
                 risk=cost * stop_pct / PCT,
             )
