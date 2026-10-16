@@ -37,6 +37,7 @@ dev = [
     "pytest>=8.4",
     "pytest-asyncio>=1.1",
     "pytest-cov>=6.2",
+    "pytest-playwright>=0.7",
     "respx>=0.22",
     "ruff>=0.12",
     "testcontainers[postgres]>=4.10",
@@ -113,6 +114,8 @@ addopts = [
 markers = [
     "live: testes contra Binance Testnet/Demo (exigem chaves no .env; rodar com `-m live`)",
     "integration: testes de integração (Binance simulada, Postgres em contêiner)",
+    "e2e: end-to-end tests with Docker and a browser (Playwright); run by path, e.g. `uv run pytest tests/grafana-dashboard-smoke-tests`",
+    "grafana: Grafana dashboard smoke tests (tests/grafana-dashboard-smoke-tests)",
 ]
 filterwarnings = ["error"]
 

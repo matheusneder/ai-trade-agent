@@ -130,7 +130,10 @@ The agent records a telemetry snapshot every 5 minutes (`telemetry_snapshots`) a
 ```bash
 docker compose -f deploy/docker-compose.yml up -d postgres grafana   # reads the root .env
 uv run python -m scripts.grafana_dashboards   # regenerates the dashboards after editing the generator
+uv run pytest tests/grafana-dashboard-smoke-tests   # E2E smoke tests of the dashboards (Docker + Playwright)
 ```
+
+Any change to a Grafana dashboard must run the smoke tests above and adjust them; new panels, metrics or features come with new tests ([`tests/grafana-dashboard-smoke-tests/README.md`](tests/grafana-dashboard-smoke-tests/README.md)).
 
 ## Layout
 
@@ -139,6 +142,7 @@ src/trade_agent/      application code (see doc/03-architecture.md §4)
 tests/unit/           unit tests
 tests/integration/    integration tests (simulated Binance, Postgres in a container)
 tests/live/           tests against Testnet/Demo (`live` marker)
+tests/grafana-dashboard-smoke-tests/  E2E smoke tests of the Grafana dashboards (`e2e` marker)
 scripts/              OPOCO spike and the Grafana and SigNoz dashboard generators
 lab/                  backtesting lab (Freqtrade through Docker, walk-forward)
 config/               allocation profiles (profiles.yaml) and analyst (research.yaml)
