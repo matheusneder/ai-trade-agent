@@ -46,9 +46,17 @@ BENCHMARK = "BTC/USDT"
 DATA = USER_DATA / "data" / "binance"
 OPTIMIZED_SPACES = ("buy", "sell")
 # They define the profile's risk: never optimized (optimize=False in the strategy).
-# Risk and the agent's decision exits come from the profile and are never optimized.
+# Risk, the agent's decision exits and the ATR-based TP activation come from the profile.
 RISK_PARAMS = frozenset(
-    {"risk_per_trade", "max_position_pct", "stop_max_pct", "break_even_r", "max_holding_hours"}
+    {
+        "risk_per_trade",
+        "max_position_pct",
+        "stop_max_pct",
+        "break_even_r",
+        "max_holding_hours",
+        "tp_activation_atr_mult",
+        "tp_activation_max",
+    }
 )
 
 # Pairs with continuous history since 2023 per tier (a static approximation of the universe).
@@ -153,7 +161,7 @@ def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
     """Content of ``trade_agent_strategy.json`` (Freqtrade's parameter format)."""
     signals = profile.signal_params()
     protection = profile.protection
-    stop = protection.stop
+    stop, take_profit = protection.stop, protection.take_profit
     if stop.mode is StopMode.FIXED:  # already reflected in signal_params()
         stop_max, atr_mult = signals.max_stop_pct, signals.atr_stop_mult
     else:  # approximation: trailing stop modeled as a fixed stop at the trailing distance
@@ -173,8 +181,10 @@ def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
             "sell": {
                 "atr_stop_mult": atr_mult,
                 "stop_max_pct": stop_max,
-                "tp_activation": float(protection.take_profit.activation_pct) / 100,
-                "tp_trailing": (protection.take_profit.trailing_delta_bps or 0) / 10_000,
+                "tp_activation": float(take_profit.activation_pct) / 100,
+                "tp_trailing": (take_profit.trailing_delta_bps or 0) / 10_000,
+                "tp_activation_atr_mult": take_profit.activation_atr_mult or 0.0,
+                "tp_activation_max": float(take_profit.activation_max_pct or 0) / 100,
                 "exit_score": profile.exits.exit_score,
                 "break_even_r": protection.break_even_after_r or 0.0,
                 "max_holding_hours": (
