@@ -216,7 +216,8 @@ class TelemetrySnapshotRecord(Base):
     active_positions: Mapped[int] = mapped_column(Integer)
     api_error_rate: Mapped[float] = mapped_column(Float)
     used_weight_1m: Mapped[int | None] = mapped_column(Integer)
-    clock_offset_ms: Mapped[int | None] = mapped_column(Integer)
+    clock_offset_ms: Mapped[int | None] = mapped_column(BigInteger)
+    """Binance clock minus local clock; int4 only fits about 24.8 days."""
     btc_change_1h: Mapped[float | None] = mapped_column(Float)
     quote_deviation: Mapped[float | None] = mapped_column(Float)
     fear_greed: Mapped[int | None] = mapped_column(Integer)
