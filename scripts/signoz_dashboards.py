@@ -11,6 +11,15 @@ Dashboards as code, in the v2 (Perses) schema of SigNoz 0.144. Edit here and run
 The dashboards are identified by ``name`` (``trade-agent-...``): applying again updates them.
 A test makes sure the versioned JSON files are in sync with this generator, that the layout
 and the query types follow SigNoz's rules and that the metrics used exist in the agent.
+
+Smoke tests (tests/signoz-dashboard-smoke-tests, see its README.md) open every dashboard in
+Chromium on an ephemeral SigNoz filled with a synthetic day of the agent:
+
+    uv run pytest tests/signoz-dashboard-smoke-tests
+
+Every change to an existing dashboard requires running them and adjusting them to the change.
+Every new chart, metric, indicator or feature comes with more test coverage (data in the seed,
+expected values in test_dashboards.py). The tests evolve together with the dashboards.
 """
 
 import argparse
