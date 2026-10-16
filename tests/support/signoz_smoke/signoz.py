@@ -22,7 +22,7 @@ import httpx
 from pydantic import SecretStr
 from scripts import signoz_dashboards
 
-from signoz_smoke.seed import MS, Summary
+from tests.support.signoz_smoke.seed import MS, Summary
 
 ADMIN_EMAIL = "smoke-admin@example.test"
 ORGANIZATION = "trade-agent-smoke"

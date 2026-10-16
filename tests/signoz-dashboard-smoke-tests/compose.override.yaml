@@ -9,7 +9,7 @@
 # The base manifests pin container, network and volume names (signoz-signoz-0,
 # signoz-network, signoz-telemetrystore-0-0-data...) and publish ports on every interface:
 # exactly the names and ports of the real stack. Everything is renamed here and the ports go
-# to random host ports on 127.0.0.1. signoz_smoke/environment.py refuses to start when the
+# to random host ports on 127.0.0.1. tests/support/signoz_smoke/environment.py refuses to start when the
 # rendered configuration still mentions any of the production names. Relative paths resolve
 # against the folder of the base manifest, as Compose does for every file.
 
