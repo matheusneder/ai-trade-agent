@@ -16,8 +16,8 @@ from typing import Any
 
 import httpx
 
-HERE = Path(__file__).resolve().parents[1]
-ROOT = HERE.parents[1]
+ROOT = Path(__file__).resolve().parents[3]
+HERE = ROOT / "tests" / "signoz-dashboard-smoke-tests"
 BASE = ROOT / "deploy" / "signoz" / "pours" / "deployment" / "compose.yaml"
 OVERRIDE = HERE / "compose.override.yaml"
 PROJECT = "ta-signoz-smoke"
@@ -142,7 +142,7 @@ class Stack:
 def wait_otlp(endpoints: Endpoints, timeout: float = 180) -> None:
     """Waits for the ingester to accept data. It starts its receivers only after SigNoz sends it
     a configuration over OpAMP, and SigNoz does so only once an organization exists: call this
-    after :func:`signoz_smoke.signoz.bootstrap` registered the first user."""
+    after :func:`tests.support.signoz_smoke.signoz.bootstrap` registered the first user."""
     _wait_http(f"{endpoints.otlp}/v1/traces", timeout, post=True)
 
 

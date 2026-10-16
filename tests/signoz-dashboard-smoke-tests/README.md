@@ -68,12 +68,12 @@ uv run python tests/signoz-dashboard-smoke-tests/smoke.py down
 ```
 tests/signoz-dashboard-smoke-tests/
   compose.override.yaml   isolates Foundry's manifests (deploy/signoz/pours) for the tests
-  conftest.py             session fixtures: stack → credential → dashboards → seed → login
+  conftest.py             fixtures: stack → credential → dashboards → seed; login per module
   smoke.py                manual control (up / seed / generate / down)
   test_seed.py            the generator alone (fast, runs in the default suite)
   test_stack.py           isolation guard, API key, provisioning, every query has data (API)
   test_dashboards.py      the dashboards in Chromium: loading, rendering, values, interaction
-  signoz_smoke/
+tests/support/signoz_smoke/   helpers (a package outside this folder: its name has dashes)
     environment.py        the ephemeral Compose project, its isolation check and readiness
     signoz.py             first admin, login, service account + API key, apply, ingestion wait
     seed.py               the deterministic synthetic day (spans, logs, metrics, Summary)
@@ -110,7 +110,7 @@ containers and volumes. A whole start takes about a minute once the images are c
 ## The credential
 
 A fresh SigNoz has no user; the first registration creates the organization and its admin,
-with no e-mail or invitation. `signoz_smoke/signoz.py` then automates the rest, with a random
+with no e-mail or invitation. `tests/support/signoz_smoke/signoz.py` then automates the rest, with a random
 password generated per run (never stored outside the session's temporary folder):
 
 1. `POST /api/v1/register` — the first admin (`smoke-admin@example.test`);
@@ -128,7 +128,7 @@ SigNoz does that only once an organization exists: the seed is sent after the re
 
 ## The synthetic data
 
-`signoz_smoke/seed.py` builds, with `random.Random(seed)` and no clock reads besides the
+`tests/support/signoz_smoke/seed.py` builds, with `random.Random(seed)` and no clock reads besides the
 window's end, a full day (by default) of a normal operation of the agent, with the same service
 names, span names, attributes, metric names and log fields the agent, Alloy and the
 `docker_stats` collector produce:
@@ -198,5 +198,5 @@ exactly.
    add a test for it next to the interaction tests.
 4. Changed panel: fix the expectations that no longer hold; never delete one without a
    replacement.
-5. SigNoz upgrade: selectors live only in `signoz_smoke/ui.py` and the API calls in
-   `signoz_smoke/signoz.py`.
+5. SigNoz upgrade: selectors live only in `tests/support/signoz_smoke/ui.py` and the API calls in
+   `tests/support/signoz_smoke/signoz.py`.

@@ -16,10 +16,10 @@ from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parents[1])]  # signoz_smoke and scripts
+sys.path.insert(0, str(HERE.parents[1]))  # run as a script: the repository root
 
-from signoz_smoke import environment, otlp, signoz  # noqa: E402
-from signoz_smoke.seed import generate  # noqa: E402
+from tests.support.signoz_smoke import environment, otlp, signoz  # noqa: E402
+from tests.support.signoz_smoke.seed import generate  # noqa: E402
 
 
 def _seed(args: argparse.Namespace, endpoints: environment.Endpoints | None) -> None:

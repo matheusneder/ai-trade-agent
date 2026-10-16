@@ -5,8 +5,9 @@ import json
 import httpx
 import pytest
 from scripts import signoz_dashboards
-from signoz_smoke import environment, signoz
-from signoz_smoke.seed import Telemetry
+
+from tests.support.signoz_smoke import environment, signoz
+from tests.support.signoz_smoke.seed import Telemetry
 
 pytestmark = [pytest.mark.e2e, pytest.mark.signoz]
 

@@ -1,8 +1,9 @@
 """Synthetic, deterministic telemetry of a normal day of the agent, for the SigNoz dashboards.
 
 Everything here is pure: the same ``seed``, ``hours`` and ``end`` always give the same spans,
-logs and metrics (``random.Random(seed)``, no clock reads). :mod:`signoz_smoke.otlp` turns
-the result into OTLP requests and sends them to an ingester.
+logs and metrics (``random.Random(seed)``, no clock reads).
+:mod:`tests.support.signoz_smoke.otlp` turns the result into OTLP requests and sends them to an
+ingester.
 
 The data imitates what the real stack emits, with the same names and attributes:
 

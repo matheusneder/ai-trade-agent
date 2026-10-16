@@ -3,7 +3,7 @@
 The panels, sections and series come from ``scripts/signoz_dashboards.py`` itself, so a new
 panel is already checked for rendering and errors. Its *values* are not: add them to
 ``EXPECTED_NUMBERS``/``EXPECTED_LEGENDS``/``EXPECTED_ROWS`` below (and the facts they need to
-``signoz_smoke.seed.Summary``). See README.md.
+``tests.support.signoz_smoke.seed.Summary``). See README.md.
 """
 
 import re
@@ -13,8 +13,15 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 from scripts import signoz_dashboards
-from signoz_smoke.seed import Summary, Telemetry
-from signoz_smoke.ui import BrowserIssues, Dashboard, legend_labels, number_text, number_value
+
+from tests.support.signoz_smoke.seed import Summary, Telemetry
+from tests.support.signoz_smoke.ui import (
+    BrowserIssues,
+    Dashboard,
+    legend_labels,
+    number_text,
+    number_value,
+)
 
 pytestmark = [pytest.mark.e2e, pytest.mark.signoz]
 

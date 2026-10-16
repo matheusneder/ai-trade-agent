@@ -9,7 +9,6 @@ the seed, and is destroyed at the end (``SIGNOZ_SMOKE_KEEP=1`` keeps it).
 """
 
 import os
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -18,12 +17,18 @@ import httpx
 import pytest
 from playwright.sync_api import Browser, Page, expect
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))  # the signoz_smoke package (this folder's name has dashes)
+from tests.support.playwright_fixtures import (  # noqa: F401 - fixtures: a browser per module
+    browser,
+    browser_context_args,
+    browser_type,
+    launch_browser,
+    playwright,
+)
+from tests.support.signoz_smoke import environment, otlp, signoz
+from tests.support.signoz_smoke.seed import MS, Telemetry, generate
+from tests.support.signoz_smoke.ui import BrowserIssues
 
-from signoz_smoke import environment, otlp, signoz  # noqa: E402
-from signoz_smoke.seed import MS, Telemetry, generate  # noqa: E402
-from signoz_smoke.ui import BrowserIssues  # noqa: E402
+HERE = Path(__file__).resolve().parent
 
 MARKER = "signoz"  # registered in pyproject.toml, with the generic "e2e"
 
@@ -104,9 +109,11 @@ def window(telemetry: Telemetry) -> tuple[int, int]:
 
 
 # ================================================================== browser (pytest-playwright)
-@pytest.fixture(scope="session")
+# Module scope, like the browser itself (tests/support/playwright_fixtures.py): a live sync
+# Playwright keeps an asyncio loop marked as running, which broke every later test of the run.
+@pytest.fixture(scope="module")
 def signoz_login(
-    browser: Browser,
+    browser: Browser,  # noqa: F811 - the module-scoped fixture imported above
     signoz_stack: environment.Endpoints,
     signoz_credentials: signoz.Credentials,
     tmp_path_factory: pytest.TempPathFactory,
@@ -126,14 +133,11 @@ def signoz_login(
     return state
 
 
-@pytest.fixture(scope="session")
-def browser_context_args(
-    browser_context_args: dict[str, Any],
-    signoz_stack: environment.Endpoints,
-    signoz_login: Path,
+@pytest.fixture(scope="module")
+def browser_context_overrides(
+    signoz_stack: environment.Endpoints, signoz_login: Path
 ) -> dict[str, Any]:
     return {
-        **browser_context_args,
         "base_url": signoz_stack.ui,
         "storage_state": signoz_login,
         "viewport": {"width": 1600, "height": 1000},
@@ -148,5 +152,8 @@ def browser_issues(page: Page, signoz_stack: environment.Endpoints) -> Iterator[
     issues = BrowserIssues(signoz_stack.ui)
     issues.attach(page)
     expect.set_options(timeout=30_000)
-    yield issues
+    try:
+        yield issues
+    finally:  # expect's options are global: the next suites keep Playwright's default
+        expect.set_options(timeout=None)
     assert issues.problems == [], "\n".join(issues.problems)

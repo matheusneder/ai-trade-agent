@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 from scripts import signoz_dashboards
-from signoz_smoke import otlp, seed
+
+from tests.support.signoz_smoke import otlp, seed
 
 END = datetime(2026, 10, 16, 18, 0, tzinfo=UTC)
 
