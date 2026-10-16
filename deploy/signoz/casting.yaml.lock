@@ -169,8 +169,8 @@ spec:
       enabled: true
       env:
         SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
-      image: signoz/signoz-otel-collector:v0.144.13
-      version: v0.144.13
+      image: signoz/signoz-otel-collector:v0.144.14
+      version: v0.144.14
     status:
       addresses:
         otlp:
@@ -379,8 +379,8 @@ spec:
         SIGNOZ_SQLSTORE_PROVIDER: postgres
         SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
         SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
-      image: signoz/signoz:v0.145.0
-      version: v0.145.0
+      image: signoz/signoz:v0.146.0
+      version: v0.146.0
     status:
       addresses:
         apiserver:
