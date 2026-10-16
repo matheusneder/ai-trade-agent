@@ -45,8 +45,11 @@ def _requested(config: pytest.Config) -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Without asking for them, the e2e tests stay out of the run (fast, no Docker)."""
-    if _requested(config):
+    """Without asking for them, the e2e tests stay out of the run (fast, no Docker).
+
+    ``--collect-only`` keeps them: it is how VS Code discovers the tests for its Testing panel
+    (with ``tests`` as the argument), and it starts nothing."""
+    if _requested(config) or config.option.collectonly:
         return
     keep: list[pytest.Item] = []
     drop: list[pytest.Item] = []
