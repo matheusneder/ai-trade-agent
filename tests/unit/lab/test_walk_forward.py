@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from lab import walk_forward as wf
 
-from trade_agent.strategy.profiles import load_strategy_config
+from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
 PROFILES = wf.ROOT / "tests" / "fixtures" / "profiles.yaml"
 CONFIG = load_strategy_config(PROFILES)
@@ -58,6 +59,19 @@ def test_lab_config_from_profile() -> None:
     assert custom["exchange"]["pair_whitelist"] == ["SOL/USDT"]
 
 
+def test_strategy_params_atr_take_profit_activation() -> None:
+    data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
+    data["profiles"]["conservador"]["protection"]["take_profit"].update(
+        {"activation_pct": 7, "activation_atr_mult": 5, "activation_max_pct": 16}
+    )
+    profile = StrategyConfig.model_validate(data).profiles["conservador"]
+    sell = wf.strategy_params(profile)["params"]["sell"]
+    assert sell["tp_activation"] == pytest.approx(0.07)
+    assert sell["tp_activation_atr_mult"] == 5.0
+    assert sell["tp_activation_max"] == pytest.approx(0.16)
+    assert {"tp_activation_atr_mult", "tp_activation_max"} <= wf.RISK_PARAMS
+
+
 def test_detail_args() -> None:
     assert wf.detail_args("5m") == ["--timeframe-detail", "5m"]
     assert wf.detail_args(None) == []
@@ -70,6 +84,8 @@ def test_strategy_params_fixed_and_trailing_stop() -> None:
     assert fixed["sell"]["stop_max_pct"] == pytest.approx(0.04)
     assert fixed["sell"]["tp_activation"] == pytest.approx(0.03)
     assert fixed["sell"]["tp_trailing"] == pytest.approx(0.01)
+    assert fixed["sell"]["tp_activation_atr_mult"] == 0.0  # ATR-based activation off
+    assert fixed["sell"]["tp_activation_max"] == 0.0
     assert fixed["sell"]["atr_stop_mult"] == 2.0
     assert fixed["sell"]["break_even_r"] == 1.0
     assert fixed["sell"]["max_holding_hours"] == 21 * 24

@@ -41,8 +41,11 @@ def _candidate(
     stop_pct: float = 0.02,
     price: str = "100",
     opinion: MarketOpinion | None = None,
+    atr_pct: float = 0.01,
 ) -> Candidate:
-    signal = Signal(score=score, setup=setup, stop_pct=stop_pct, atr_pct=0.01, close=float(price))
+    signal = Signal(
+        score=score, setup=setup, stop_pct=stop_pct, atr_pct=atr_pct, close=float(price)
+    )
     return Candidate(_member(symbol, tier), signal, bid=D(price), ask=D(price), opinion=opinion)
 
 
@@ -69,6 +72,18 @@ def test_sizing_by_risk_per_trade() -> None:
     assert idea.risk == pytest.approx(idea.notional * D("0.02"))
     assert idea.profile_code == "con"
     assert result.rejections == ()
+
+
+def test_take_profit_activation_from_entry_atr() -> None:
+    take_profit = CONSERVATIVE.protection.take_profit.model_copy(
+        update={"activation_pct": D("7"), "activation_atr_mult": 5.0, "activation_max_pct": D("16")}
+    )
+    protection = CONSERVATIVE.protection.model_copy(update={"take_profit": take_profit})
+    profile = CONSERVATIVE.model_copy(update={"protection": protection})
+    [idea] = _plan(profile, candidates=[_candidate("AAAUSDT", atr_pct=0.024)]).ideas
+    assert idea.policy.take_profit_pct == pytest.approx(D("12"))
+    [fixed] = _plan(candidates=[_candidate("AAAUSDT", atr_pct=0.024)]).ideas
+    assert fixed.policy.take_profit_pct == D("3")  # default: fixed activation
 
 
 def test_ranking_limits_and_rejections() -> None:

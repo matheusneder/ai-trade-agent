@@ -58,6 +58,27 @@ def test_fixed_stop_policy_is_capped_by_max_pct() -> None:
     assert protection.stop_distance_pct(D("9")) == D("4")
 
 
+def test_take_profit_activation_is_fixed_by_default() -> None:
+    protection = load_strategy_config(CONFIG_FILE).profiles["conservador"].protection
+    assert protection.take_profit.activation_for(D("5")) == D("3")
+    assert protection.policy(D("2"), atr_pct=D("5")).take_profit_pct == D("3")
+
+
+def test_take_profit_activation_from_atr_is_clipped() -> None:
+    data = _raw()
+    data["profiles"]["conservador"]["protection"]["take_profit"].update(
+        {"activation_pct": 7, "activation_atr_mult": 5, "activation_max_pct": 16}
+    )
+    protection = StrategyConfig.model_validate(data).profiles["conservador"].protection
+    take_profit = protection.take_profit
+    assert take_profit.activation_for(D("2")) == D("10")
+    assert take_profit.activation_for(D("1")) == D("7")  # floor
+    assert take_profit.activation_for(D("4")) == D("16")  # cap
+    assert take_profit.activation_for(None) == D("7")  # unknown ATR: floor
+    assert take_profit.activation_for(D("0")) == D("7")
+    assert protection.policy(D("2"), atr_pct=D("2.4")).take_profit_pct == D("12.0")
+
+
 def test_trailing_stop_policy_and_distance() -> None:
     protection = load_strategy_config(CONFIG_FILE).profiles["agressivo"].protection
     policy = protection.policy(D("3"))
@@ -121,6 +142,27 @@ def test_max_holding_formats() -> None:
             ("profiles", "moderado", "protection", "take_profit"),
             {"mode": "trailing", "activation_pct": 3},
             "trailing_delta_bps",
+        ),
+        (
+            ("profiles", "moderado", "protection", "take_profit"),
+            {
+                "mode": "trailing",
+                "activation_pct": 3,
+                "trailing_delta_bps": 100,
+                "activation_atr_mult": 4,
+            },
+            "activation_max_pct",
+        ),
+        (
+            ("profiles", "moderado", "protection", "take_profit"),
+            {
+                "mode": "trailing",
+                "activation_pct": 3,
+                "trailing_delta_bps": 100,
+                "activation_atr_mult": 4,
+                "activation_max_pct": 2,
+            },
+            ">= activation_pct",
         ),
         (("profiles", "moderado", "allocation", "max_position_pct"), 1.5, "less than or equal"),
         (("profiles", "moderado", "extra"), 1, "Extra inputs"),

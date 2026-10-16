@@ -6,7 +6,9 @@ into the container through ``PYTHONPATH``) and replicates the agent's native pro
 * fixed stop at ``entry × (1 − stop_pct)``, with ``stop_pct`` from the ATR capped at the
   profile's maximum (the OCO's ``STOP_LOSS`` leg);
 * *trailing take-profit*: on reaching ``+tp_activation``, the stop starts following the top
-  at a ``tp_trailing`` distance (``TAKE_PROFIT`` leg with ``trailingDelta``);
+  at a ``tp_trailing`` distance (``TAKE_PROFIT`` leg with ``trailingDelta``); with
+  ``tp_activation_atr_mult``, the activation is that multiple of the entry's ATR%, clipped to
+  [``tp_activation``, ``tp_activation_max``];
 * risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position;
 * the agent's decision exits: stop at *break-even* after ``break_even_r`` and the maximum
   holding time.
@@ -16,6 +18,7 @@ The default parameters are only a starting point: ``lab/walk_forward.py`` genera
 ``config/profiles.yaml``.
 """
 
+import math
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -74,6 +77,13 @@ class TradeAgentStrategy(IStrategy):
     )
     tp_activation = DecimalParameter(0.01, 0.25, default=0.03, decimals=3, space="sell")
     tp_trailing = DecimalParameter(0.005, 0.05, default=0.01, decimals=3, space="sell")
+    # ATR-based activation (``take_profit.activation_atr_mult``), from the profile; 0 = off.
+    tp_activation_atr_mult = DecimalParameter(
+        0, 20, default=0, decimals=2, space="sell", optimize=False
+    )
+    tp_activation_max = DecimalParameter(
+        0, 0.5, default=0, decimals=3, space="sell", optimize=False
+    )
     exit_score = DecimalParameter(-0.8, 0.2, default=-0.2, decimals=2, space="sell")
     # Decision exits of the agent (``trade_agent.strategy.exits``), from the profile; 0 = off.
     break_even_r = DecimalParameter(0, 5, default=0, decimals=2, space="sell", optimize=False)
@@ -122,13 +132,29 @@ class TradeAgentStrategy(IStrategy):
         dataframe.loc[dataframe["score"] <= float(self.exit_score.value), "exit_long"] = 1
         return dataframe
 
-    def _entry_stop_pct(self, pair: str, trade: Trade) -> float:
+    def _entry_value(self, pair: str, trade: Trade, column: str, default: float) -> float:
+        """``column`` on the signal candle of the entry (``default`` if missing)."""
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         candle = timeframe_to_prev_date(self.timeframe, trade.open_date_utc)
         rows = dataframe.loc[dataframe["date"] == candle]
         if rows.empty:
-            return float(self.stop_max_pct.value)
-        return float(rows["stop_pct"].iloc[-1])
+            return default
+        value = float(rows[column].iloc[-1])
+        return default if math.isnan(value) else value
+
+    def _entry_stop_pct(self, pair: str, trade: Trade) -> float:
+        return self._entry_value(pair, trade, "stop_pct", float(self.stop_max_pct.value))
+
+    def _tp_activation(self, pair: str, trade: Trade) -> float:
+        """Same rule as ``TakeProfitConfig.activation_for`` (fractions instead of %)."""
+        floor = float(self.tp_activation.value)
+        mult = float(self.tp_activation_atr_mult.value)
+        if mult <= 0:
+            return floor
+        atr_pct = self._entry_value(pair, trade, "atr_pct", 0.0)
+        if atr_pct <= 0:
+            return floor
+        return min(max(mult * atr_pct, floor), float(self.tp_activation_max.value))
 
     def custom_stoploss(
         self,
@@ -141,7 +167,7 @@ class TradeAgentStrategy(IStrategy):
         **kwargs: Any,
     ) -> float | None:
         max_rate = trade.max_rate or trade.open_rate
-        if max_rate >= trade.open_rate * (1 + float(self.tp_activation.value)):
+        if max_rate >= trade.open_rate * (1 + self._tp_activation(pair, trade)):
             return -float(self.tp_trailing.value)  # trailing TP activated: follows the top
         stop_pct = self._entry_stop_pct(pair, trade)
         if self._break_even_reached(pair, trade, stop_pct):
