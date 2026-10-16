@@ -101,7 +101,7 @@ def telemetry(signoz_stack: environment.Endpoints, signoz_api: httpx.Client) -> 
     data = generate(seed, hours)
     environment.wait_otlp(signoz_stack)
     otlp.send(data, signoz_stack.otlp)
-    signoz.wait_ingested(signoz_api, data.summary)
+    signoz.wait_ingested(signoz_api, data.summary, environment.Stack())
     return data
 
 

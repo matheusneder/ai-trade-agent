@@ -21,6 +21,7 @@ HERE = ROOT / "tests" / "signoz-dashboard-smoke-tests"
 BASE = ROOT / "deploy" / "signoz" / "pours" / "deployment" / "compose.yaml"
 OVERRIDE = HERE / "compose.override.yaml"
 PROJECT = "ta-signoz-smoke"
+CLICKHOUSE = "signoz-telemetrystore-clickhouse-0-0"  # compose service
 # names of the real stack: the ephemeral configuration must not mention any of them
 PRODUCTION_PROJECTS = {"signoz", "trade-agent"}
 PRODUCTION_NETWORKS = {"signoz-network", "trade-agent_default", "trade-agent_docker-api"}
@@ -137,6 +138,22 @@ class Stack:
 
     def running(self) -> bool:
         return bool(self.compose("ps", "-q", check=False).strip())
+
+    def metric_samples(self, start_ms: int, end_ms: int) -> int:
+        """Metric samples stored in ClickHouse between the two instants, for the seed's metrics
+        (``trade_agent.*`` and ``container.*``). The API has no exact sample count: its metric
+        queries aggregate by step. One OTLP gauge or sum point is one sample here."""
+        query = (
+            "SELECT count() FROM signoz_metrics.distributed_samples_v4"
+            " WHERE (startsWith(metric_name, 'trade_agent.')"
+            " OR startsWith(metric_name, 'container.'))"
+            " AND unix_milli BETWEEN {start:Int64} AND {end:Int64}"
+        )
+        found = self.compose(
+            "exec", "-T", CLICKHOUSE, "clickhouse-client", "--query", query,
+            f"--param_start={start_ms}", f"--param_end={end_ms}", timeout=120,
+        )  # fmt: skip
+        return int(found.strip() or 0)
 
 
 def wait_otlp(endpoints: Endpoints, timeout: float = 180) -> None:

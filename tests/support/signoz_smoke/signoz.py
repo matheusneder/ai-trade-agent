@@ -22,6 +22,7 @@ import httpx
 from pydantic import SecretStr
 from scripts import signoz_dashboards
 
+from tests.support.signoz_smoke.environment import Stack
 from tests.support.signoz_smoke.seed import MS, Summary
 
 ADMIN_EMAIL = "smoke-admin@example.test"
@@ -106,16 +107,23 @@ def count(http: httpx.Client, signal: str, where: str, summary: Summary) -> int:
     return int(rows[0][-1]) if rows else 0
 
 
-def wait_ingested(http: httpx.Client, summary: Summary, *, timeout: float = 180) -> None:
-    """Waits until SigNoz answers with everything that was sent (the collector batches)."""
+def wait_ingested(
+    http: httpx.Client, summary: Summary, stack: Stack, *, timeout: float = 180
+) -> None:
+    """Waits until SigNoz holds everything that was sent (the collector batches): every span,
+    log and metric sample. Without the metrics, a panel read right after the seed could show a
+    partial series or an older last value (a gauge, a missing p50 line)."""
     expected = {
         ("traces", "service.name LIKE 'trade-agent.%'"): summary.spans,
         ("logs", "service.namespace = 'trade-agent'"): summary.logs,
+        ("metrics", "samples"): summary.metric_points,
     }
+    window = (summary.start // MS, summary.end // MS + 60_000)
     deadline = time.monotonic() + timeout
     found: dict[tuple[str, str], int] = {}
     while time.monotonic() < deadline:
-        found = {key: count(http, *key, summary) for key in expected}
+        found = {key: count(http, *key, summary) for key in expected if key[0] != "metrics"}
+        found["metrics", "samples"] = stack.metric_samples(*window)
         if found == expected:
             return
         time.sleep(2)
