@@ -173,8 +173,9 @@ def test_number_panels_show_the_seeded_values(
     precision = int(board.panels[key]["spec"]["plugin"]["spec"]["formatting"]["decimalPrecision"])
     decimals = len(shown.partition(".")[2])
     assert decimals <= precision, shown
-    if float(expected).is_integer():
-        assert shown == number_text(expected)
+    if float(expected).is_integer():  # web-first: the panel may still update after loading
+        value = board.rendered(key).get_by_test_id("number-panel-value")
+        expect(value).to_have_text(number_text(expected))
     else:
         assert number_value(shown) == pytest.approx(expected, abs=10**-decimals)
 
@@ -235,7 +236,8 @@ def test_time_range_selector_reloads_the_panels(
             expect(page.locator(".timeSelection-input .time-input-prefix")).to_have_text(relative)
             board.rendered(first)
         assert sent, "no query after changing the time range"
-        assert {(q["end"] - q["start"]) // 60_000 for q in sent} == {minutes}
+        # SigNoz aligns start and end to the millisecond: 6 h may be 359.99 minutes
+        assert {round((q["end"] - q["start"]) / 60_000) for q in sent} == {minutes}
 
 
 def test_shorter_range_shows_fewer_requests(
