@@ -78,6 +78,23 @@ Same method (fixed parameters, `--detail 5m`, *break-even* and maximum holding),
 
 **Rejected:** no variant beats the fixed activation on the design period, and the results are not monotonic in k (5 × ATR is worse than both 4 and 6), which points to noise rather than an effect. The ATR at the entry does not predict how far the trade will go: high-volatility entries get a higher activation, hold their slot longer and block new entries (2024-Q4: 50 trades and +26.72% with the fixed activation, 41 trades and +15.46% with 5 × ATR). The regime effect seen with the fixed 13% is not a per-trade volatility effect. The holdout was already used in this section, so the +29.69% of 6 × ATR is not an out-of-sample result either. The mode stays available (off by default) for future tests.
 
+### 2.2 New profiles with ATR-based activation (2026-10-16)
+
+Two new profiles were tried with the ATR-based activation, each against the same profile with a fixed activation (one change at a time). The 2025–2026 holdout had already been used in D-034 and section 2.1.
+
+- `trend_atr`: 1d, core and large, 3 slots, risk 1.0%, stop 2 × ATR (cap 9%), trailing 250 bps, *break-even* 1.2R, maximum holding 40d, `min_score` 0.60, `vol_rel_min` 1.5.
+- `alt_atr`: 4h, large and mid, 3 slots, risk 1.0%, stop 3 × ATR (cap 7%), trailing 150 bps, *break-even* 1.0R, maximum holding 10d, `min_score` 0.67.
+
+| Profile | Activation | Design (2023–2024) | Holdout (2025–2026) | Worst window DD |
+|---|---|--:|--:|--:|
+| `trend_atr` | fixed 15% | +7.67% | −10.01% | 9.50% |
+| `trend_atr` | 2.5 × ATR, 8–25% | +9.87% | −3.30% | 8.17% |
+| `alt_atr` | fixed 11% | **+38.65%** | −6.25% | 9.34% |
+| `alt_atr` | 4 × ATR, 8–18% | +27.26% | −1.40% | 8.14% |
+| `alt_atr` | 4 × ATR, 10–13% | +23.29% | — | 8.74% |
+
+**Rejected:** none of them is profitable on the holdout, so no profile was added. The ATR-based activation lost less than the fixed one on the holdout in both profiles, and in the daily profile it also won on the design period. On 4h it lost on the design period, as in `swing_trend`. Both profiles lose in 2025–2026, the regime in which `swing_trend` still made +26.86%. An earlier daily test (`trend_daily`, D-034) had made +34.47% on the design period with other entry filters.
+
 ## 3. Out-of-sample results (2026-10-01)
 
 > **Superseded by section 2:** these numbers come from 4h backtests without intra-candle exits and are inflated by the tight trailings that *hyperopt* chose.
