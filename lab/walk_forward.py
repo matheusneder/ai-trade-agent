@@ -46,7 +46,10 @@ BENCHMARK = "BTC/USDT"
 DATA = USER_DATA / "data" / "binance"
 OPTIMIZED_SPACES = ("buy", "sell")
 # They define the profile's risk: never optimized (optimize=False in the strategy).
-RISK_PARAMS = frozenset({"risk_per_trade", "max_position_pct", "stop_max_pct"})
+# Risk and the agent's decision exits come from the profile and are never optimized.
+RISK_PARAMS = frozenset(
+    {"risk_per_trade", "max_position_pct", "stop_max_pct", "break_even_r", "max_holding_hours"}
+)
 
 # Pairs with continuous history since 2023 per tier (a static approximation of the universe).
 PAIRS_BY_TIER: dict[Tier, tuple[str, ...]] = {
@@ -173,6 +176,10 @@ def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
                 "tp_activation": float(protection.take_profit.activation_pct) / 100,
                 "tp_trailing": (protection.take_profit.trailing_delta_bps or 0) / 10_000,
                 "exit_score": profile.exits.exit_score,
+                "break_even_r": protection.break_even_after_r or 0.0,
+                "max_holding_hours": (
+                    protection.max_holding.total_seconds() / 3600 if protection.max_holding else 0.0
+                ),
             },
             "stoploss": {"stoploss": -0.25},
             "roi": {"0": 100},

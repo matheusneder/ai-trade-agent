@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -8,11 +8,12 @@
 | Item | Value |
 |------|-------|
 | Backtester | Freqtrade (`freqtradeorg/freqtrade:stable`) through Docker (D-014). The "shell" strategy imports `trade_agent.signals`, the same code as production |
+| Intra-candle exits | Since 2026-10-16, `--detail 5m`: the stop and the trailing take-profit follow 5m candles. Without it, Freqtrade only sees the 4h high and low and assumes the high came first |
 | Data | Public Binance Spot 4h candles, since 2021-10, for static pairs per *tier* (`lab/walk_forward.py`, `PAIRS_BY_TIER`): BTC and ETH; 10 *large*; 6 *mid*; 4 *small* |
 | Windows | 15 quarterly validation windows, from 2023-01-01 to 2026-09-01 |
 | Optimization (D-017) | For each window, *hyperopt* (`SharpeHyperOptLossDaily`, 150 epochs, seed 42) on the **previous 12 months**. The chosen parameters are applied **unchanged** to the window |
 | Optimized parameters | `min_score`, `adx_min`, `rsi_pullback_max`, `vol_rel_min`, `exit_score`, `atr_stop_mult`, `tp_activation`, `tp_trailing` |
-| Fixed (from the profile) | Maximum stop, risk per trade, maximum size and cash reserve. *Break-even* and maximum holding are not simulated |
+| Fixed (from the profile) | Maximum stop, risk per trade, maximum size, cash reserve, *break-even* and maximum holding. Since 2026-10-16 the lab simulates the agent's *break-even* (checked at the candle close, like the 4h cycle) and maximum holding |
 | Simulated protection | Fixed stop `entry × (1 − min(k·ATR%, max_stop))` and a *trailing take-profit* with activation, like the native OPOCO |
 | Fees | 0.1% per side (standard Spot fee, without the BNB discount) |
 | References | *Buy & hold* of the profile's pair basket (simple average) and of BTC |
@@ -30,7 +31,40 @@ docker compose -f lab/freqtrade/docker-compose.yml run --rm freqtrade download-d
     --config user_data/config.swing_trend.json --timerange 20211001- -t 4h --prepend
 ```
 
-## 2. Out-of-sample results (2026-10-01)
+## 2. Revision with intra-candle exits (2026-10-16)
+
+**The optimized walk-forward of section 3 overstated the result.** With `--detail 5m`, the same method (Sharpe, 150 epochs, 12 months of training) gives **−4.95%** in `swing_trend` instead of +107.27%, and +24.91% in `momentum_alpha` instead of +34.36%. Without the intra-candle detail, *hyperopt* chose very tight trailings (0.6–1.4%) that only win because the 4h candle is read as "high first". `CalmarHyperOptLoss` gives +41.20% and +30.32%: still below the fixed parameters.
+
+Method of the revision (D-034): **fixed parameters** (no *hyperopt* per window), with `--detail 5m`, *break-even* and maximum holding. Variants with **one change at a time** were compared on the **design windows (2023-01 → 2025-01, 8 windows)**; only the chosen one was run on the **holdout (2025-01 → 2026-09, 7 windows)**, without adjustment.
+
+| Design (2023–2024), compounded | `swing_trend` | `momentum_alpha` |
+|---|--:|--:|
+| Profiles of 2026-10-01 (baseline) | +33.26% | +32.16% |
+| Stop cap +1.5 p.p. | +43.31% | +39.69% |
+| TP activation 13% | +36.98% | +44.89% |
+| TP activation 7% | +23.44% | +27.99% |
+| Trailing 200 / 300 bps | +17.05% / +18.80% | +27.15% / +29.48% |
+| No *break-even* | +35.59% | +24.63% |
+| `min_score` 0.55 / 0.78 | +19.48% / +31.14% | +33.45% / +36.54% |
+| **Stop cap +1.5 p.p. and activation 13% (chosen)** | **+70.22%** | **+49.27%** |
+
+| Holdout (2025-01 → 2026-09) | Baseline | Chosen variant |
+|---|--:|--:|
+| `swing_trend` | **+26.86%** (worst window DD 6.98%) | +9.47% (7.96%) |
+| `momentum_alpha` | −0.02% (7.47%) | **+6.98%** (7.53%) |
+
+**Adopted:** only in `momentum_alpha` (stop cap 6.5%, activation 13%): over the 15 windows, +32.14% → **+59.69%**, worst window drawdown 12.01% → **7.53%**. In `swing_trend` the gain did not hold on the holdout: in 2025–2026 the moves were smaller, and the trades that used to exit around +10% no longer reach the 13% activation. The fixed activation favored the strong trend of 2023–2024, and `swing_trend` stays as it was.
+
+**Rejected:**
+
+- **More risk per trade** (1.2 → 1.5% and 1.5 → 2.0%): better on the design, slightly worse on the holdout and with more drawdown.
+- **New profiles:** `trend_daily` (1d, core and large; +34.47% on the design) loses in the same windows as the 4h profiles, so taking capital away from them lowers the portfolio's return (+63.5% → +55.2%) and raises its drawdown. `breakout_alt` (4h, mid and small) made +8.95%, and these tiers have the worst survivorship bias.
+
+The holdout has been used, so any new variant tested on 2025–2026 no longer has a clean out-of-sample check: the Demo is the next validation.
+
+## 3. Out-of-sample results (2026-10-01)
+
+> **Superseded by section 2:** these numbers come from 4h backtests without intra-candle exits and are inflated by the tight trailings that *hyperopt* chose.
 
 | | `swing_trend` | `momentum_alpha` |
 |---|---:|---:|
@@ -50,7 +84,7 @@ docker compose -f lab/freqtrade/docker-compose.yml run --rm freqtrade download-d
 - **Concentration:** in `swing_trend`, the result comes mostly from three bullish quarters (2023-Q4 +19.9%, 2024-Q1 +14.1% and 2024-Q4 +49.3%). `momentum_alpha` spreads the gains more (10 positive windows), but with a lower total return.
 - **Parameter stability:** the take-profit activation stayed between 6% and 11.5% in the trainings of both profiles, a consistent sign of letting profits run. The entry parameters vary a lot between trainings (`min_score` from 0.31 to 0.88; `adx_min` from 10 to 34), which points to little predictive power of the entry filters on their own.
 
-## 3. Adopted parameters
+## 4. Adopted parameters
 
 `config/profiles.yaml` uses the **median of the 15 trainings** of each profile (D-028):
 
@@ -62,18 +96,19 @@ docker compose -f lab/freqtrade/docker-compose.yml run --rm freqtrade download-d
 | `vol_rel_min` | 2.3 | 2.6 |
 | `exit_score` | −0.46 | −0.46 |
 | `atr_mult` (stop) | 3.1 | 3.0 |
-| `activation_pct` (TP) | 9.7 | 9.5 |
+| `max_pct` (stop) | 4.5 | **6.5** (D-034; was 5.0) |
+| `activation_pct` (TP) | 9.7 | **13.0** (D-034; was 9.5) |
 | `trailing_delta_bps` (TP) | 100 | 130 |
 
 The median uses trainings later than the first windows, so this set was **not** validated out of sample as a whole. The Demo (doc 04) is the validation that counts.
 
-## 4. Limitations
+## 5. Limitations
 
 - **Survivorship bias:** the pair list is static, made of assets that exist since 2021. The real universe changes every cycle (D-027), and most of the recent setups showed up in assets outside that list.
-- **Idealized execution:** fills at the stop price and at the candle open, with no *slippage* beyond the fee. On 4h, the order of events within the candle is approximated.
-- **No LLM layer**, no Risk Guard limits, no *break-even* and no maximum holding.
+- **Idealized execution:** fills at the stop price and at the candle open, with no *slippage* beyond the fee. With `--detail 5m` the order of events within the 4h candle follows 5m candles; within each 5m candle it is still approximated.
+- **No LLM layer** and no Risk Guard limits.
 - **Short sample:** 15 windows and about 300 trades per profile.
 
-## 5. History
+## 6. History
 
 The first tests (2026-09-26) used the `conservador` (4h) and `moderado` (1h) profiles, since removed. The baseline with fixed parameters had a negative expectancy in both profiles. Losses went to the full stop while the trailing took small gains, and there were *altcoin* buys with BTC falling and breakouts against the trend. That led to the regime filter and the with-the-trend-only setups (D-016) and to the optimized *walk-forward* (D-017). On 1h, the excess of trades and the fees made the expectancy negative even with optimization, and the current profiles use 4h.

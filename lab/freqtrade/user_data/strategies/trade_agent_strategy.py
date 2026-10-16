@@ -7,14 +7,16 @@ into the container through ``PYTHONPATH``) and replicates the agent's native pro
   profile's maximum (the OCO's ``STOP_LOSS`` leg);
 * *trailing take-profit*: on reaching ``+tp_activation``, the stop starts following the top
   at a ``tp_trailing`` distance (``TAKE_PROFIT`` leg with ``trailingDelta``);
-* risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position.
+* risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position;
+* the agent's decision exits: stop at *break-even* after ``break_even_r`` and the maximum
+  holding time.
 
 The default parameters are only a starting point: ``lab/walk_forward.py`` generates the
 ``trade_agent_strategy.json`` file with the values of the profile chosen in
 ``config/profiles.yaml``.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from freqtrade.persistence import Trade
@@ -34,6 +36,9 @@ from trade_agent.signals import (
     setup_frame,
     stop_pct_frame,
 )
+
+BREAK_EVEN_FEE_BUFFER = 0.003
+"""Same margin above the entry as ``trade_agent.strategy.exits.DEFAULT_FEE_BUFFER``."""
 
 
 class TradeAgentStrategy(IStrategy):
@@ -65,11 +70,16 @@ class TradeAgentStrategy(IStrategy):
     # Parameters with optimize=False define the profile's risk and are never optimized.
     atr_stop_mult = DecimalParameter(1.0, 4.0, default=2.0, decimals=1, space="sell")
     stop_max_pct = DecimalParameter(
-        0.02, 0.10, default=0.04, decimals=3, space="sell", optimize=False
+        0.02, 0.20, default=0.04, decimals=3, space="sell", optimize=False
     )
-    tp_activation = DecimalParameter(0.01, 0.12, default=0.03, decimals=3, space="sell")
+    tp_activation = DecimalParameter(0.01, 0.25, default=0.03, decimals=3, space="sell")
     tp_trailing = DecimalParameter(0.005, 0.05, default=0.01, decimals=3, space="sell")
     exit_score = DecimalParameter(-0.8, 0.2, default=-0.2, decimals=2, space="sell")
+    # Decision exits of the agent (``trade_agent.strategy.exits``), from the profile; 0 = off.
+    break_even_r = DecimalParameter(0, 5, default=0, decimals=2, space="sell", optimize=False)
+    max_holding_hours = DecimalParameter(
+        0, 2000, default=0, decimals=0, space="sell", optimize=False
+    )
 
     def informative_pairs(self) -> list[tuple[str, str]]:
         return [(self.benchmark_pair, self.timeframe)]
@@ -134,9 +144,41 @@ class TradeAgentStrategy(IStrategy):
         if max_rate >= trade.open_rate * (1 + float(self.tp_activation.value)):
             return -float(self.tp_trailing.value)  # trailing TP activated: follows the top
         stop_pct = self._entry_stop_pct(pair, trade)
+        if self._break_even_reached(pair, trade, stop_pct):
+            return stoploss_from_open(
+                BREAK_EVEN_FEE_BUFFER, current_profit, is_short=False, leverage=trade.leverage
+            )
         return stoploss_from_open(
             -stop_pct, current_profit, is_short=False, leverage=trade.leverage
         )
+
+    def _break_even_reached(self, pair: str, trade: Trade, stop_pct: float) -> bool:
+        """The agent checks *break-even* once per cycle (candle close), not on the intra-candle
+        high: the last closed candle's close at ``break_even_r`` × the stop distance."""
+        trigger_r = float(self.break_even_r.value)
+        if trigger_r <= 0:
+            return False
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if dataframe.empty:
+            return False
+        last = dataframe.iloc[-1]
+        if last["date"] < timeframe_to_prev_date(self.timeframe, trade.open_date_utc):
+            return False
+        return float(last["close"]) >= trade.open_rate * (1 + stop_pct * trigger_r)
+
+    def custom_exit(
+        self,
+        pair: str,
+        trade: Trade,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        **kwargs: Any,
+    ) -> str | None:
+        hours = float(self.max_holding_hours.value)
+        if hours > 0 and current_time - trade.open_date_utc >= timedelta(hours=hours):
+            return "max_holding"
+        return None
 
     def custom_stake_amount(
         self,

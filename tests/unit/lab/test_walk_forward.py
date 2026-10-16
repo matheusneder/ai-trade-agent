@@ -71,9 +71,13 @@ def test_strategy_params_fixed_and_trailing_stop() -> None:
     assert fixed["sell"]["tp_activation"] == pytest.approx(0.03)
     assert fixed["sell"]["tp_trailing"] == pytest.approx(0.01)
     assert fixed["sell"]["atr_stop_mult"] == 2.0
+    assert fixed["sell"]["break_even_r"] == 1.0
+    assert fixed["sell"]["max_holding_hours"] == 21 * 24
     trailing = wf.strategy_params(CONFIG.profiles["agressivo"])["params"]["sell"]
     assert trailing["stop_max_pct"] == pytest.approx(0.08)
     assert trailing["atr_stop_mult"] == 100.0
+    assert trailing["break_even_r"] == 0.0  # no break-even in the profile
+    assert trailing["max_holding_hours"] == 7 * 24
 
 
 def _exported(**sell: float) -> dict[str, object]:
@@ -82,7 +86,7 @@ def _exported(**sell: float) -> dict[str, object]:
         "params": {
             # Freqtrade also exports the non-optimized ones; the risk ones must be ignored
             "buy": {"min_score": 0.45, "adx_min": 25, "risk_per_trade": 0.02},
-            "sell": {"tp_activation": 0.07, **sell},
+            "sell": {"tp_activation": 0.07, "break_even_r": 3.0, **sell},
             "roi": {"0": 100},
         },
     }
@@ -95,6 +99,7 @@ def test_merge_optimized_keeps_profile_risk_parameters() -> None:
     assert merged["params"]["buy"]["risk_per_trade"] == pytest.approx(0.01)  # from the profile
     assert merged["params"]["sell"]["tp_activation"] == 0.07
     assert merged["params"]["sell"]["stop_max_pct"] == pytest.approx(0.07)
+    assert merged["params"]["sell"]["break_even_r"] == 1.0  # decision exits from the profile
     assert base["params"]["buy"]["min_score"] == 0.5  # the base is not changed
     assert wf.chosen_params(_exported()) == {
         "min_score": 0.45,
