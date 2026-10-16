@@ -20,6 +20,7 @@ PostgreSQL and Loki, and Chromium (Playwright) opens every dashboard.
 | File | Needs | Checks |
 | --- | --- | --- |
 | `test_seed.py` | nothing | the synthetic day keeps the agent's invariants: valid position states, FKs, unique order/fill/intent IDs, PnL and fees recomputed from the fills by the domain's own functions, equity consistent with the trades, determinism per seed |
+| `test_stack_hygiene.py` | nothing | the stacks of killed runs are recognized by their owner PID, never one of a live run |
 | `test_provisioning.py` | Docker | the 6 dashboards are provisioned (same panels as the generator), the PostgreSQL (`grafana_ro`) and Loki data sources are healthy, the 3 alert rules evaluate with data (`health=ok`) and stay normal |
 | `test_dashboards.py` | Docker + Chromium | each dashboard loads; every panel's query returns rows without error; no panel shows "No data" or an error badge; charts draw series and tables rows; stat, table and chart values match the aggregates of the seed (equity, day PnL, drawdown, exposure, trades, win rate, profit factor, fees, exit reasons, news per source, analyst reading, LLM cost, critical events, log counts...) |
 | `test_interactions.py` | Docker + Chromium | the time range picker refetches and filters (`Last 6 hours` counts only the trades of the window Grafana sent), the refresh button, the panel view, the `Serviço` and `Nível` variables and the regex search of the Logs dashboard |
@@ -39,6 +40,7 @@ tests/grafana-dashboard-smoke-tests/
   compose.yaml          ephemeral PostgreSQL + Loki + Grafana (images from deploy/stack.yml)
   conftest.py           fixtures: stack, seed, logged-in page; deselection outside this folder
   test_seed.py          invariants of the synthetic data (fast, always runs)
+  test_stack_hygiene.py the cleanup rule for leftovers of killed runs (fast, always runs)
   test_provisioning.py  Grafana API: dashboards, data sources, alert rules
   test_dashboards.py    each dashboard in the browser, values against the seed
   test_interactions.py  time range, refresh, panel view, variables, search
@@ -46,11 +48,12 @@ tests/support/
   grafana_seed.py       the synthetic day (also a CLI)
   grafana_stack.py      docker compose up/down, migrations, log push to Loki
   grafana_ui.py         Playwright helpers: panels, /api/ds/query capture, console/network watch
+  playwright_fixtures.py  pytest-playwright's browser fixtures, scoped per module (see below)
 ```
 
 ## The ephemeral environment
 
-`tests/support/grafana_stack.py` runs `docker compose -p ta-grafana-smoke-<random>` on
+`tests/support/grafana_stack.py` runs `docker compose -p ta-grafana-smoke-<pid>-<random>` on
 `compose.yaml`:
 
 - **Isolated from the real stack**: its own project name, network and tmpfs storage; ports
@@ -65,8 +68,12 @@ tests/support/
   random values each run, passed only through the environment of `docker compose`.
 - **Schema from the project's migrations**: `upgrade_to_head` (Alembic, `src/trade_agent/persistence/migrations`).
 - The fixtures create it once per session and remove it (`down -v`) at the end, even on failure.
-  `GRAFANA_SMOKE_KEEP=1` keeps it for debugging; remove it later with
-  `docker compose -p ta-grafana-smoke-<id> down -v` (from the repository root).
+- **No leftovers of previous runs**: a run killed before its teardown (stopped in VS Code, a
+  closed terminal) leaves its containers behind. The project name carries the PID of the
+  pytest process that owns it, and every run starts by removing the smoke stacks whose owner
+  process is gone, never the stack of a run still going (two runs can share the machine).
+- `GRAFANA_SMOKE_KEEP=1` keeps the stack for debugging until the next run removes it (or
+  `docker compose -p ta-grafana-smoke-<pid>-<id> down -v`, from the repository root).
 
 **Loki and Jaeger.** The Logs dashboard reads only Loki, so Loki is part of the stack and
 receives the synthetic day's logs (agent JSON lines with the `event` metadata and tracebacks,
@@ -132,10 +139,20 @@ Useful options: `--headed` (watch the browser), `--slowmo 300`, `--tracing retai
 pytest; open the Testing panel and click ▶ on the `grafana-dashboard-smoke-tests` folder (or on a
 single test). Debugging works the same way (the debug ▶ of the test).
 
+**The browser lives only while a module's browser tests run.** While a sync Playwright
+instance is alive, Playwright keeps its asyncio loop marked as running in the main thread, and
+pytest-playwright's fixtures keep it alive for the whole session: in a full run (the VS Code
+"Run all", which puts this folder before `tests/integration` and `tests/unit`) every later test
+that uses asyncio failed with "cannot be called from a running event loop".
+[`tests/support/playwright_fixtures.py`](../support/playwright_fixtures.py) gives `playwright`,
+`browser` and the context arguments module scope (same command line options as the plugin);
+the suite's context options go in `browser_context_overrides`. The whole repository passes in
+one run, in either order (E2E first or last).
+
 **The default run stays fast.** `uv run pytest` (whole `tests/`) deselects the E2E tests of
 this folder (`e2e` and `grafana` markers): they run only when the run targets this folder or a
-test of it, or with `-m e2e` / `-m grafana`. `test_seed.py` needs neither Docker nor a browser
-and always runs.
+test of it, or with `-m e2e` / `-m grafana`. `test_seed.py` and
+`test_stack_hygiene.py` need neither Docker nor a browser and always run.
 
 A full run takes a few minutes: about 1 minute to start the stack, up to 2 minutes for the alert
 rules' first clean evaluation, and a few seconds per dashboard.
