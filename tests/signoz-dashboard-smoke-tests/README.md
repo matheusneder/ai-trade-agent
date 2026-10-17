@@ -120,11 +120,15 @@ password generated per run (never stored outside the session's temporary folder)
    of key `scripts/signoz_dashboards.py --apply` uses in production (`SIGNOZ-API-KEY`).
 
 The dashboards are applied with that key through `scripts.signoz_dashboards.apply`, the very
-code of `--apply`. The browser logs in through the real login page once per session, and the
-resulting local storage is reused by every test. No production credential or `.env` is read.
+code of `--apply`. The browser logs in through the real login page once per test module (the browser lives per
+module: see `tests/support/playwright_fixtures.py`), and the resulting local storage is reused
+by the module's tests. No production credential or `.env` is read.
 
 The ingester only turns on its receivers after SigNoz sends it a configuration over OpAMP, and
 SigNoz does that only once an organization exists: the seed is sent after the registration.
+The tests start only once SigNoz holds every span, log and metric sample of the seed (spans
+and logs counted through the API, metric samples in ClickHouse: the API only aggregates them
+by step), whatever the order the tests run in.
 
 ## The synthetic data
 
@@ -175,7 +179,8 @@ exactly.
 - every panel renders (chart with legend, number or table) with no error or "no data" state;
 - number panels show the seeded values (equity, positions, requests, errors, LLM cost and
   tokens, containers...): counts exactly, decimals within one unit of the panel's last decimal
-  (SigNoz truncates); legends list exactly the seeded series (the legend is a virtual list:
+  (SigNoz truncates), with the sign SigNoz renders in a prefix element and in the time unit it
+  switches to (1149 ms shows as "1 s"); legends list exactly the seeded series (the legend is a virtual list:
   it is scrolled to the end and checked against its "Showing N of M series" line); lists show
   the seeded rows and columns;
 - the time range selector (6 h, 1 day, 1 hour) re-queries with the new range and changes the
