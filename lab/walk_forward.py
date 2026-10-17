@@ -32,6 +32,7 @@ from typing import Any
 
 from trade_agent.execution.orders import StopMode
 from trade_agent.market.universe import Tier
+from trade_agent.risk.conditions import PreTradeConfig, load_stop_conditions
 from trade_agent.strategy.profiles import ProfileConfig, StrategyConfig, load_strategy_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,8 @@ RISK_PARAMS = frozenset(
         "max_holding_hours",
         "tp_activation_atr_mult",
         "tp_activation_max",
+        "min_reward_risk",
+        "round_trip_fee",
     }
 )
 
@@ -157,8 +160,12 @@ def lab_config(
     return config
 
 
-def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
-    """Content of ``trade_agent_strategy.json`` (Freqtrade's parameter format)."""
+def strategy_params(
+    profile: ProfileConfig, pre_trade: PreTradeConfig | None = None
+) -> dict[str, Any]:
+    """Content of ``trade_agent_strategy.json`` (Freqtrade's parameter format). ``pre_trade``
+    (``config/stop_conditions.yaml``) gives the Risk Guard's minimum R:R."""
+    pre_trade = pre_trade or PreTradeConfig()
     signals = profile.signal_params()
     protection = profile.protection
     stop, take_profit = protection.stop, protection.take_profit
@@ -177,6 +184,8 @@ def strategy_params(profile: ProfileConfig) -> dict[str, Any]:
                 "vol_rel_min": signals.vol_rel_min,
                 "risk_per_trade": float(profile.allocation.risk_per_trade_pct) / 100,
                 "max_position_pct": float(profile.allocation.max_position_pct),
+                "min_reward_risk": pre_trade.min_reward_risk,
+                "round_trip_fee": pre_trade.round_trip_fee_pct / 100,
             },
             "sell": {
                 "atr_stop_mult": atr_mult,
@@ -357,14 +366,19 @@ def _write_params(params: dict[str, Any]) -> None:
     _params_file().write_text(json.dumps(params, indent=2), encoding="utf-8")
 
 
-def prepare(config: StrategyConfig, profile_name: str, pairs: Sequence[str] | None = None) -> str:
+def prepare(
+    config: StrategyConfig,
+    profile_name: str,
+    pairs: Sequence[str] | None = None,
+    pre_trade: PreTradeConfig | None = None,
+) -> str:
     """Writes ``config.<profile>.json`` and ``trade_agent_strategy.json``; returns its path."""
     profile = config.profiles[profile_name]
     base = json.loads((USER_DATA / "config.base.json").read_text(encoding="utf-8"))
     generated = lab_config(base, profile, config.profile_capital(profile_name), pairs)
     config_file = USER_DATA / f"config.{profile_name}.json"
     config_file.write_text(json.dumps(generated, indent=2), encoding="utf-8")
-    _write_params(strategy_params(profile))
+    _write_params(strategy_params(profile, pre_trade))
     return f"user_data/{config_file.name}"
 
 
@@ -372,7 +386,7 @@ def optimize(
     profile: ProfileConfig, config_path: str, train: tuple[date, date], args: argparse.Namespace
 ) -> dict[str, float]:
     """*Hyperopt* on the training window; records the chosen parameters (over the profile's)."""
-    base = strategy_params(profile)
+    base = strategy_params(profile, load_stop_conditions(args.stop_conditions).pre_trade)
     _write_params(base)
     _freqtrade(
         "hyperopt", "--config", config_path, "--strategy", STRATEGY,
@@ -390,6 +404,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--profile", required=True, help="perfil de config/profiles.yaml")
     parser.add_argument("--profiles-file", type=Path, default=ROOT / "config" / "profiles.yaml")
+    parser.add_argument(
+        "--stop-conditions",
+        type=Path,
+        default=ROOT / "config" / "stop_conditions.yaml",
+        help="R:R mínimo do Risk Guard (pre_trade)",
+    )
     parser.add_argument("--start", type=date.fromisoformat, default=date(2023, 1, 1))
     parser.add_argument("--end", type=date.fromisoformat, default=date(2026, 9, 1))
     parser.add_argument("--window-months", type=int, default=3)
@@ -411,7 +431,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     strategy_config = load_strategy_config(args.profiles_file)
     profile = strategy_config.profiles[args.profile]
-    config_path = prepare(strategy_config, args.profile, args.pairs)
+    pre_trade = load_stop_conditions(args.stop_conditions).pre_trade
+    config_path = prepare(strategy_config, args.profile, args.pairs, pre_trade)
     periods = windows(args.start, args.end, args.window_months)
     if args.download:
         history = 3 + (args.train_months if args.optimize else 0)
