@@ -84,8 +84,9 @@ profiles:
   alt_atr:
     # Created on 2026-10-17 (D-036): fixed-parameter walk-forward with 5m intra-candle exits and
     # the Risk Guard's R:R check, 15 windows 2023-01 -> 2026-09 (doc/lab-results.md, 2.3):
-    # +48.93%, about break-even in 2025-2026. Small experimental share: the 2025-2026 holdout
-    # had already been used, so the Demo is the validation.
+    # +30.71%, +8.69% in 2025-2026. Small experimental share: the 2025-2026 holdout had
+    # already been used, so the Demo is the validation. The ATR-based activation was tested
+    # first (hence the name) and lost more in 2025-2026.
     code: alt
     enabled: true
     capital_share: 0.05        # Experimental allocation: 50 USDT
@@ -102,9 +103,10 @@ profiles:
       max_slippage_bps: 20
     protection:
       stop: {mode: fixed, atr_mult: 3.0, max_pct: 7.0}
-      # Activation at 5 x the entry's ATR%, between 8% and 16% (D-035). With the 3 x ATR stop it
-      # always passes the Risk Guard's minimum R:R of 1.5; 4 x ATR does not
-      take_profit: {mode: trailing, activation_pct: 8.0, trailing_delta_bps: 150, activation_atr_mult: 5.0, activation_max_pct: 16.0}
+      # Fixed 10.9% on purpose: with the stop at its 7% cap the R:R is 1.49, below the Risk
+      # Guard's 1.5, so the most volatile entries (ATR above ~2.3%) are refused. At 11% they
+      # would pass (exactly 1.5) and 2025-2026 goes from +11% to -5% (doc/lab-results.md, 2.3)
+      take_profit: {mode: trailing, activation_pct: 10.9, trailing_delta_bps: 150}
       break_even_after_r: 1.0
       max_holding: 10d
     exits:

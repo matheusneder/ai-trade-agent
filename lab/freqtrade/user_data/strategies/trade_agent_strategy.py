@@ -44,6 +44,7 @@ from trade_agent.signals import (
 
 BREAK_EVEN_FEE_BUFFER = 0.003
 """Same margin above the entry as ``trade_agent.strategy.exits.DEFAULT_FEE_BUFFER``."""
+RATIO_TOLERANCE = 1e-9
 
 
 class TradeAgentStrategy(IStrategy):
@@ -133,7 +134,8 @@ class TradeAgentStrategy(IStrategy):
             (dataframe["setup"] != "")
             & (dataframe["score"] >= float(self.min_score.value))
             & (dataframe["volume"] > 0)
-            & (reward_risk >= float(self.min_reward_risk.value))
+            # tolerance: the Risk Guard compares Decimals, where 10.8 / 7.2 is exactly 1.5
+            & (reward_risk >= float(self.min_reward_risk.value) - RATIO_TOLERANCE)
         )
         dataframe.loc[entry, "enter_long"] = 1
         dataframe.loc[entry, "enter_tag"] = dataframe.loc[entry, "setup"]
