@@ -48,7 +48,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         sub.add_argument("--out", help="also write the summary (JSON) to this file")
     commands.add_parser("down")
     args = parser.parse_args(argv)
-    stack = environment.Stack()
+    stack = environment.Stack(environment.MANUAL_PROJECT)
     if args.command == "down":
         stack.down()
     elif args.command == "generate":

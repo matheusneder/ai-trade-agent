@@ -4,6 +4,11 @@ Its own Compose project, network, volumes and random 127.0.0.1 ports; the real s
 ``trade-agent``/``signoz``, ``signoz-*`` containers, ports 8080 and 14318) is never touched.
 :meth:`Stack.up` renders the configuration first and refuses to start when anything still
 points at a production name or port.
+
+Each run has its own project, named after the PID of the process that owns it
+(``ta-signoz-smoke-<pid>-<random>``, see :mod:`tests.support.stack_owner`): two runs at the
+same time (VS Code and a terminal, two worktrees) never remove each other's stack, and a run
+killed before its teardown has its stack removed by the next run.
 """
 
 import json
@@ -16,11 +21,15 @@ from typing import Any
 
 import httpx
 
+from tests.support.stack_owner import new_project, project_pattern, stale_projects
+
 ROOT = Path(__file__).resolve().parents[3]
 HERE = ROOT / "tests" / "signoz-dashboard-smoke-tests"
 BASE = ROOT / "deploy" / "signoz" / "pours" / "deployment" / "compose.yaml"
 OVERRIDE = HERE / "compose.override.yaml"
-PROJECT = "ta-signoz-smoke"
+PROJECT_PREFIX = "ta-signoz-smoke-"
+PROJECT = project_pattern(PROJECT_PREFIX)
+MANUAL_PROJECT = f"{PROJECT_PREFIX}manual"  # smoke.py up/down: not tied to a process
 CLICKHOUSE = "signoz-telemetrystore-clickhouse-0-0"  # compose service
 # names of the real stack: the ephemeral configuration must not mention any of them
 PRODUCTION_PROJECTS = {"signoz", "trade-agent"}
@@ -69,6 +78,8 @@ def problems(config: dict[str, Any], project: str) -> list[str]:
         name = network.get("name", key)
         if name in PRODUCTION_NETWORKS or network.get("external"):
             found.append(f"network {name!r}")
+        elif not name.startswith(f"{project}_"):
+            found.append(f"network {name!r} is not the project's own")
     for key, volume in (config.get("volumes") or {}).items():
         name = volume.get("name", key)
         if name.startswith(PRODUCTION_PREFIX) or volume.get("external"):
@@ -83,8 +94,8 @@ class Endpoints:
 
 
 class Stack:
-    def __init__(self, project: str = PROJECT) -> None:
-        self.project = project
+    def __init__(self, project: str | None = None) -> None:
+        self.project = project or new_project(PROJECT_PREFIX)
 
     def compose(self, *args: str, timeout: float = 600, check: bool = True) -> str:
         files = ["-f", str(BASE), "-f", str(OVERRIDE)]
@@ -99,9 +110,11 @@ class Stack:
             )
 
     def up(self, *, timeout: float = 600) -> Endpoints:
-        """Starts from scratch (no leftovers of a previous run) and waits for it to be ready."""
+        """Starts from scratch and waits for it to be ready. Leftovers of killed runs go first;
+        a stack of a run still going is never touched."""
         self.check_isolation()
-        self.down()
+        remove_stale_stacks()
+        self.down()  # the same project again (smoke.py up twice)
         self.compose(
             "up", "-d", "--wait", "--wait-timeout", str(int(timeout)), timeout=timeout + 60
         )
@@ -154,6 +167,14 @@ class Stack:
             f"--param_start={start_ms}", f"--param_end={end_ms}", timeout=120,
         )  # fmt: skip
         return int(found.strip() or 0)
+
+
+def remove_stale_stacks() -> list[str]:
+    """Removes the smoke stacks left by runs whose process is gone."""
+    stale = stale_projects(PROJECT)
+    for project in stale:
+        Stack(project).down()
+    return stale
 
 
 def wait_otlp(endpoints: Endpoints, timeout: float = 180) -> None:
