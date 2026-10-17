@@ -19,7 +19,7 @@ Chromium on an ephemeral SigNoz filled with a synthetic day of the agent:
 
 Every change to an existing dashboard requires running them and adjusting them to the change.
 Every new chart, metric, indicator or feature comes with more test coverage (data in the seed,
-expected values in test_dashboards.py). The tests evolve together with the dashboards.
+expected values in test_signoz_dashboards.py). The tests evolve together with the dashboards.
 """
 
 import argparse

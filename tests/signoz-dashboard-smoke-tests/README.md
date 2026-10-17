@@ -11,7 +11,7 @@ telemetry is sent, and Chromium (Playwright) checks every dashboard, panel and v
 >   the change (renamed panels, new series, other units or formats).
 > - Every new chart, metric, indicator or feature comes with more test coverage: the seed
 >   must emit what the new panel reads, and its expected values go into
->   `test_dashboards.py` (`EXPECTED_NUMBERS`, `EXPECTED_LEGENDS`, `EXPECTED_ROWS`).
+>   `test_signoz_dashboards.py` (`EXPECTED_NUMBERS`, `EXPECTED_LEGENDS`, `EXPECTED_ROWS`).
 > - The tests evolve with the dashboards: a dashboard change is not done until this suite is
 >   green with it.
 
@@ -30,7 +30,7 @@ Then:
 ```bash
 uv run pytest tests/signoz-dashboard-smoke-tests            # everything (~7 min)
 uv run pytest tests/signoz-dashboard-smoke-tests -m signoz  # the same, by marker
-uv run pytest tests/signoz-dashboard-smoke-tests/test_dashboards.py -k llm   # a subset
+uv run pytest tests/signoz-dashboard-smoke-tests/test_signoz_dashboards.py -k llm   # a subset
 uv run pytest tests/signoz-dashboard-smoke-tests --headed --slowmo 300       # watch it
 ```
 
@@ -40,7 +40,7 @@ a test runs it.
 
 The default `uv run pytest` does **not** run the e2e tests (no Docker, no browser): the
 `conftest.py` here deselects the tests marked `signoz` unless the run names this folder (or a
-file or test inside it) or selects the marker (`-m signoz` or `-m e2e`). Only `test_seed.py`
+file or test inside it) or selects the marker (`-m signoz` or `-m e2e`). Only `test_signoz_seed.py`
 (the generator alone, a few seconds) runs by default.
 
 Variables:
@@ -68,12 +68,13 @@ uv run python tests/signoz-dashboard-smoke-tests/smoke.py down
 ```
 tests/signoz-dashboard-smoke-tests/
   compose.override.yaml   isolates Foundry's manifests (deploy/signoz/pours) for the tests
-  conftest.py             fixtures: stack → credential → dashboards → seed; login per module
+  conftest.py             re-exports the fixtures and the hook of tests/support/signoz_smoke/fixtures.py
   smoke.py                manual control (up / seed / generate / down)
-  test_seed.py            the generator alone (fast, runs in the default suite)
-  test_stack.py           isolation guard, API key, provisioning, every query has data (API)
-  test_dashboards.py      the dashboards in Chromium: loading, rendering, values, interaction
+  test_signoz_seed.py            the generator alone (fast, runs in the default suite)
+  test_signoz_stack.py           isolation guard, API key, provisioning, every query has data (API)
+  test_signoz_dashboards.py      the dashboards in Chromium: loading, rendering, values, interaction
 tests/support/signoz_smoke/   helpers (a package outside this folder: its name has dashes)
+    fixtures.py           stack → credential → dashboards → seed; login per module; the hook
     environment.py        the ephemeral Compose project, its isolation check and readiness
     signoz.py             first admin, login, service account + API key, apply, ingestion wait
     seed.py               the deterministic synthetic day (spans, logs, metrics, Summary)
@@ -94,7 +95,7 @@ Foundry's manifests pin the real stack's container, network and volume names and
 (`ta-signoz-smoke-*`, network `ta-signoz-smoke-network`, project volumes) and publishes only
 the UI and the ingester's OTLP/HTTP, on **random ports of 127.0.0.1**. Before starting,
 `environment.Stack.up` renders the configuration and refuses to go on if any production name,
-external network/volume or fixed port is still there (`test_stack.py` proves the check catches
+external network/volume or fixed port is still there (`test_signoz_stack.py` proves the check catches
 the bare manifests). The production SigNoz, its ClickHouse and the agent's PostgreSQL are never
 read, written, stopped or recreated.
 
@@ -198,7 +199,7 @@ exactly.
 1. Edit `scripts/signoz_dashboards.py` and regenerate the JSON as usual.
 2. Run `uv run pytest tests/signoz-dashboard-smoke-tests`.
 3. New panel: rendering and error checks already cover it. Make the seed emit what it reads
-   (`seed.py`), then add its expected value, series or rows to `test_dashboards.py` and, if
+   (`seed.py`), then add its expected value, series or rows to `test_signoz_dashboards.py` and, if
    it needs a new fact, a field to `Summary`. New interactive feature (variables, links...):
    add a test for it next to the interaction tests.
 4. Changed panel: fix the expectations that no longer hold; never delete one without a
