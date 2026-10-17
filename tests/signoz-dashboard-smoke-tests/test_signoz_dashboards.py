@@ -173,7 +173,9 @@ def test_number_panels_show_the_seeded_values(
     expected = EXPECTED_NUMBERS[key](telemetry.summary)
     formatting = board.panels[key]["spec"]["plugin"]["spec"]["formatting"]
     decimals = len(shown.partition(".")[2])
-    assert decimals <= int(formatting["decimalPrecision"]), shown
+    precision = int(formatting["decimalPrecision"])
+    # below one unit of the last decimal SigNoz keeps significant digits (-0.0013, not -0.00)
+    assert decimals <= precision or abs(number_value(shown)) < 10**-precision, shown
     # the seeded values change with the window's end: negative, or large enough for SigNoz
     # to show another time unit (1149 ms as "1 s"), on some runs
     scale = unit_scale(board.number_unit(key), formatting["unit"])
