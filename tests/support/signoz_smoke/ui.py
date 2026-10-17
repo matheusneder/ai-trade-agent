@@ -149,7 +149,18 @@ class Dashboard:
         return panel
 
     def number(self, key: str) -> str:
-        return self.rendered(key).get_by_test_id("number-panel-value").inner_text().strip()
+        """The value as shown, signed: SigNoz renders the minus sign in a prefix element
+        (``-`` | ``115`` | ``ms``), so the value element alone reads 115 for -115."""
+        panel = self.rendered(key)
+        value = panel.get_by_test_id("number-panel-value").inner_text().strip()
+        prefix = panel.get_by_test_id("value-display-prefix-unit")
+        negative = prefix.count() > 0 and prefix.inner_text().strip() == "-"
+        return f"-{value}" if negative else value
+
+    def number_unit(self, key: str) -> str:
+        """The unit shown after the value; SigNoz scales time units (1149 ms shows as 1 s)."""
+        suffix = self.rendered(key).get_by_test_id("value-display-suffix-unit")
+        return suffix.inner_text().strip() if suffix.count() else ""
 
     def legend(self, key: str) -> list[str]:
         return legend_labels(self.rendered(key))
@@ -207,6 +218,17 @@ _SCROLL_DOWN = """e => {
 def number_text(value: float, decimals: int = 0) -> str:
     """How a number panel shows a count: thousands separators."""
     return f"{round(value, decimals):,.{decimals}f}"
+
+
+TIME_UNITS = {"ns": 1e-6, "µs": 1e-3, "ms": 1.0, "s": 1e3, "min": 6e4, "m": 6e4, "h": 3.6e6}
+"""Milliseconds per unit, for the time units SigNoz may switch to when it formats a value."""
+
+
+def unit_scale(shown: str, configured: str) -> float:
+    """How many ``configured`` units one ``shown`` unit is (1 when no time scaling happened)."""
+    if shown in TIME_UNITS and configured in TIME_UNITS:
+        return TIME_UNITS[shown] / TIME_UNITS[configured]
+    return 1.0
 
 
 def number_value(text: str) -> float:

@@ -21,6 +21,7 @@ from tests.support.signoz_smoke.ui import (
     legend_labels,
     number_text,
     number_value,
+    unit_scale,
 )
 
 pytestmark = [pytest.mark.e2e, pytest.mark.signoz]
@@ -170,14 +171,16 @@ def test_number_panels_show_the_seeded_values(
         assert number_value(shown) >= 0
         return
     expected = EXPECTED_NUMBERS[key](telemetry.summary)
-    precision = int(board.panels[key]["spec"]["plugin"]["spec"]["formatting"]["decimalPrecision"])
+    formatting = board.panels[key]["spec"]["plugin"]["spec"]["formatting"]
     decimals = len(shown.partition(".")[2])
-    assert decimals <= precision, shown
-    if float(expected).is_integer():  # web-first: the panel may still update after loading
-        value = board.rendered(key).get_by_test_id("number-panel-value")
-        expect(value).to_have_text(number_text(expected))
+    assert decimals <= int(formatting["decimalPrecision"]), shown
+    # the seeded values change with the window's end: negative, or large enough for SigNoz
+    # to show another time unit (1149 ms as "1 s"), on some runs
+    scale = unit_scale(board.number_unit(key), formatting["unit"])
+    if scale == 1 and float(expected).is_integer():
+        assert shown == number_text(expected)
     else:
-        assert number_value(shown) == pytest.approx(expected, abs=10**-decimals)
+        assert number_value(shown) * scale == pytest.approx(expected, abs=scale * 10**-decimals)
 
 
 @pytest.mark.parametrize(("name", "key"), _panels("signoz/TimeSeriesPanel", "signoz/BarChartPanel"))
