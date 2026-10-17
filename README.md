@@ -143,6 +143,7 @@ tests/unit/           unit tests
 tests/integration/    integration tests (simulated Binance, Postgres in a container)
 tests/live/           tests against Testnet/Demo (`live` marker)
 tests/grafana-dashboard-smoke-tests/  E2E smoke tests of the Grafana dashboards (`e2e` marker)
+tests/signoz-dashboard-smoke-tests/  SigNoz dashboards end to end (Docker + Playwright; see its README)
 scripts/              OPOCO spike and the Grafana and SigNoz dashboard generators
 lab/                  backtesting lab (Freqtrade through Docker, walk-forward)
 config/               allocation profiles (profiles.yaml) and analyst (research.yaml)
