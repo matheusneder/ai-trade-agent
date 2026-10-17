@@ -3,6 +3,16 @@
 Dashboards as code: edit here and run ``uv run python -m scripts.grafana_dashboards``.
 A test makes sure the versioned JSON files are in sync with this generator and that every
 query runs: SQL on the database schema and LogQL on a Loki with the production configuration.
+
+End-to-end smoke tests (``tests/grafana-dashboard-smoke-tests``, see its README.md) open every
+dashboard in a real Grafana with synthetic data (``tests/support/grafana_seed.py``) and check
+that each panel renders, that the values match the data and that the interactive elements work:
+
+* every change to an existing dashboard requires running them
+  (``uv run pytest tests/grafana-dashboard-smoke-tests``) and adjusting them to the change;
+* every new chart, metric, indicator or feature comes with more test coverage (and, when it
+  reads new data, with that data in the synthetic seed);
+* the tests evolve together with the dashboards.
 """
 
 import json

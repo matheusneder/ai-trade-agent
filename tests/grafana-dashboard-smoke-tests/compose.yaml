@@ -1,0 +1,73 @@
+# Ephemeral stack of the Grafana dashboard smoke tests: PostgreSQL, Loki and Grafana with the
+# project's configuration (deploy/), isolated from the real stack. Started and removed by the
+# fixtures (tests/support/grafana_stack.py), always with a unique project name
+# (`docker compose -p ta-grafana-smoke-<id>`): its own network and anonymous volumes, ports
+# published only on 127.0.0.1 and chosen by Docker (never 3000/5432). The images come from
+# deploy/stack.yml (the fixture exports them), so the tests follow every version upgrade.
+#
+# The service names match deploy/stack.yml (postgres, loki): the versioned data sources
+# (deploy/grafana/provisioning/datasources) reach them unchanged. Jaeger is left out: no
+# dashboard queries it (its data source is provisioned, but never called).
+
+services:
+  postgres:
+    image: ${SMOKE_POSTGRES_IMAGE:?}
+    environment:
+      POSTGRES_DB: trade_agent
+      POSTGRES_USER: trade_agent
+      POSTGRES_PASSWORD: ${SMOKE_POSTGRES_PASSWORD:?}
+      GRAFANA_DB_PASSWORD: ${SMOKE_GRAFANA_DB_PASSWORD:?}
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - ../../deploy/postgres/init:/docker-entrypoint-initdb.d:ro   # grafana_ro, as in production
+    tmpfs:
+      - /var/lib/postgresql   # nothing outlives the test session
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trade_agent -d trade_agent"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  loki:
+    image: ${SMOKE_LOKI_IMAGE:?}
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "127.0.0.1::3100"   # the fixture pushes the synthetic logs here
+    volumes:
+      - ../../deploy/loki/loki.yaml:/etc/loki/loki.yaml:ro
+    tmpfs:
+      - /loki:uid=10001,gid=10001
+
+  grafana:
+    image: ${SMOKE_GRAFANA_IMAGE:?}
+    # the same startup as deploy/stack.yml: renders the Telegram chatid in a copy of the
+    # provisioning (the placeholder token never reaches Telegram: the alerts stay normal)
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        rm -rf /tmp/provisioning && cp -r /etc/grafana/provisioning-src /tmp/provisioning &&
+        sed -i "s/__TELEGRAM_CHAT_ID__/$${TELEGRAM_CHAT_ID}/" /tmp/provisioning/alerting/telegram.yaml &&
+        exec /run.sh
+    environment:
+      GF_PATHS_PROVISIONING: /tmp/provisioning
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${SMOKE_GRAFANA_ADMIN_PASSWORD:?}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GRAFANA_DB_PASSWORD: ${SMOKE_GRAFANA_DB_PASSWORD:?}
+      TELEGRAM_BOT_TOKEN: nao-configurado
+      TELEGRAM_CHAT_ID: "0"
+    ports:
+      - "127.0.0.1::3000"
+    volumes:
+      - ../../deploy/grafana/provisioning:/etc/grafana/provisioning-src:ro
+      - ../../deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      loki:
+        condition: service_started
