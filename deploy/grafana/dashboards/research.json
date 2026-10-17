@@ -110,7 +110,15 @@
         "defaults": {},
         "overrides": []
       },
-      "options": {},
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        }
+      },
       "id": 3
     },
     {

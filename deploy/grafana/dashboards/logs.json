@@ -131,7 +131,7 @@
             "uid": "trade-agent-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (level) (count_over_time({service=~\"$service\", level=~\"$level\"} |~ \"(?i)$busca\" [$__auto]))",
+          "expr": "sum by (level) (count_over_time({service=~\"$service\", level=~\"$level\"} |~ `(?i)$busca` [$__auto]))",
           "queryType": "range",
           "legendFormat": "{{level}}"
         }
@@ -267,7 +267,7 @@
             "uid": "trade-agent-loki"
           },
           "editorMode": "code",
-          "expr": "{service=~\"$service\", level=~\"$level\"} |~ \"(?i)$busca\"",
+          "expr": "{service=~\"$service\", level=~\"$level\"} |~ `(?i)$busca`",
           "queryType": "range"
         }
       ],
