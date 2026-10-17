@@ -41,7 +41,7 @@ a test runs it.
 The default `uv run pytest` does **not** run the e2e tests (no Docker, no browser): the
 `conftest.py` here deselects the tests marked `signoz` unless the run names this folder (or a
 file or test inside it) or selects the marker (`-m signoz` or `-m e2e`). Only `test_signoz_seed.py`
-(the generator alone, a few seconds) runs by default.
+(the generator alone, a few seconds) and `test_signoz_stack_hygiene.py` (no Docker) run by default.
 
 Variables:
 
@@ -49,7 +49,7 @@ Variables:
 | --- | --- | --- |
 | `SIGNOZ_SMOKE_SEED` | `7` | seed of the synthetic data |
 | `SIGNOZ_SMOKE_HOURS` | `24` | length of the seeded window (≥ 4) |
-| `SIGNOZ_SMOKE_KEEP` | unset | `1` leaves the stack running after the tests |
+| `SIGNOZ_SMOKE_KEEP` | unset | `1` leaves the stack running after the tests (until the next run removes it) |
 
 Playwright's own options work too (`--browser`, `--headed`, `--tracing retain-on-failure`,
 `--screenshot only-on-failure`, `--output`).
@@ -63,6 +63,8 @@ uv run python tests/signoz-dashboard-smoke-tests/smoke.py generate --seed 42 --o
 uv run python tests/signoz-dashboard-smoke-tests/smoke.py down
 ```
 
+`smoke.py` uses its own project, `ta-signoz-smoke-manual`, which the test runs never remove.
+
 ## Layout
 
 ```
@@ -72,6 +74,7 @@ tests/signoz-dashboard-smoke-tests/
   smoke.py                manual control (up / seed / generate / down)
   test_signoz_seed.py            the generator alone (fast, runs in the default suite)
   test_signoz_stack.py           isolation guard, API key, provisioning, every query has data (API)
+  test_signoz_stack_hygiene.py   one project per run, leftovers recognized by owner PID (no Docker)
   test_signoz_dashboards.py      the dashboards in Chromium: loading, rendering, values, interaction
 tests/support/signoz_smoke/   helpers (a package outside this folder: its name has dashes)
     fixtures.py           stack → credential → dashboards → seed; login per module; the hook
@@ -84,15 +87,16 @@ tests/support/signoz_smoke/   helpers (a package outside this folder: its name h
 
 ## The ephemeral environment
 
-`docker compose -p ta-signoz-smoke -f deploy/signoz/pours/deployment/compose.yaml -f
+`docker compose -p ta-signoz-smoke-<pid>-<random> -f deploy/signoz/pours/deployment/compose.yaml -f
 tests/signoz-dashboard-smoke-tests/compose.override.yaml`: SigNoz, ClickHouse, ClickHouse
 Keeper, the PostgreSQL metastore, the schema migrator and the ingester, with the **same images,
 versions and configuration files as `deploy/`** (the override only renames and rewires; a
 version bump in `deploy/signoz` is picked up automatically).
 
 Foundry's manifests pin the real stack's container, network and volume names and publish ports
-8080/4317/4318 on every interface. The override gives everything its own name
-(`ta-signoz-smoke-*`, network `ta-signoz-smoke-network`, project volumes) and publishes only
+8080/4317/4318 on every interface. The override drops those names, so Compose names every
+container, network and volume after the run's project (`ta-signoz-smoke-<pid>-<random>-*`,
+network `<project>_signoz-network`, project volumes), and publishes only
 the UI and the ingester's OTLP/HTTP, on **random ports of 127.0.0.1**. Before starting,
 `environment.Stack.up` renders the configuration and refuses to go on if any production name,
 external network/volume or fixed port is still there (`test_signoz_stack.py` proves the check catches
@@ -104,9 +108,20 @@ function from GitHub and retry forever when GitHub is unreachable, which blocks 
 override keeps the same download with a short timeout and goes on without it; the dashboards
 do not use it (it serves quantiles of metric histograms).
 
-The session fixture runs `down -v` first (leftovers of an interrupted run), then `up --wait`,
-waits for the migrator to exit successfully and for the API to answer, and at the end removes
-containers and volumes. A whole start takes about a minute once the images are cached.
+**One stack per run.** The project name carries the PID of the pytest process that owns it
+and a random suffix, so two runs at the same time (the VS Code Testing panel and a terminal,
+two worktrees, another Claude session) each have their own SigNoz and never stop each other's.
+With one fixed project name, a second run's startup `down -v` destroyed the first run's stack
+mid-test (every later test failed with `ERR_CONNECTION_REFUSED`), and the first run's teardown
+then destroyed the second one. A run killed before its teardown (stopped in VS Code, a closed
+terminal) leaves its containers behind: every run starts by removing the smoke stacks whose
+owner process is gone, never the stack of a run still going (`tests/support/stack_owner.py`,
+shared with the Grafana suite).
+
+The session fixture then runs `up --wait`, waits for the migrator to exit successfully and for
+the API to answer, and at the end removes containers and volumes. A whole start takes about a
+minute once the images are cached. Two runs at once start two SigNoz stacks, with the memory
+and CPU of both.
 
 ## The credential
 

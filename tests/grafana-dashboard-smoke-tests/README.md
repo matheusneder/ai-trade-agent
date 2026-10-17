@@ -50,6 +50,7 @@ tests/support/
   grafana_stack.py               docker compose up/down, migrations, log push to Loki
   grafana_ui.py                  Playwright helpers: panels, /api/ds/query capture, console/network watch
   playwright_fixtures.py         pytest-playwright's browser fixtures, scoped per module (see below)
+  stack_owner.py                 per-run project names, leftovers of killed runs (shared with SigNoz)
 ```
 
 The folder's name has dashes, so it is not a Python package: mypy names its files after their

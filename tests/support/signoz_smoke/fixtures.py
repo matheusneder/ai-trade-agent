@@ -54,12 +54,19 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 # ================================================================== the stack and its data
 @pytest.fixture(scope="session")
-def signoz_stack() -> Iterator[environment.Endpoints]:
-    stack = environment.Stack()
-    endpoints = stack.up()
+def signoz_compose() -> environment.Stack:
+    """This run's own Compose project (``ta-signoz-smoke-<pid>-<random>``)."""
+    return environment.Stack()
+
+
+@pytest.fixture(scope="session")
+def signoz_stack(signoz_compose: environment.Stack) -> Iterator[environment.Endpoints]:
+    endpoints = signoz_compose.up()
     yield endpoints
-    if not environment.keep():
-        stack.down()
+    if environment.keep():
+        print(f"\nSIGNOZ_SMOKE_KEEP=1: {signoz_compose.project} kept until the next run")
+    else:
+        signoz_compose.down()
 
 
 @pytest.fixture(scope="session")
@@ -82,7 +89,11 @@ def dashboard_ids(signoz_api: httpx.Client) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def telemetry(signoz_stack: environment.Endpoints, signoz_api: httpx.Client) -> Telemetry:
+def telemetry(
+    signoz_compose: environment.Stack,
+    signoz_stack: environment.Endpoints,
+    signoz_api: httpx.Client,
+) -> Telemetry:
     """The seed (``SIGNOZ_SMOKE_SEED``, ``SIGNOZ_SMOKE_HOURS``), sent and fully ingested.
 
     ``signoz_api`` comes first on purpose: the ingester only accepts data once an organization
@@ -92,7 +103,7 @@ def telemetry(signoz_stack: environment.Endpoints, signoz_api: httpx.Client) -> 
     data = generate(seed, hours)
     environment.wait_otlp(signoz_stack)
     otlp.send(data, signoz_stack.otlp)
-    signoz.wait_ingested(signoz_api, data.summary, environment.Stack())
+    signoz.wait_ingested(signoz_api, data.summary, signoz_compose)
     return data
 
 

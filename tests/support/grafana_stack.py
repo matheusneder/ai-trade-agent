@@ -16,11 +16,9 @@ import contextlib
 import json
 import math
 import os
-import re
 import secrets
 import shutil
 import subprocess
-import sys
 import time
 from collections.abc import Coroutine, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +32,7 @@ import pytest
 import yaml
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.support.stack_owner import new_project, project_pattern, stale_projects
 from trade_agent.persistence.migrate import upgrade_to_head
 
 ROOT = Path(__file__).parents[2]
@@ -41,7 +40,7 @@ SUITE = ROOT / "tests" / "grafana-dashboard-smoke-tests"
 COMPOSE_FILE = SUITE / "compose.yaml"
 STACK = yaml.safe_load((ROOT / "deploy" / "stack.yml").read_text("utf-8"))
 PROJECT_PREFIX = "ta-grafana-smoke-"
-PROJECT = re.compile(rf"{PROJECT_PREFIX}(?P<pid>\d+)-[0-9a-f]+")
+PROJECT = project_pattern(PROJECT_PREFIX)
 KEEP_ENV = "GRAFANA_SMOKE_KEEP"
 """``GRAFANA_SMOKE_KEEP=1`` leaves the stack running after the tests (debugging)."""
 
@@ -119,45 +118,9 @@ def _env(admin: str, postgres: str, grafana_db: str) -> dict[str, str]:
     }
 
 
-if sys.platform == "win32":
-    import ctypes
-
-    def _process_alive(pid: int) -> bool:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: it exists, not ours
-        try:
-            code = ctypes.c_ulong()
-            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-            return code.value == 259  # STILL_ACTIVE
-        finally:
-            kernel32.CloseHandle(handle)
-
-else:
-
-    def _process_alive(pid: int) -> bool:
-        try:
-            os.kill(pid, 0)  # signal 0: only checks that the process exists
-        except ProcessLookupError:
-            return False
-        except PermissionError:  # it exists, owned by another user
-            return True
-        return True
-
-
 def remove_stale_stacks() -> list[str]:
     """Removes the smoke stacks left by runs whose pytest process is gone."""
-    listed = subprocess.run(
-        ["docker", "ps", "-a", "--filter", "label=com.docker.compose.project",  # noqa: S607
-         "--format", '{{.Label "com.docker.compose.project"}}'],
-        capture_output=True, text=True, encoding="utf-8", timeout=60, check=True,
-    ).stdout.split()  # fmt: skip
-    stale = sorted(
-        project
-        for project in set(listed)
-        if (match := PROJECT.fullmatch(project)) and not _process_alive(int(match["pid"]))
-    )
+    stale = stale_projects(PROJECT)
     for project in stale:  # no -f: Compose finds the containers by the project label
         subprocess.run(  # noqa: S603 - project names matched above
             ["docker", "compose", "-p", project, "down", "-v", "--remove-orphans",  # noqa: S607
@@ -172,7 +135,7 @@ def ephemeral_stack() -> Iterator[Stack]:
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível: smoke tests do Grafana ignorados")
     remove_stale_stacks()
-    project = f"{PROJECT_PREFIX}{os.getpid()}-{secrets.token_hex(4)}"
+    project = new_project(PROJECT_PREFIX)
     admin, postgres, grafana_db = (secrets.token_urlsafe(18) for _ in range(3))
     env = _env(admin, postgres, grafana_db)
     try:

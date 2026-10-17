@@ -24,6 +24,7 @@ from tests.support.signoz_smoke.fixtures import (  # noqa: F401 - fixtures and t
     dashboard_ids,
     pytest_collection_modifyitems,
     signoz_api,
+    signoz_compose,
     signoz_credentials,
     signoz_login,
     signoz_stack,
