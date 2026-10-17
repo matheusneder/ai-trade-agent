@@ -9,6 +9,8 @@ into the container through ``PYTHONPATH``) and replicates the agent's native pro
   at a ``tp_trailing`` distance (``TAKE_PROFIT`` leg with ``trailingDelta``); with
   ``tp_activation_atr_mult``, the activation is that multiple of the entry's ATR%, clipped to
   [``tp_activation``, ``tp_activation_max``];
+* the Risk Guard's minimum R:R: no entry when ``(activation − fee) / (stop + fee)`` is below
+  ``min_reward_risk`` (``pre_trade`` in ``config/stop_conditions.yaml``);
 * risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position;
 * the agent's decision exits: stop at *break-even* after ``break_even_r`` and the maximum
   holding time.
@@ -68,6 +70,11 @@ class TradeAgentStrategy(IStrategy):
     max_position_pct = DecimalParameter(
         0.05, 1.0, default=0.25, decimals=2, space="buy", optimize=False
     )
+    # Risk Guard pre-trade check (``PreTradeConfig``); 0 = off.
+    min_reward_risk = DecimalParameter(0, 5, default=0, decimals=2, space="buy", optimize=False)
+    round_trip_fee = DecimalParameter(
+        0, 0.01, default=0.002, decimals=4, space="buy", optimize=False
+    )
 
     # ------------------------------------------------------------------ exit (space=sell)
     # Parameters with optimize=False define the profile's risk and are never optimized.
@@ -119,10 +126,14 @@ class TradeAgentStrategy(IStrategy):
         dataframe["score"] = score_frame(dataframe, params)
         dataframe["setup"] = setup_frame(dataframe, params)
         dataframe["stop_pct"] = stop_pct_frame(dataframe, params)
+        fee = float(self.round_trip_fee.value)
+        activation = dataframe["atr_pct"].map(self._activation_for)
+        reward_risk = (activation - fee) / (dataframe["stop_pct"] + fee)
         entry = (
             (dataframe["setup"] != "")
             & (dataframe["score"] >= float(self.min_score.value))
             & (dataframe["volume"] > 0)
+            & (reward_risk >= float(self.min_reward_risk.value))
         )
         dataframe.loc[entry, "enter_long"] = 1
         dataframe.loc[entry, "enter_tag"] = dataframe.loc[entry, "setup"]
@@ -145,16 +156,16 @@ class TradeAgentStrategy(IStrategy):
     def _entry_stop_pct(self, pair: str, trade: Trade) -> float:
         return self._entry_value(pair, trade, "stop_pct", float(self.stop_max_pct.value))
 
-    def _tp_activation(self, pair: str, trade: Trade) -> float:
+    def _activation_for(self, atr_pct: float) -> float:
         """Same rule as ``TakeProfitConfig.activation_for`` (fractions instead of %)."""
         floor = float(self.tp_activation.value)
         mult = float(self.tp_activation_atr_mult.value)
-        if mult <= 0:
-            return floor
-        atr_pct = self._entry_value(pair, trade, "atr_pct", 0.0)
-        if atr_pct <= 0:
+        if mult <= 0 or math.isnan(atr_pct) or atr_pct <= 0:
             return floor
         return min(max(mult * atr_pct, floor), float(self.tp_activation_max.value))
+
+    def _tp_activation(self, pair: str, trade: Trade) -> float:
+        return self._activation_for(self._entry_value(pair, trade, "atr_pct", 0.0))
 
     def custom_stoploss(
         self,

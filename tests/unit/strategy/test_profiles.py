@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from trade_agent.execution.orders import StopMode, TakeProfitMode
 from trade_agent.market.universe import Tier
+from trade_agent.risk.conditions import load_stop_conditions
 from trade_agent.signals import SignalParams
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
@@ -33,6 +34,25 @@ def test_repository_profiles_are_valid_and_within_exchange_limits() -> None:
         for bips in (policy.take_profit_trailing_bips, policy.stop_trailing_bips):
             assert bips is None or 10 <= bips <= 2000  # TRAILING_DELTA filter
         assert protection.stop_distance_pct(D("100")) <= 10
+
+
+def test_repository_profiles_pass_the_minimum_reward_risk() -> None:
+    """The Risk Guard refuses entries below ``pre_trade.min_reward_risk``: with any ATR, the
+    repository profiles must not be blocked by their own stop and take-profit settings."""
+    pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
+    fee = D(str(pre_trade.round_trip_fee_pct))
+    config = load_strategy_config(REPOSITORY_FILE)
+    for name, profile in config.enabled_profiles().items():
+        params = profile.signal_params()
+        for atr_pct in (D("0.3"), D("0.8"), D("1.2"), D("1.8"), D("2.5"), D("4"), D("7")):
+            stop = atr_pct * D(str(params.atr_stop_mult))
+            stop = min(
+                max(stop, D(str(params.min_stop_pct)) * 100), D(str(params.max_stop_pct)) * 100
+            )
+            policy = profile.protection.policy(profile.protection.stop_distance_pct(stop), atr_pct)
+            stop_pct = policy.stop_pct or D(policy.stop_trailing_bips or 0) / 100
+            reward_risk = (policy.take_profit_pct - fee) / (stop_pct + fee)
+            assert reward_risk >= D(str(pre_trade.min_reward_risk)), (name, atr_pct, reward_risk)
 
 
 def test_fixture_profiles_are_valid() -> None:

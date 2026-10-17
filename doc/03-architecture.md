@@ -274,20 +274,20 @@ The universe is built every cycle, with the volume ranking of the moment (D-027)
 
 The profiles live in `config/profiles.yaml`, validated by schema (`strategy/profiles.py`). The lab reads the same file (D-014). Profiles in use, calibrated on 2026-10-01 by the optimized *walk-forward* (D-028, [lab-results.md](lab-results.md)):
 
-| | `swing_trend` (`swg`) | `momentum_alpha` (`mom`) |
-|---|---|---|
-| Capital | 65% of `managed_capital` (650 USDT) | 35% (350 USDT) |
-| Timeframe | 4h | 4h |
-| *Tiers* | core 70%, large 30% | core 30%, large 50%, mid 20% |
-| Positions, size, reserve | up to 2; up to 42% of the capital; 15% reserve | up to 2; up to 42%; 15% reserve |
-| Risk per trade | 1.2% | 1.5% |
-| Entry | `min_score` 0.67, `limit_fok`, *slippage* up to 18 bps | `min_score` 0.67, `limit_fok`, up to 20 bps |
-| Stop | fixed, 3.1 × ATR, at most 4.5% | fixed, 3.0 × ATR, at most 5% |
-| Take-profit | trailing, activation at +9.7%, 100 bps pullback | trailing, activation at +9.5%, 130 bps pullback |
-| *Break-even* and holding | after 1.2 R; 18 days | after 1.0 R; 6 days |
-| Exit by score | `exit_score` −0.46, already on the first cycle | −0.46, on the first cycle |
-| Signals | ADX ≥ 24, pullback RSI ≤ 41, relative volume ≥ 2.3 | ADX ≥ 29, RSI ≤ 35, volume ≥ 2.6 |
-| LLM | weight 0.25, minimum confidence 0.65, `ta_only_reduced` | weight 0.30, confidence 0.60, `ta_only_reduced` |
+| | `swing_trend` (`swg`) | `momentum_alpha` (`mom`) | `alt_atr` (`alt`, D-036) |
+|---|---|---|---|
+| Capital | 65% of `managed_capital` (650 USDT) | 30% (300 USDT) | 5% (50 USDT), experimental |
+| Timeframe | 4h | 4h | 4h |
+| *Tiers* | core 70%, large 30% | core 30%, large 50%, mid 20% | large 40%, mid 70% |
+| Positions, size, reserve | up to 2; up to 42% of the capital; 15% reserve | up to 2; up to 42%; 15% reserve | up to 3; up to 34%; 10% reserve |
+| Risk per trade | 1.2% | 1.5% | 1.0% |
+| Entry | `min_score` 0.67, `limit_fok`, *slippage* up to 18 bps | `min_score` 0.67, `limit_fok`, up to 20 bps | `min_score` 0.67, `limit_fok`, up to 20 bps |
+| Stop | fixed, 3.1 × ATR, at most 4.5% | fixed, 3.0 × ATR, at most 6.5% (D-034) | fixed, 3.0 × ATR, at most 7% |
+| Take-profit | trailing, activation at +9.7%, 100 bps pullback | trailing, activation at +13% (D-034), 130 bps pullback | trailing, activation at 5 × the entry's ATR% (8–16%, D-035), 150 bps pullback |
+| *Break-even* and holding | after 1.2 R; 18 days | after 1.0 R; 6 days | after 1.0 R; 10 days |
+| Exit by score | `exit_score` −0.46, already on the first cycle | −0.46, on the first cycle | −0.46, on the first cycle |
+| Signals | ADX ≥ 24, pullback RSI ≤ 41, relative volume ≥ 2.3 | ADX ≥ 29, RSI ≤ 35, volume ≥ 2.6 | ADX ≥ 26, RSI ≤ 38, volume ≥ 1.8 |
+| LLM | weight 0.25, minimum confidence 0.65, `ta_only_reduced` | weight 0.30, confidence 0.60, `ta_only_reduced` | weight 0.25, confidence 0.65, `ta_only_reduced` |
 
 The lab does not optimize the risk, the *break-even* or the maximum holding (D-017); those values are the user's.
 
@@ -360,7 +360,7 @@ Options per profile:
 |-----------|---------|------|
 | Entry | `limit_fok` (default) · `limit_maker_gtc` | FOK needs no partial-fill handling. GTC maker pays a lower fee, but needs a *timeout* and partial-fill handling (see 9.3) |
 | Upper leg (`take_profit.mode`) | `trailing`: `TAKE_PROFIT` + `stopPrice` + `trailingDelta` · `limit`: `LIMIT_MAKER` (fixed target) | The trailing TP maximizes the gain with the agent turned off. Both profiles use `trailing` |
-| Take-profit activation | `activation_pct` (default: fixed) · `activation_atr_mult` + `activation_max_pct`: k × the entry's ATR%, between `activation_pct` (floor) and `activation_max_pct` (cap) | The ATR mode adapts the activation to the asset's volatility at the entry. No profile uses it (D-035) |
+| Take-profit activation | `activation_pct` (default: fixed) · `activation_atr_mult` + `activation_max_pct`: k × the entry's ATR%, between `activation_pct` (floor) and `activation_max_pct` (cap) | The ATR mode adapts the activation to the asset's volatility at the entry. The activation ÷ stop must stay above the Risk Guard's `min_reward_risk` (1.5) for any ATR, or the entries are refused (`test_repository_profiles_pass_the_minimum_reward_risk`). Used by `alt_atr` (D-036) |
 | Lower leg (`stop.mode`) | `fixed`: `STOP_LOSS` with `stopPrice` · `trailing`: `STOP_LOSS` with `trailingDelta` only (moves up with the price from the entry) | Always `STOP_LOSS` at market: it prioritizes getting out over the price. Both profiles use `fixed` |
 
 > All these combinations passed on the Spot Testnet on 2026-09-28, and OPOCO has been running in Demo Mode since 2026-09-29 (doc 01, §3).
@@ -605,3 +605,4 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 | D-033 | 2026-10-08 | The LLM daily cap is checked **once per research cycle**, before its first call; a started cycle runs to the end | Checked before every call, the cap let the web step (about 83% of a cycle's cost) run and then refused the structured reading: on 2026-10-06 at 20:03, two cycles paid US$ 0.90 and produced nothing, and the 20:00 cycle ran without the analyst. The overshoot is at most one cycle | Estimate the cycle's cost and require that much budget left (more configuration, and the estimate varies by cycle) |
 | D-034 | 2026-10-16 | Lab calibrations use **5m intra-candle exits** (`--detail 5m`), simulate the agent's *break-even* and maximum holding, and compare **fixed-parameter variants** chosen on 2023–2024 and confirmed on a 2025–2026 holdout. `momentum_alpha`: stop cap 6.5% and TP activation 13% | With 4h candles only, *hyperopt* chose tight trailings that only win because Freqtrade assumes the high came first: the optimized `swing_trend` fell from +107% to −5% with the 5m detail. The `momentum_alpha` change held on the holdout (−0.02% → +6.98%); the same change in `swing_trend` did not (+26.86% → +9.47%) and was not adopted | Per-window *hyperopt* (D-017) as the calibration (overfits with ~40 trades per training); adopting the best design variant in both profiles; more risk per trade; new `trend_daily` and `breakout_alt` profiles ([lab-results.md](lab-results.md)) |
 | D-035 | 2026-10-16 | Optional **ATR-based take-profit activation** (`take_profit.activation_atr_mult` + `activation_max_pct`): k × the entry's ATR%, with `activation_pct` as the floor; off by default, and the lab simulates it the same way | Test whether an activation that follows volatility keeps the gain of the 13% activation in strong trends without losing it in calmer regimes. In `swing_trend` it lost to the fixed 9.7% on the design period for every k (4, 5, 6 and 5 bounded to 9.7–13%), so no profile uses it | Fixed activation per regime (needs a regime detector); activation as a multiple of the stop distance (the stop is capped at `max_pct` in most entries, so it barely varies) ([lab-results.md](lab-results.md), section 2.1) |
+| D-036 | 2026-10-17 | New experimental **`alt_atr`** profile (4h, large and mid, 5% of the capital, taken from `momentum_alpha`: 35% → 30%) with the take-profit activation at 5 × the entry's ATR% (8–16%). The lab now also simulates the Risk Guard's minimum R:R | 15 windows +48.93% (design +47.37%, holdout +1.05%), worst window drawdown 10.09%; the same profile with a fixed 11% activation makes +33.90%. The holdout had been used before, so the small share limits the cost of being wrong while the Demo validates it. Without the R:R check, the lab counted entries the agent would refuse (4 × ATR against a 3 × ATR stop is R:R 1.33) | 4 × ATR (blocked by the R:R check: −16.24% on the holdout); fixed 11% (+11.15% on the holdout, but weaker on the design period and not ATR-based); a larger share ([lab-results.md](lab-results.md), section 2.3) |

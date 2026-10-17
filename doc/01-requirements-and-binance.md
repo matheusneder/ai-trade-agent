@@ -7,7 +7,7 @@
 | # | Requirement | How the agent meets it |
 |---|-------------|------------------------|
 | R1 | Choose pairs and buy or sell without intervention | The universe is built every cycle, with liquidity, spread, history, delisting and *tier* filters. Then come the technical signals, the LLM analyst and each profile's portfolio, up to the OPOCO (doc 03, §6) |
-| R2 | Allocation profiles | Declarative profiles in `config/profiles.yaml`, validated by schema. Today they are `swing_trend` and `momentum_alpha`, both on 4h (doc 03, §8) |
+| R2 | Allocation profiles | Declarative profiles in `config/profiles.yaml`, validated by schema. Today they are `swing_trend`, `momentum_alpha` and the experimental `alt_atr`, all on 4h (doc 03, §8) |
 | R3 | Decisions with technical analysis, news and sentiment | Technical analysis is pure functions (`signals/`). News and sentiment go through the LLM analyst, with structured output capped by code (doc 03, §7) |
 | R4 | Protection even with the agent turned off | Every entry is an OPOCO: Binance arms the trailing take-profit and the stop on its own server (§2; doc 03, §9) |
 | R5 | Configurable stop conditions | `config/stop_conditions.yaml`, with the persisted states `running`, `paused`, `halted` and `flattening` (doc 03, §10) |

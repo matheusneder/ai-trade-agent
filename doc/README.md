@@ -8,7 +8,7 @@ Autonomous cryptocurrency trading agent for **Binance Spot**. It decides with te
 - **Recovery:** with what is critical kept on the exchange, a crash is resolved at the next startup: the agent **reconciles and moves on**.
 - **The LLM is an analyst, not an operator:** it produces a structured reading, with asymmetric authority. It can veto or reduce risk, never increase it.
 - **Pieces:** a Python process with PostgreSQL. Alongside it are Telegram (alerts and commands), Grafana, Loki, Jaeger and SigNoz (observability), Freqtrade as an offline backtesting lab and Binance's Demo Mode for *paper trading*.
-- **Status:** *paper trading* on Demo since 2026-09-29, with the `swing_trend` and `momentum_alpha` profiles (4h). The *go-live* checklist is in doc 04.
+- **Status:** *paper trading* on Demo since 2026-09-29, with the `swing_trend` and `momentum_alpha` profiles (4h), plus the experimental `alt_atr` (5%, since 2026-10-17). The *go-live* checklist is in doc 04.
 
 ## Documents
 

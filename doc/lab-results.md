@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -15,6 +15,7 @@
 | Optimized parameters | `min_score`, `adx_min`, `rsi_pullback_max`, `vol_rel_min`, `exit_score`, `atr_stop_mult`, `tp_activation`, `tp_trailing` |
 | Fixed (from the profile) | Maximum stop, risk per trade, maximum size, cash reserve, *break-even* and maximum holding. Since 2026-10-16 the lab simulates the agent's *break-even* (checked at the candle close, like the 4h cycle) and maximum holding |
 | Simulated protection | Fixed stop `entry × (1 − min(k·ATR%, max_stop))` and a *trailing take-profit* with activation, like the native OPOCO |
+| Risk Guard R:R | Since 2026-10-17, no entry when `(activation − fees) ÷ (stop + fees)` is below `pre_trade.min_reward_risk` (`config/stop_conditions.yaml`), like the agent. The 2026-10-16 profiles always pass it |
 | Fees | 0.1% per side (standard Spot fee, without the BNB discount) |
 | References | *Buy & hold* of the profile's pair basket (simple average) and of BTC |
 
@@ -94,6 +95,27 @@ Two new profiles were tried with the ATR-based activation, each against the same
 | `alt_atr` | 4 × ATR, 10–13% | +23.29% | — | 8.74% |
 
 **Rejected:** none of them is profitable on the holdout, so no profile was added. The ATR-based activation lost less than the fixed one on the holdout in both profiles, and in the daily profile it also won on the design period. On 4h it lost on the design period, as in `swing_trend`. Both profiles lose in 2025–2026, the regime in which `swing_trend` still made +26.86%. An earlier daily test (`trend_daily`, D-034) had made +34.47% on the design period with other entry filters.
+
+### 2.3 `alt_atr`: experimental profile at 5% (2026-10-17)
+
+Goal: a profile with the ATR-based activation, with a small share (5%, 50 USDT) and some profit, or the smallest loss, in 2025–2026. Starting from the `alt_atr` of section 2.2, 44 walk-forwards over the 15 windows (2023-01 → 2026-09) with one or two changes at a time, all with the 50 USDT wallet. The 2025–2026 holdout had been used before and was used again here to choose, so these numbers are **not** out of sample.
+
+**Sweep without the R:R check** (base: 4 × ATR, 8–18%, relative volume ≥ 2.3; holdout −1.70%, 15 windows +25.12%). Relative volume was the only lever that improved both periods: ≥ 1.8 gave +57.95% / +3.81% (+63.97%), and 1.6, 2.0 and 2.8 were also positive on the holdout. Two slots, `min_score`, ADX, *break-even*, maximum holding, trailing, stop cap, tiers and exit score did not improve both periods. With 5% or 30% of the capital the result is the same (no minimum notional effect).
+
+**The Risk Guard refuses entries with R:R below 1.5** (`pre_trade` in `config/stop_conditions.yaml`), and the lab did not simulate it: 4 × ATR against a 3 × ATR stop is R:R 1.33, so the agent would refuse most of those entries. The lab now applies the same check, and a test checks that every repository profile passes it for any ATR:
+
+| `alt_atr`, relative volume ≥ 1.8, with the R:R check | Design (2023–2024) | Holdout (2025–2026) | 15 windows | Worst window | Worst window DD | Trades |
+|---|--:|--:|--:|--:|--:|--:|
+| 4 × ATR, 8–18% (stop 3 × ATR) | +32.50% | −16.24% | +10.99% | −12.12% | 12.12% | 364 |
+| 4 × ATR, stop 2.5 / 2 × ATR | +37.68% / +24.80% | −12.98% / −17.04% | +19.81% / +3.53% | | 10.71% / 11.64% | |
+| 5 × ATR, 8–20% | +50.35% | +0.43% | +50.99% | −5.43% | 10.09% | 426 |
+| **5 × ATR, 8–16% (adopted)** | **+47.37%** | **+1.05%** | **+48.93%** | **−5.43%** | **10.09%** | 435 |
+| 5 × ATR with relative volume 1.6 / 2.0 | +61.61% / +33.84% | −6.50% / +0.01% | +51.10% / +33.85% | | 11.69% / 8.79% | |
+| 5 × ATR with floor 10%, trailing 100, `min_score` 0.72 or 2 slots | +40% to +57% | −7.01% to −0.80% | +30% to +56% | | 9.3–10.9% | |
+| 5.5 / 6 × ATR | +37.00% / +40.79% | −3.24% / −1.52% | +32.55% / +38.65% | | 10.9% / 10.5% | |
+| Fixed 11% | +20.47% | +11.15% | +33.90% | −3.03% | 6.62% | 192 |
+
+**Reading:** around 5 × ATR the holdout stays between −7% and +1%: in 2025–2026 the profile is about break-even, and its result comes from the strong 2023–2024 trend in the alts. The fixed 11% activation lost less in 2025–2026 (it only enters when the stop is below its 7% cap, which the R:R check imposes) but made less over the 15 windows. With 5% of the capital, the worst window (−5.43%) is about 2.7 USDT, and the portfolio of the three profiles goes from +67.28% to +66.70% over the 15 windows (holdout +19.62% → +19.29%), with the same worst window (−3.7%). The Demo decides whether the share grows.
 
 ## 3. Out-of-sample results (2026-10-01)
 

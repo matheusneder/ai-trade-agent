@@ -14,7 +14,7 @@ The agent has been **paper trading in Demo Mode** since 2026-09-29, with the ord
 | *Live* test (open, arm, adjust, close) | passed on the Spot Testnet |
 | OPOCO on Demo | running since 2026-09-29; the protected quantity is the one received after the fee (doc 01, §3) |
 | Chaos tests (crash after the intent and before sending, after sending and before recording, during an adjustment; exit and expired protection with the agent down; repeated restarts) | passed in the integration suite (`tests/integration/test_chaos.py`) |
-| Lab | `swing_trend` and `momentum_alpha` with a positive out-of-sample expectancy, below BTC *buy & hold*; revised on 2026-10-16 with 5m intra-candle exits (D-034, [lab-results.md](lab-results.md)) |
+| Lab | `swing_trend` and `momentum_alpha` with a positive out-of-sample expectancy, below BTC *buy & hold*; revised on 2026-10-16 with 5m intra-candle exits (D-034, [lab-results.md](lab-results.md)). `alt_atr` (5% of the capital, 2026-10-17, D-036) is experimental: about break-even in 2025–2026 |
 | Analyst evaluation | 31/31 cases, 100% of outputs valid against the schema, 2026-09-28 (doc 03, §7.5) |
 | Telegram alerts | in use: risk state changes, entries and exits, and the 3 Grafana rules |
 

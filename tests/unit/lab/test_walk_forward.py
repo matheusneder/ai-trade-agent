@@ -12,6 +12,7 @@ import pytest
 import yaml
 from lab import walk_forward as wf
 
+from trade_agent.risk.conditions import load_stop_conditions
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
 PROFILES = wf.ROOT / "tests" / "fixtures" / "profiles.yaml"
@@ -72,6 +73,14 @@ def test_strategy_params_atr_take_profit_activation() -> None:
     assert {"tp_activation_atr_mult", "tp_activation_max"} <= wf.RISK_PARAMS
 
 
+def test_strategy_params_pre_trade_from_stop_conditions() -> None:
+    pre_trade = load_stop_conditions(wf.ROOT / "config" / "stop_conditions.yaml").pre_trade
+    buy = wf.strategy_params(CONFIG.profiles["conservador"], pre_trade)["params"]["buy"]
+    assert buy["min_reward_risk"] == pre_trade.min_reward_risk
+    assert buy["round_trip_fee"] == pytest.approx(pre_trade.round_trip_fee_pct / 100)
+    assert {"min_reward_risk", "round_trip_fee"} <= wf.RISK_PARAMS
+
+
 def test_detail_args() -> None:
     assert wf.detail_args("5m") == ["--timeframe-detail", "5m"]
     assert wf.detail_args(None) == []
@@ -81,6 +90,8 @@ def test_strategy_params_fixed_and_trailing_stop() -> None:
     fixed = wf.strategy_params(CONFIG.profiles["conservador"])["params"]
     assert fixed["buy"]["min_score"] == 0.6
     assert fixed["buy"]["risk_per_trade"] == pytest.approx(0.005)
+    assert fixed["buy"]["min_reward_risk"] == 1.5  # PreTradeConfig defaults
+    assert fixed["buy"]["round_trip_fee"] == pytest.approx(0.002)
     assert fixed["sell"]["stop_max_pct"] == pytest.approx(0.04)
     assert fixed["sell"]["tp_activation"] == pytest.approx(0.03)
     assert fixed["sell"]["tp_trailing"] == pytest.approx(0.01)
@@ -334,7 +345,14 @@ def test_optimize_writes_merged_params(tmp_path: Path, monkeypatch: pytest.Monke
         params_file.write_text(json.dumps(_exported()), encoding="utf-8")
 
     monkeypatch.setattr(wf, "_freqtrade", fake_freqtrade)
-    args = argparse.Namespace(loss="L", epochs=5, seed=1, min_trades=3, detail=None)
+    args = argparse.Namespace(
+        loss="L",
+        epochs=5,
+        seed=1,
+        min_trades=3,
+        detail=None,
+        stop_conditions=wf.ROOT / "config" / "stop_conditions.yaml",
+    )
     chosen = wf.optimize(
         CONFIG.profiles["moderado"], "cfg", (date(2024, 1, 1), date(2025, 1, 1)), args
     )
