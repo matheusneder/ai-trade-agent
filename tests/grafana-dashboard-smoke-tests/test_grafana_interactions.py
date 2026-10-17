@@ -94,9 +94,8 @@ def test_regex_search_filters_the_log_lines(grafana: GrafanaPage) -> None:
     )
     search = label.locator("xpath=..").locator("input")
     watch.reset()
-    # a plain regex: the panel puts $busca inside a double-quoted LogQL string, where a
-    # backslash (decision\.cycle) is an invalid escape and Loki answers 400
-    search.fill("decision.cycle")
+    # a backslash must reach Loki as is (the filter is a raw backtick string)
+    search.fill(r"decision\.cycle")
     search.press("Enter")
     expect(page).to_have_url(re.compile("var\\-busca=decision"))
     wait_for_panels(page, watch, board, using="$busca")

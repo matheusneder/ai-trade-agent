@@ -25,7 +25,8 @@ LOKI = {"type": "loki", "uid": "trade-agent-loki"}
 CLOSED = "state = 'closed' AND realized_pnl IS NOT NULL"
 LATEST = "id = (SELECT max(id) FROM telemetry_snapshots)"
 PROBLEMS = 'level=~"warning|warn|error|critical|fatal"'
-FILTERED = '{service=~"$service", level=~"$level"} |~ "(?i)$busca"'
+# backticks: a raw LogQL string, so a regex such as decision\.cycle needs no escaping
+FILTERED = '{service=~"$service", level=~"$level"} |~ `(?i)$busca`'
 
 
 def panel(
@@ -59,8 +60,18 @@ def panel(
     }
 
 
-def stat(title: str, sql: str, unit: str | None = None, w: int = 6) -> dict[str, Any]:
-    return panel(title, sql, kind="stat", fmt="table", unit=unit, w=w, h=4)
+def stat(
+    title: str, sql: str, unit: str | None = None, w: int = 6, *, text: bool = False
+) -> dict[str, Any]:
+    """Single-value panel; ``text`` also shows the text columns (the default reduction drops them)."""
+    result = panel(title, sql, kind="stat", fmt="table", unit=unit, w=w, h=4)
+    if text:
+        result["options"]["reduceOptions"] = {
+            "values": False,
+            "calcs": ["lastNotNull"],
+            "fields": "/.*/",
+        }
+    return result
 
 
 def table(title: str, sql: str, w: int = 24, h: int = 9) -> dict[str, Any]:
@@ -189,7 +200,7 @@ def build() -> dict[str, dict[str, Any]]:
     research = dashboard("ta-research", "Decisões e pesquisa", [
         table("Ciclos de decisão", "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"),
         table("Última leitura do analista", "SELECT a->>'asset' AS ativo, (a->>'sentiment')::float AS sentimento, (a->>'confidence')::float AS confianca, (a->>'veto')::bool AS veto, a->>'rationale' AS justificativa FROM research_reports r, jsonb_array_elements(r.view->'assets') a WHERE r.id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=16),
-        stat("Regime e exposição", "SELECT view->>'market_regime' AS regime, (view->>'exposure_multiplier')::float AS exposicao FROM research_reports WHERE id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=8),
+        stat("Regime e exposição", "SELECT view->>'market_regime' AS regime, (view->>'exposure_multiplier')::float AS exposicao FROM research_reports WHERE id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=8, text=True),
         panel("Custo diário do LLM", "SELECT date_trunc('day', at) AS time, sum(cost_usd)::float AS custo FROM llm_usage WHERE $__timeFilter(at) GROUP BY 1 ORDER BY 1", kind="barchart", unit="currencyUSD"),
         panel("Ciclos do analista por status", "SELECT date_trunc('day', created_at) AS time, count(*) FILTER (WHERE status = 'ok') AS ok, count(*) FILTER (WHERE status = 'failed') AS falhas FROM research_reports WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", kind="barchart"),
         table("Notícias coletadas por fonte", "SELECT source AS fonte, count(*) AS noticias, count(*) FILTER (WHERE severity = 'critical') AS criticas FROM news_items WHERE $__timeFilter(published_at) GROUP BY 1 ORDER BY 2 DESC", h=7),

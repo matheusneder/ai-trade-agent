@@ -132,6 +132,8 @@ def test_research_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
     regime = _result(watch, "ta-research", "Regime e exposição")
     assert regime.value("regime") == expected.regime
     assert regime.value("exposicao") == pytest.approx(expected.exposure_multiplier)
+    # the text column survives the stat's reduction and is drawn next to the number
+    expect(panel(page, "Regime e exposição")).to_contain_text(expected.regime)
     status = _result(watch, "ta-research", "Ciclos do analista por status")
     assert (sum(status.column("ok")), sum(status.column("falhas"))) == (
         expected.reports_ok,
