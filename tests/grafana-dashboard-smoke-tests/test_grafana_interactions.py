@@ -67,6 +67,12 @@ def test_view_panel_opens_one_panel(grafana: GrafanaPage, seeded: Dataset) -> No
 
 
 def test_service_variable_filters_the_logs(grafana: GrafanaPage) -> None:
+    """Picking one service narrows the URL, the queries and the legend to it.
+
+    Since Grafana 13 the multi-value picker keeps ``All`` checked when another value is
+    checked (the selection still means every service), and Escape discards the pending
+    change. A user unchecks ``All``, checks the service and leaves the picker, which applies
+    the selection; the test does the same."""
     page, watch = grafana
     board = open_dashboard(page, watch, "ta-logs", "&from=now-24h&to=now")  # agent warnings
     all_values = "data-testid Dashboard template variables Variable Value DropDown value link text"
@@ -74,10 +80,14 @@ def test_service_variable_filters_the_logs(grafana: GrafanaPage) -> None:
     picker.click()
     options = page.get_by_role("option").all_inner_texts()
     assert {"All", "agent", "grafana", "postgres", "loki", "alloy", "jaeger"} <= set(options)
-    watch.reset()
+    all_option = page.get_by_role("option", name="All", exact=True)
+    expect(all_option).to_have_attribute("aria-selected", "true")
+    all_option.click()
     page.get_by_role("option", name="agent", exact=True).click()
-    page.keyboard.press("Escape")
-    expect(page).to_have_url(re.compile("var\\-service=agent"))
+    expect(page.get_by_role("option", selected=True)).to_have_text(["agent"])  # agent only
+    watch.reset()
+    page.keyboard.press("Tab")  # leaving the picker applies the selection
+    expect(page).to_have_url(re.compile("var\\-service=agent(&|$)"))
     wait_for_panels(page, watch, board, using="$service")
     by_service = next(r for r in reversed(watch.results) if "sum by (service)" in r.query)
     assert 'service=~"agent"' in by_service.query
