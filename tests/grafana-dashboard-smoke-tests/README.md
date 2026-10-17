@@ -19,11 +19,11 @@ PostgreSQL and Loki, and Chromium (Playwright) opens every dashboard.
 
 | File | Needs | Checks |
 | --- | --- | --- |
-| `test_seed.py` | nothing | the synthetic day keeps the agent's invariants: valid position states, FKs, unique order/fill/intent IDs, PnL and fees recomputed from the fills by the domain's own functions, equity consistent with the trades, determinism per seed |
-| `test_stack_hygiene.py` | nothing | the stacks of killed runs are recognized by their owner PID, never one of a live run |
-| `test_provisioning.py` | Docker | the 6 dashboards are provisioned (same panels as the generator), the PostgreSQL (`grafana_ro`) and Loki data sources are healthy, the 3 alert rules evaluate with data (`health=ok`) and stay normal |
-| `test_dashboards.py` | Docker + Chromium | each dashboard loads; every panel's query returns rows without error; no panel shows "No data" or an error badge; charts draw series and tables rows; stat, table and chart values match the aggregates of the seed (equity, day PnL, drawdown, exposure, trades, win rate, profit factor, fees, exit reasons, news per source, analyst reading, LLM cost, critical events, log counts...) |
-| `test_interactions.py` | Docker + Chromium | the time range picker refetches and filters (`Last 6 hours` counts only the trades of the window Grafana sent), the refresh button, the panel view, the `Serviço` and `Nível` variables and the regex search of the Logs dashboard |
+| `test_grafana_seed.py` | nothing | the synthetic day keeps the agent's invariants: valid position states, FKs, unique order/fill/intent IDs, PnL and fees recomputed from the fills by the domain's own functions, equity consistent with the trades, determinism per seed |
+| `test_grafana_stack_hygiene.py` | nothing | the stacks of killed runs are recognized by their owner PID, never one of a live run |
+| `test_grafana_provisioning.py` | Docker | the 6 dashboards are provisioned (same panels as the generator), the PostgreSQL (`grafana_ro`) and Loki data sources are healthy, the 3 alert rules evaluate with data (`health=ok`) and stay normal |
+| `test_grafana_dashboards.py` | Docker + Chromium | each dashboard loads; every panel's query returns rows without error; no panel shows "No data" or an error badge; charts draw series and tables rows; stat, table and chart values match the aggregates of the seed (equity, day PnL, drawdown, exposure, trades, win rate, profit factor, fees, exit reasons, news per source, analyst reading, LLM cost, critical events, log counts...) |
+| `test_grafana_interactions.py` | Docker + Chromium | the time range picker refetches and filters (`Last 6 hours` counts only the trades of the window Grafana sent), the refresh button, the panel view, the `Serviço` and `Nível` variables and the regex search of the Logs dashboard |
 
 Every browser test also fails on any console error, page error, failed request or HTTP
 4xx/5xx response from Grafana (`/api/ds/query` included) during loading and interaction.
@@ -37,19 +37,26 @@ the text the panel shows.
 
 ```text
 tests/grafana-dashboard-smoke-tests/
-  compose.yaml          ephemeral PostgreSQL + Loki + Grafana (images from deploy/stack.yml)
-  conftest.py           fixtures: stack, seed, logged-in page; deselection outside this folder
-  test_seed.py          invariants of the synthetic data (fast, always runs)
-  test_stack_hygiene.py the cleanup rule for leftovers of killed runs (fast, always runs)
-  test_provisioning.py  Grafana API: dashboards, data sources, alert rules
-  test_dashboards.py    each dashboard in the browser, values against the seed
-  test_interactions.py  time range, refresh, panel view, variables, search
+  compose.yaml                   ephemeral PostgreSQL + Loki + Grafana (images from deploy/stack.yml)
+  conftest.py                    re-exports the fixtures and the hook (tests/support/grafana_fixtures.py)
+  test_grafana_seed.py           invariants of the synthetic data (fast, always runs)
+  test_grafana_stack_hygiene.py  the cleanup rule for leftovers of killed runs (fast, always runs)
+  test_grafana_provisioning.py   Grafana API: dashboards, data sources, alert rules
+  test_grafana_dashboards.py     each dashboard in the browser, values against the seed
+  test_grafana_interactions.py   time range, refresh, panel view, variables, search
 tests/support/
-  grafana_seed.py       the synthetic day (also a CLI)
-  grafana_stack.py      docker compose up/down, migrations, log push to Loki
-  grafana_ui.py         Playwright helpers: panels, /api/ds/query capture, console/network watch
-  playwright_fixtures.py  pytest-playwright's browser fixtures, scoped per module (see below)
+  grafana_fixtures.py            fixtures: stack, seed, logged-in page; deselection outside the folder
+  grafana_seed.py                the synthetic day (also a CLI)
+  grafana_stack.py               docker compose up/down, migrations, log push to Loki
+  grafana_ui.py                  Playwright helpers: panels, /api/ds/query capture, console/network watch
+  playwright_fixtures.py         pytest-playwright's browser fixtures, scoped per module (see below)
 ```
+
+The folder's name has dashes, so it is not a Python package: mypy names its files after their
+bare file name. The test files carry the `grafana` prefix and the fixtures live in
+`tests/support/` so that this suite and the SigNoz one never produce the same module name
+(`conftest`, `test_seed`...); `conftest.py` only re-exports them and is left out of mypy
+(`exclude` in `pyproject.toml`).
 
 ## The ephemeral environment
 
@@ -130,7 +137,7 @@ Docker (Rancher Desktop) must be running. Then:
 uv run pytest tests/grafana-dashboard-smoke-tests
 ```
 
-A single file or test works the same way (`uv run pytest tests/grafana-dashboard-smoke-tests/test_interactions.py`).
+A single file or test works the same way (`uv run pytest tests/grafana-dashboard-smoke-tests/test_grafana_interactions.py`).
 Useful options: `--headed` (watch the browser), `--slowmo 300`, `--tracing retain-on-failure`
 (Playwright trace in `test-results/`), `-x`. Environment: `GRAFANA_SMOKE_SEED` (default 42),
 `GRAFANA_SMOKE_HOURS` (default 24), `GRAFANA_SMOKE_KEEP=1`.
@@ -151,8 +158,8 @@ one run, in either order (E2E first or last).
 
 **The default run stays fast.** `uv run pytest` (whole `tests/`) deselects the E2E tests of
 this folder (`e2e` and `grafana` markers): they run only when the run targets this folder or a
-test of it, or with `-m e2e` / `-m grafana`. `test_seed.py` and
-`test_stack_hygiene.py` need neither Docker nor a browser and always run.
+test of it, or with `-m e2e` / `-m grafana`. `test_grafana_seed.py` and
+`test_grafana_stack_hygiene.py` need neither Docker nor a browser and always run.
 
 A full run takes a few minutes: about 1 minute to start the stack, up to 2 minutes for the alert
 rules' first clean evaluation, and a few seconds per dashboard.
