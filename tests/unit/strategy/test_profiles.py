@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from trade_agent.execution.orders import StopMode, TakeProfitMode
 from trade_agent.market.universe import Tier
+from trade_agent.risk.conditions import load_stop_conditions
 from trade_agent.signals import SignalParams
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
@@ -33,6 +34,43 @@ def test_repository_profiles_are_valid_and_within_exchange_limits() -> None:
         for bips in (policy.take_profit_trailing_bips, policy.stop_trailing_bips):
             assert bips is None or 10 <= bips <= 2000  # TRAILING_DELTA filter
         assert protection.stop_distance_pct(D("100")) <= 10
+
+
+def _reward_risk(name: str, atr_pct: Decimal) -> tuple[Decimal, bool]:
+    """R:R checked by the Risk Guard for an entry of the repository profile ``name`` with
+    ``atr_pct`` (percentage), and whether the stop is at its cap."""
+    pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
+    fee = D(str(pre_trade.round_trip_fee_pct))
+    profile = load_strategy_config(REPOSITORY_FILE).profiles[name]
+    params = profile.signal_params()
+    cap = D(str(params.max_stop_pct)) * 100
+    stop = max(atr_pct * D(str(params.atr_stop_mult)), D(str(params.min_stop_pct)) * 100)
+    policy = profile.protection.policy(
+        profile.protection.stop_distance_pct(min(stop, cap)), atr_pct
+    )
+    stop_pct = policy.stop_pct or D(policy.stop_trailing_bips or 0) / 100
+    return (policy.take_profit_pct - fee) / (stop_pct + fee), stop >= cap
+
+
+def test_repository_profiles_pass_the_minimum_reward_risk() -> None:
+    """The Risk Guard refuses entries below ``pre_trade.min_reward_risk``: below the stop cap,
+    the repository profiles must not be blocked by their own stop and take-profit settings."""
+    pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
+    minimum = D(str(pre_trade.min_reward_risk))
+    for name in load_strategy_config(REPOSITORY_FILE).enabled_profiles():
+        for atr_pct in (D("0.3"), D("0.8"), D("1.2"), D("1.8"), D("2.2"), D("2.5"), D("4"), D("7")):
+            reward_risk, capped = _reward_risk(name, atr_pct)
+            if name == "alt_atr" and capped:
+                continue  # refused on purpose, see the next test
+            assert reward_risk >= minimum, (name, atr_pct, reward_risk)
+
+
+def test_alt_atr_skips_entries_with_the_stop_at_its_cap() -> None:
+    """D-036: with the stop at its 7% cap (ATR above ~2.3%), the fixed 10.9% activation is below
+    the minimum R:R, so the Risk Guard refuses the most volatile entries, as in the lab."""
+    pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
+    reward_risk, capped = _reward_risk("alt_atr", D("3"))
+    assert capped and reward_risk < D(str(pre_trade.min_reward_risk))
 
 
 def test_fixture_profiles_are_valid() -> None:
