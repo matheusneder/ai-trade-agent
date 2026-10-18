@@ -46,7 +46,12 @@ REQUEST_BY_PANEL = {  # the request type each panel type draws
     "signoz/TimeSeriesPanel": "time_series",
     "signoz/BarChartPanel": "time_series",
     "signoz/NumberPanel": "scalar",
+    "signoz/TablePanel": "scalar",
     "signoz/ListPanel": "raw",
+}
+# panels that accept ClickHouse SQL, among the ones the generator makes
+SQL_PANELS = {"signoz/TimeSeriesPanel", "signoz/BarChartPanel", "signoz/NumberPanel"} | {
+    "signoz/TablePanel"
 }
 
 
@@ -116,6 +121,8 @@ def test_each_panel_has_one_query_of_the_kind_it_draws() -> None:
         if kind == "signoz/ListPanel":  # list: raw records from a single builder
             assert query["spec"]["plugin"]["kind"] == "signoz/BuilderQuery", name
             assert "aggregations" not in specs[0] and specs[0]["limit"] > 0, name
+        if query["spec"]["plugin"]["kind"] == "signoz/ClickHouseSQL":  # SigNoz's allowed kinds
+            assert kind in SQL_PANELS, name
         if kind == "signoz/NumberPanel":  # a metric as a single value needs reduceTo
             for spec in specs:
                 if spec["signal"] == "metrics":
@@ -149,6 +156,25 @@ def test_series_colors_need_one_per_named_series() -> None:
         series("x", metric("a"), colors=("#000000",))  # no legend: no key for the color
 
 
+def _sql_panels() -> list[tuple[str, dict[str, Any]]]:
+    return [
+        (name, panel)
+        for name, panel in _panels()
+        if panel["spec"]["queries"][0]["spec"]["plugin"]["kind"] == "signoz/ClickHouseSQL"
+    ]
+
+
+def test_sql_queries_keep_their_own_time_bounds() -> None:
+    """The SQL panels ignore the dashboard's range: no SigNoz time variable, one ``now()`` (the
+    tests evaluate the query at other instants) and nothing the querier would template."""
+    assert {name for name, _ in _sql_panels()} == {"trade-agent-operacao/pnl-scope-today"}
+    for name, panel in _sql_panels():
+        query = _builder_specs(panel)[0]["query"]
+        assert query.count("now()") == 1, name
+        assert not re.search(r"\{\{|\[\[|\$", query), name  # {{.start_timestamp}}, $var...
+        assert "toStartOfDay(instant, 'UTC')" in query, name  # the agent's day is UTC
+
+
 def test_agent_metrics_exist() -> None:
     used = {
         aggregation["metricName"]
@@ -156,6 +182,11 @@ def test_agent_metrics_exist() -> None:
         for spec in _builder_specs(panel)
         for aggregation in spec.get("aggregations", [])
         if aggregation.get("metricName", "").startswith("trade_agent.")
+    }
+    used |= {
+        found
+        for _, panel in _sql_panels()
+        for found in re.findall(r"'(trade_agent\.[\w.]+)'", _builder_specs(panel)[0]["query"])
     }
     defined = set(re.findall(r'"(trade_agent\.[\w.]+)"', METRICS_SOURCE))
     assert len(used) >= 15

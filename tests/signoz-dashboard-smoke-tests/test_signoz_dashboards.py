@@ -2,11 +2,12 @@
 
 The panels, sections and series come from ``scripts/signoz_dashboards.py`` itself, so a new
 panel is already checked for rendering and errors. Its *values* are not: add them to
-``EXPECTED_NUMBERS``/``EXPECTED_LEGENDS``/``EXPECTED_ROWS`` below (and the facts they need to
-``tests.support.signoz_smoke.seed.Summary``). See README.md.
+``EXPECTED_NUMBERS``/``EXPECTED_LEGENDS``/``EXPECTED_ROWS``/``EXPECTED_TABLES`` below (and
+the facts they need to ``tests.support.signoz_smoke.seed.Summary``). See README.md.
 """
 
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -90,6 +91,13 @@ EXPECTED_LEGENDS: dict[str, Expect] = {
 EXPECTED_ROWS: dict[str, Expect] = {
     "last-cycles": lambda s: min(50, sum(s.decision_cycles.values())),
     "llm-calls": lambda s: min(30, s.llm_calls),
+}
+
+
+# table panel key → first column → number of the second, at the current time (the tables read
+# their own window, not the dashboard's)
+EXPECTED_TABLES: dict[str, Callable[[Summary], dict[str, float]]] = {
+    "pnl-scope-today": lambda s: s.daily_scope_pnl(time.time_ns()),
 }
 
 
@@ -216,10 +224,45 @@ def test_list_panels_show_the_seeded_rows(
         expect(header).to_contain_text(field["name"])
 
 
+def _table_values(board: Dashboard, key: str) -> dict[str, float]:
+    return {scope: number_value(value) for scope, value in board.table(key)}
+
+
+@pytest.mark.parametrize(("name", "key"), _panels("signoz/TablePanel"))
+def test_table_panels_show_the_seeded_values(
+    open_board: Callable[[str], Dashboard], telemetry: Telemetry, name: str, key: str
+) -> None:
+    """Global first, then each profile; the values with the panel's two decimals, which SigNoz
+    truncates (28.478 shows as 28.47)."""
+    board = open_board(name)
+    shown = board.table(key)
+    expected = EXPECTED_TABLES[key](telemetry.summary)
+    assert [row[0] for row in shown] == ["global", *sorted(set(expected) - {"global"})]
+    assert _table_values(board, key) == pytest.approx(expected, abs=0.01)
+    assert all(re.fullmatch(r"-?[\d,]+(\.\d{1,2})?", row[1]) for row in shown), shown
+
+
+@pytest.mark.parametrize("relative", ["1h", "1w"])
+def test_daily_table_ignores_the_time_range(
+    open_board: Callable[[str], Dashboard], relative: str
+) -> None:
+    """The day's result per scope is the same on the seeded window, the last hour and the last
+    week; the panel's request carries each range, the SQL ignores it."""
+    board = open_board("trade-agent-operacao")
+    on_window = _table_values(board, "pnl-scope-today")
+    with board.queries() as sent:
+        board.open(relative=relative)
+        assert _table_values(board, "pnl-scope-today") == on_window
+    minutes = {"1h": 60, "1w": 7 * 24 * 60}[relative]
+    daily = [q for q in sent if "clickhouse_sql" in str(q["compositeQuery"])]
+    assert daily and {round((q["end"] - q["start"]) / 60_000) for q in daily} == {minutes}
+
+
 def test_every_expectation_points_at_a_real_panel() -> None:
     """A renamed panel key must not leave its expectation silently unused."""
     keys = {key for board in BOARDS.values() for key in board["spec"]["panels"]}
-    assert set(EXPECTED_NUMBERS) | set(EXPECTED_LEGENDS) | set(EXPECTED_ROWS) <= keys
+    expected = set(EXPECTED_NUMBERS) | set(EXPECTED_LEGENDS) | set(EXPECTED_ROWS)
+    assert expected | set(EXPECTED_TABLES) <= keys
 
 
 # ================================================================== interaction

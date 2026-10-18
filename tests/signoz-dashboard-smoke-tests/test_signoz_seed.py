@@ -1,5 +1,6 @@
 """The seed generator alone (fast, no Docker): it runs in the default ``uv run pytest``."""
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -97,9 +98,35 @@ def test_every_panel_has_something_to_show(day: seed.Telemetry) -> None:
         for board in signoz_dashboards.build().values()
         for panel in board["spec"]["panels"].values()
         for query in _queries(panel)
-        if query["signal"] == "metrics"
+        if query.get("signal") == "metrics"
     }
+    used |= {  # the ClickHouse SQL panels name their metric in the query
+        name
+        for board in signoz_dashboards.build().values()
+        for panel in board["spec"]["panels"].values()
+        for query in _queries(panel)
+        for name in re.findall(r"'(trade_agent\.[\w.]+)'", query.get("query", ""))
+    }
+    assert "trade_agent.pnl.total" in used
     assert used <= emitted, used - emitted
+
+
+def test_daily_scope_pnl_restarts_at_the_utc_midnight(day: seed.Telemetry) -> None:
+    """The day's result per scope: zero at the day's first reading, the day so far after it,
+    and the day before has its own result up to the last second before midnight."""
+    summary = day.summary
+    midnight = summary.end - summary.end % seed.DAY
+    assert summary.start < midnight < summary.end  # END is 18:00: the window crosses midnight
+    first = min(at for at, _ in summary.scope_pnl["global"] if at >= midnight)
+    assert summary.daily_scope_pnl(first) == dict.fromkeys(seed.SCOPES, 0.0)
+    assert summary.daily_scope_pnl(midnight + seed.SECOND) == {}  # no reading yet today
+    before = summary.daily_scope_pnl(midnight - seed.SECOND)
+    today = summary.daily_scope_pnl(summary.end)
+    assert set(before) == set(today) == set(seed.SCOPES)
+    assert before != today and all(value != 0 for value in today.values())
+    points = dict(summary.scope_pnl["global"])
+    last = max(points)
+    assert today["global"] == pytest.approx(points[last] - points[first])
 
 
 def test_the_otlp_requests_carry_everything(day: seed.Telemetry) -> None:

@@ -230,7 +230,7 @@
         "uid": "trade-agent-pg"
       },
       "gridPos": {
-        "w": 24,
+        "w": 12,
         "h": 8,
         "x": 0,
         "y": 12
@@ -256,6 +256,42 @@
       },
       "options": {},
       "id": 7
+    },
+    {
+      "type": "table",
+      "title": "Ganhos e perdas por escopo do dia (USDT)",
+      "description": "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do PnL do dia e do Risk Guard): os ganhos e perdas por escopo da última foto menos os da primeira foto do dia. Zera na virada do dia UTC (21h em Brasília) e não depende do intervalo selecionado. Sem foto no dia (logo após a virada, com o agente parado) fica sem dados; reinícios do agente não zeram o dia.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "WITH bounds AS ( SELECT date_trunc('day', instant, 'UTC') AS day_start, instant FROM (SELECT now() AS instant) AS clock ), today AS ( SELECT at, 'global' AS escopo, realized_pnl + unrealized_pnl AS pnl FROM telemetry_snapshots, bounds WHERE at >= day_start AND at <= instant UNION ALL SELECT at, key, (value->>'pnl')::numeric FROM telemetry_snapshots, bounds, jsonb_each(profiles) WHERE at >= day_start AND at <= instant AND value->>'pnl' IS NOT NULL ) SELECT escopo, ((array_agg(pnl ORDER BY at DESC))[1] - (array_agg(pnl ORDER BY at))[1])::float AS resultado FROM today GROUP BY escopo ORDER BY escopo <> 'global', escopo"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 8
     },
     {
       "type": "table",
@@ -288,7 +324,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 8
+      "id": 9
     },
     {
       "type": "table",
@@ -321,7 +357,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 9
+      "id": 10
     },
     {
       "type": "table",
@@ -354,7 +390,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 10
+      "id": 11
     }
   ]
 }

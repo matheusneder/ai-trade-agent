@@ -1106,6 +1106,23 @@ def loki_streams(data: Dataset) -> list[dict[str, Any]]:
     return result
 
 
+def daily_scope_pnl(data: Dataset, instant: datetime) -> dict[str, float]:
+    """What "Ganhos e perdas por escopo do dia" shows at ``instant``: per scope (global and each
+    profile), the result of the UTC day's last snapshot so far minus its first; no snapshot,
+    no row."""
+    day_start = instant.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = [t for t in data.telemetry if day_start <= t.at <= instant]
+    if not today:
+        return {}
+
+    def results(snapshot: TelemetrySnapshotRecord) -> dict[str, Decimal]:
+        profiles = {name: Decimal(p["pnl"]) for name, p in snapshot.profiles.items()}
+        return {GLOBAL: snapshot.realized_pnl + snapshot.unrealized_pnl} | profiles
+
+    first, last = results(today[0]), results(today[-1])
+    return {scope: float(last[scope] - first[scope]) for scope in last}
+
+
 def log_counts(data: Dataset, since: datetime) -> dict[str, int]:
     """The "Logs" stat panels: errors, warnings and agent tracebacks since ``since``."""
     recent = [log for log in data.logs if log.at > since]
