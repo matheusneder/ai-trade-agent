@@ -17,7 +17,9 @@ from typing import Any
 
 import feedparser  # type: ignore[import-untyped]
 import httpx
+from opentelemetry.trace import SpanKind
 
+from trade_agent import tracing
 from trade_agent.research.models import DerivativesSnapshot, FearGreed, NewsItem
 
 BINANCE_CMS = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
@@ -101,10 +103,21 @@ def open_interest_change(rows: Sequence[Mapping[str, Any]]) -> float | None:
 
 
 # ============================================================================ fetch (HTTP)
+async def _get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:
+    """GET in a client span (``url.full`` without the query), under the source's span."""
+    attributes = tracing.http_attributes("GET", url)
+    with tracing.span(
+        "research", f"GET {attributes['server.address']}", kind=SpanKind.CLIENT,
+        attributes=attributes,
+    ) as span:  # fmt: skip
+        response = await client.get(url, headers=USER_AGENT, **kwargs)
+        span.set_attribute("http.response.status_code", response.status_code)
+        response.raise_for_status()
+        return response
+
+
 async def _get_json(client: httpx.AsyncClient, url: str, **params: Any) -> Any:
-    response = await client.get(url, params=params or None, headers=USER_AGENT)
-    response.raise_for_status()
-    return response.json()
+    return (await _get(client, url, params=params or None)).json()
 
 
 async def fetch_fear_greed(client: httpx.AsyncClient) -> FearGreed:
@@ -126,8 +139,7 @@ async def fetch_announcements(
 async def fetch_feed(
     client: httpx.AsyncClient, source: str, url: str, *, now: datetime
 ) -> list[NewsItem]:
-    response = await client.get(url, headers=USER_AGENT, follow_redirects=True)
-    response.raise_for_status()
+    response = await _get(client, url, follow_redirects=True)
     return parse_feed(response.content, source, now=now)
 
 

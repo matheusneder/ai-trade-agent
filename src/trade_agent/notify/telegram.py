@@ -50,8 +50,8 @@ def parse_updates(payload: list[dict[str, Any]]) -> list[Update]:
 class TelegramBot:
     def __init__(self, http: httpx.AsyncClient, token: str, *, base_url: str = API_URL) -> None:
         self._http = http
+        self._base_url = base_url
         self._url = f"{base_url}/bot{token}"
-        self._host = httpx.URL(base_url).host
 
     async def _call(self, method: str, payload: dict[str, Any], wait_s: float) -> Any:
         if method in UNTRACED:
@@ -59,7 +59,10 @@ class TelegramBot:
         attributes: dict[str, tracing.AttributeValue] = {
             "rpc.method": method,
             "peer.service": "telegram",
-            "server.address": self._host,
+            # the real path carries the bot token
+            **tracing.http_attributes(
+                "POST", f"{self._base_url}/{method}", path=f"/bot<token>/{method}"
+            ),
         }
         with tracing.span(
             "telegram", f"telegram {method}", kind=SpanKind.CLIENT, attributes=attributes

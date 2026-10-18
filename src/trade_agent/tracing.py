@@ -21,6 +21,7 @@ from enum import Enum
 from importlib.metadata import version
 from typing import Any
 
+import httpx
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -136,6 +137,26 @@ def annotate(**attributes: object) -> None:
         converted = _value(value)
         if converted is not None:
             current.set_attribute(f"trade_agent.{key}", converted)
+
+
+def http_attributes(method: str, url: str, *, path: str | None = None) -> dict[str, AttributeValue]:
+    """HTTP client attributes (OpenTelemetry semantic conventions) for an outgoing call.
+
+    SigNoz's *External API Monitoring* only lists ``Client`` spans with ``url.full`` and groups
+    them by ``server.address``. ``url.full`` never carries the query (Binance's signature) and
+    ``path`` replaces a path with a secret in it (the Telegram bot token).
+    """
+    parsed = httpx.URL(url)
+    shown = path if path is not None else parsed.path
+    attributes: dict[str, AttributeValue] = {
+        "http.request.method": method,
+        "url.full": f"{parsed.scheme}://{parsed.netloc.decode()}{shown}",
+        "url.path": shown,
+        "server.address": parsed.host,
+    }
+    if parsed.port is not None:
+        attributes["server.port"] = parsed.port
+    return attributes
 
 
 @contextmanager

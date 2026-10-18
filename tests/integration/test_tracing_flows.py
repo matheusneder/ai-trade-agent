@@ -29,6 +29,7 @@ from trade_agent.persistence.db import Database
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.reconcile.reconciler import Reconciler
 from trade_agent.research.models import TriageDraft
+from trade_agent.research.sources import fetch_fear_greed
 from trade_agent.risk.guard import RiskGuard
 from trade_agent.risk.state import StateStore
 from trade_agent.runtime import AgentRuntime
@@ -51,6 +52,9 @@ async def test_binance_calls_are_client_spans_without_secrets(
         assert spans.parent(span) == spans.one("risk.snapshot")
     attributes = account.attributes or {}
     assert attributes["url.path"] == "/api/v3/account"
+    # External API Monitoring (SigNoz) needs url.full; it never carries the signed query
+    assert str(attributes["url.full"]).endswith("/api/v3/account")
+    assert attributes["url.full"] == f"https://{attributes['server.address']!s}/api/v3/account"
     assert attributes["http.response.status_code"] == 200
     assert attributes["peer.service"] == "binance" and attributes["trade_agent.signed"] is True
     assert (time_span.attributes or {})["trade_agent.signed"] is False
@@ -132,6 +136,10 @@ async def test_llm_span_has_usage_but_no_content(spans: Recorded) -> None:
     assert attributes["gen_ai.response.finish_reasons"] == ("end_turn",)
     assert Decimal(str(attributes["trade_agent.cost_usd"])) > 0
     assert attributes["trade_agent.purpose"] == "triage"
+    assert attributes["url.full"] == "https://api.anthropic.com/v1/messages"
+    assert attributes["server.address"] == "api.anthropic.com"
+    assert attributes["http.request.method"] == "POST"
+    assert attributes["http.response.status_code"] == 200
     text_ = spans.attribute_text()
     assert "PROMPT-SECRETO" not in text_ and "NOTICIA-SIGILOSA" not in text_
     assert ("research", "llm") in spans.edges()
@@ -175,6 +183,8 @@ async def test_telegram_commands_and_alerts(spans: Recorded, store: Store) -> No
     alert = spans.one("alert.send")
     assert spans.parent(alert_call) == alert and alert.status.status_code is StatusCode.ERROR
     assert (alert_call.attributes or {})["http.response.status_code"] == 500
+    assert (alert_call.attributes or {})["url.full"] == "https://tg.example/bot<token>/sendMessage"
+    assert (alert_call.attributes or {})["server.address"] == "tg.example"
     assert "TOKEN123" not in spans.attribute_text()
     assert {("telegram", "risk"), ("risk", "db")} <= spans.edges()
 
@@ -208,3 +218,19 @@ async def test_background_task_failures_mark_their_trace(
     assert "falha no risco" in str(job.events[0].attributes["exception.message"])
     assert not spans.named("job ping")
     assert json.dumps([s.name for s in spans.spans])  # no span without a name
+
+
+# ============================================================================ research sources
+async def test_news_source_requests_are_client_spans_with_the_url(spans: Recorded) -> None:
+    with respx.mock() as router:
+        router.get("https://api.alternative.me/fng/").respond(
+            200, json={"data": [{"value": "53", "value_classification": "Neutral"}] * 2}
+        )
+        async with httpx.AsyncClient() as http:
+            await fetch_fear_greed(http)
+    (request,) = spans.named("GET api.alternative.me")
+    attributes = request.attributes or {}
+    assert component(request) == "research" and request.kind is SpanKind.CLIENT
+    assert attributes["url.full"] == "https://api.alternative.me/fng/"  # without ?limit=2
+    assert attributes["http.response.status_code"] == 200
+    assert "limit" not in spans.attribute_text()
