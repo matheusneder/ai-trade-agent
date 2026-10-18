@@ -1106,21 +1106,29 @@ def loki_streams(data: Dataset) -> list[dict[str, Any]]:
     return result
 
 
-def daily_scope_pnl(data: Dataset, instant: datetime) -> dict[str, float]:
-    """What "Ganhos e perdas por escopo do dia" shows at ``instant``: per scope (global and each
-    profile), the result of the UTC day's last snapshot so far minus its first; no snapshot,
-    no row."""
+def daily_scope_series(data: Dataset, instant: datetime) -> dict[str, list[tuple[datetime, float]]]:
+    """What "Ganhos e perdas por escopo do dia" draws at ``instant``: per scope (global and
+    each profile), the result of each snapshot of the UTC day so far minus the day's first;
+    no snapshot, no series."""
     day_start = instant.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     today = [t for t in data.telemetry if day_start <= t.at <= instant]
-    if not today:
-        return {}
 
     def results(snapshot: TelemetrySnapshotRecord) -> dict[str, Decimal]:
         profiles = {name: Decimal(p["pnl"]) for name, p in snapshot.profiles.items()}
         return {GLOBAL: snapshot.realized_pnl + snapshot.unrealized_pnl} | profiles
 
-    first, last = results(today[0]), results(today[-1])
-    return {scope: float(last[scope] - first[scope]) for scope in last}
+    series: dict[str, list[tuple[datetime, float]]] = {}
+    if today:
+        first = results(today[0])
+        for snapshot in today:
+            for scope, value in results(snapshot).items():
+                series.setdefault(scope, []).append((snapshot.at, float(value - first[scope])))
+    return series
+
+
+def daily_scope_pnl(data: Dataset, instant: datetime) -> dict[str, float]:
+    """The last point of each series of :func:`daily_scope_series`: the day so far."""
+    return {scope: s[-1][1] for scope, s in daily_scope_series(data, instant).items()}
 
 
 def log_counts(data: Dataset, since: datetime) -> dict[str, int]:

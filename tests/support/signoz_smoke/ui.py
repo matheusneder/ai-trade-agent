@@ -20,7 +20,6 @@ RENDERERS = {
     "signoz/TimeSeriesPanel": "time-series-renderer",
     "signoz/BarChartPanel": "bar-panel-renderer",
     "signoz/NumberPanel": "number-panel-value",
-    "signoz/TablePanel": "table-panel-renderer",
     "signoz/ListPanel": "list-panel-renderer",
 }
 # states a healthy panel never shows
@@ -171,15 +170,6 @@ class Dashboard:
         rows = panel.locator("tbody tr.ant-table-row")
         expect(rows.first).to_be_visible()
         return rows.count()
-
-    def table(self, key: str) -> list[list[str]]:
-        """The cells of each row of a table panel, as shown."""
-        panel = self.rendered(key)
-        rows = panel.locator("tbody tr.ant-table-row")
-        expect(rows.first).to_be_visible()
-        return [
-            [cell.strip() for cell in row.locator("td").all_inner_texts()] for row in rows.all()
-        ]
 
     @contextmanager
     def queries(self) -> Iterator[list[dict[str, Any]]]:

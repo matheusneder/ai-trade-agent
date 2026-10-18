@@ -14,7 +14,7 @@ from scripts.grafana_dashboards import DAILY_SCOPE_PNL
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.support.grafana_seed import Dataset, daily_scope_pnl, log_counts
+from tests.support.grafana_seed import Dataset, daily_scope_series, log_counts
 from tests.support.grafana_stack import Stack
 from tests.support.grafana_ui import (
     BOARDS,
@@ -85,47 +85,58 @@ def test_overview_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
     for scope in expected.states:  # global and each profile: one series each
         expect(scopes.get_by_test_id(f"data-testid VizLegend series {scope}")).to_be_visible()
     daily = _result(watch, "ta-overview", DAILY)
-    found = dict(zip(daily.column("escopo"), daily.column("resultado"), strict=True))
-    assert found == pytest.approx(daily_scope_pnl(seeded, datetime.now(UTC)), abs=1e-9)
-    assert next(iter(found)) == "global" and set(found) == set(expected.states)
-    for scope in found:  # one row per scope, in the table the user sees
-        expect(panel(page, DAILY).get_by_text(scope, exact=True)).to_be_visible()
+    midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    assert daily.start == midnight  # "today so far", whatever the dashboard's range
+    chart = panel(page, DAILY)
+    for scope in daily_scope_series(seeded, datetime.now(UTC)):  # one series per scope
+        expect(chart.get_by_test_id(f"data-testid VizLegend series {scope}")).to_be_visible()
 
 
-def _daily_at(stack: Stack, instant: datetime) -> dict[str, float]:
+Series = dict[str, list[tuple[datetime, float]]]
+
+
+def _daily_at(stack: Stack, instant: datetime) -> Series:
     """The daily panel's query evaluated at ``instant`` instead of ``now()``, straight on the
     ephemeral PostgreSQL (the query reads nothing else from the clock)."""
     query = text(DAILY_SCOPE_PNL.replace("now()", "CAST(:instant AS timestamptz)"))
 
-    async def run() -> dict[str, float]:
+    async def run() -> Series:
         engine = create_async_engine(stack.database_url)
         try:
             async with engine.connect() as connection:
                 rows = (await connection.execute(query, {"instant": instant})).all()
         finally:
             await engine.dispose()
-        return {row[0]: row[1] for row in rows}
+        series: Series = {}
+        for at, scope, value in rows:
+            series.setdefault(scope, []).append((at, value))
+        return series
 
     with ThreadPoolExecutor(max_workers=1) as pool:  # Playwright's sync API owns this loop
         return pool.submit(asyncio.run, run()).result()
 
 
+def _same(found: Series, expected: Series) -> None:
+    assert set(found) == set(expected)
+    for scope, points in expected.items():
+        assert [t for t, _ in found[scope]] == [t for t, _ in points], scope
+        assert [v for _, v in found[scope]] == pytest.approx([v for _, v in points], abs=1e-9)
+
+
 def test_daily_scope_pnl_restarts_at_the_utc_midnight(stack: Stack, seeded: Dataset) -> None:
-    """Around the seeded midnight: the day before keeps its result up to 23:59:59, nothing
+    """Around the seeded midnight: the day before keeps its series up to 23:59:59, nothing
     shows before the day's first snapshot, which starts the day at zero."""
     assert DAILY_SCOPE_PNL.count("now()") == 1
     midnight = seeded.end.replace(hour=0, minute=0, second=0)
     first = next(t.at for t in seeded.telemetry if t.at >= midnight)
     before = midnight - timedelta(seconds=1)
-    yesterday = _daily_at(stack, before)
-    assert yesterday == pytest.approx(daily_scope_pnl(seeded, before), abs=1e-9)
-    assert set(yesterday) == {"global", *seeded.telemetry[-1].profiles}
+    _same(_daily_at(stack, before), daily_scope_series(seeded, before))
     if first > midnight:
         assert _daily_at(stack, midnight) == {}
-    assert set(_daily_at(stack, first).values()) == {0.0}
-    assert _daily_at(stack, seeded.end) == pytest.approx(
-        daily_scope_pnl(seeded, seeded.end), abs=1e-9
-    )
+    at_first = _daily_at(stack, first)
+    assert at_first == {scope: [(first, 0.0)] for scope in at_first}
+    assert set(at_first) == {"global", *seeded.telemetry[-1].profiles}
+    _same(_daily_at(stack, seeded.end), daily_scope_series(seeded, seeded.end))
 
 
 def test_positions_match_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
