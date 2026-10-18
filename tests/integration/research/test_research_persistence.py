@@ -114,6 +114,14 @@ async def test_reports_and_usage_ledger(research_store: ResearchStore) -> None:
     assert await research_store.spent_since(NOW - timedelta(hours=1)) == Decimal("0.25")
 
 
+async def test_a_cycle_of_many_profiles_is_recorded(research_store: ResearchStore) -> None:
+    # the engine's trigger grows with each profile that brought candidates
+    trigger = "ciclo:" + "+".join(f"profile_{n:02d}" for n in range(12))
+    stored = await research_store.add_report(_entry("ok", trigger=trigger))
+    latest = await research_store.latest_report()
+    assert latest is not None and latest.id == stored and latest.trigger == trigger
+
+
 def _service(
     db: Database, fake: FakeClaude | None, http: httpx.AsyncClient, **config: Any
 ) -> ResearchService:

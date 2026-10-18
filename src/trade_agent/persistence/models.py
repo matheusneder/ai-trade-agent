@@ -187,7 +187,7 @@ class ResearchReportRecord(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
     as_of: Mapped[datetime]
-    trigger: Mapped[str] = mapped_column(String(32))
+    trigger: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16))
     model: Mapped[str] = mapped_column(String(48))
     prompt_version: Mapped[str] = mapped_column(String(16))
