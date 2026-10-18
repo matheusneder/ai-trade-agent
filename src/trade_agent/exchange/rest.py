@@ -268,9 +268,7 @@ class BinanceRestClient:
         # only the path goes to logs, spans and error messages: the query carries the signature
         path = url.split("?", 1)[0]
         attributes: dict[str, tracing.AttributeValue] = {
-            "http.request.method": method,
-            "url.path": path,
-            "server.address": self._http.base_url.host,
+            **tracing.http_attributes(method, str(self._http.base_url).rstrip("/") + path),
             "peer.service": "binance",
             "trade_agent.signed": API_KEY_HEADER in headers,
         }
