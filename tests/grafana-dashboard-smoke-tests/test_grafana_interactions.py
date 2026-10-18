@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.support.grafana_seed import Dataset, daily_scope_pnl
+from tests.support.grafana_seed import Dataset, daily_scope_series
 from tests.support.grafana_ui import (
     BOARDS,
     Watch,
@@ -56,27 +56,26 @@ DAILY = query_text(
 
 
 @pytest.mark.parametrize(
-    ("window", "length"),
-    [
-        ("&from=now-1h&to=now", timedelta(hours=1)),
-        ("&from=now-7d&to=now", timedelta(days=7)),
-        ("&from=now-3d&to=now-2d", timedelta(days=1)),
-    ],
+    "window",
+    ["&from=now-1h&to=now", "&from=now-7d&to=now", "&from=now-3d&to=now-2d"],
     ids=["last-hour", "last-7-days", "two-days-ago"],
 )
 def test_daily_scope_pnl_ignores_the_time_range(
-    grafana: GrafanaPage, seeded: Dataset, window: str, length: timedelta
+    grafana: GrafanaPage, seeded: Dataset, window: str
 ) -> None:
-    """The day's result per scope is the same whatever range the dashboard shows, even one
-    that ends before today."""
+    """The day's chart asks for the UTC day so far whatever range the dashboard shows, even
+    one that ends before today, and draws every scope."""
     page, watch = grafana
     open_dashboard(page, watch, "ta-overview", window)
     result = watch.latest(DAILY)
     assert result is not None and result.error is None
-    expected = daily_scope_pnl(seeded, datetime.now(UTC))
-    found = dict(zip(result.column("escopo"), result.column("resultado"), strict=True))
-    assert found == pytest.approx(expected, abs=1e-9)
-    assert result.end - result.start == length  # the range reached the request, not the SQL
+    now = datetime.now(UTC)
+    assert result.start == now.replace(hour=0, minute=0, second=0, microsecond=0)
+    assert now - result.end < timedelta(minutes=2)
+    expect(panel(page, "Ganhos e perdas por escopo do dia (USDT)")).to_contain_text("Today so far")
+    chart = panel(page, "Ganhos e perdas por escopo do dia (USDT)")
+    for scope in daily_scope_series(seeded, now):
+        expect(chart.get_by_test_id(f"data-testid VizLegend series {scope}")).to_be_visible()
 
 
 def test_refresh_button_runs_every_query_again(grafana: GrafanaPage) -> None:

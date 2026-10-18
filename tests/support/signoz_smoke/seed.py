@@ -167,16 +167,22 @@ class Summary:
     last: Mapping[str, float]  # last value of each gauge of the "Agora" row
     scope_pnl: Mapping[str, Sequence[tuple[int, float]]]  # trade_agent.pnl.total: (ns, value)
 
-    def daily_scope_pnl(self, instant: int) -> dict[str, float]:
-        """What "Ganhos e perdas por escopo do dia" shows at ``instant`` (unix ns): per scope,
-        the last reading of the UTC day so far minus its first one; no readings, no row."""
+    def daily_scope_series(self, instant: int) -> dict[str, list[tuple[int, float]]]:
+        """What "Ganhos e perdas por escopo do dia" draws at ``instant`` (unix ns): per scope,
+        each reading of the UTC day so far (at the start of its minute, in ms) minus the day's
+        first one; no readings, no series."""
         day_start = instant - instant % DAY  # the epoch starts at a UTC midnight
         result = {}
         for scope, points in self.scope_pnl.items():
-            today = [value for at, value in points if day_start <= at <= instant]
+            today = [(at, value) for at, value in points if day_start <= at <= instant]
             if today:
-                result[scope] = today[-1] - today[0]
+                first = today[0][1]
+                result[scope] = [(at // MINUTE * 60_000, value - first) for at, value in today]
         return result
+
+    def daily_scope_pnl(self, instant: int) -> dict[str, float]:
+        """The last point of each series of :meth:`daily_scope_series`: the day so far."""
+        return {scope: s[-1][1] for scope, s in self.daily_scope_series(instant).items()}
 
     def to_json(self) -> str:
         return json.dumps(

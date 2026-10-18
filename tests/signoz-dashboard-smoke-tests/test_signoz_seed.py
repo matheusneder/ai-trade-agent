@@ -122,6 +122,10 @@ def test_daily_scope_pnl_restarts_at_the_utc_midnight(day: seed.Telemetry) -> No
     assert summary.daily_scope_pnl(midnight + seed.SECOND) == {}  # no reading yet today
     before = summary.daily_scope_pnl(midnight - seed.SECOND)
     today = summary.daily_scope_pnl(summary.end)
+    series = summary.daily_scope_series(summary.end)["global"]
+    minutes = [at for at, _ in series]
+    assert series[0] == (midnight // seed.MS, 0.0)  # one point per minute from 00:00
+    assert minutes == list(range(minutes[0], minutes[-1] + 1, 60_000))
     assert set(before) == set(today) == set(seed.SCOPES)
     assert before != today and all(value != 0 for value in today.values())
     points = dict(summary.scope_pnl["global"])

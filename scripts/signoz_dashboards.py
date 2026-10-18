@@ -52,15 +52,16 @@ ERRORS = "severity_text IN ('error', 'critical', 'fatal')"
 CONTAINERS = "service.namespace = 'trade-agent'"
 
 # The result of each scope since the start of the current UTC day (the agent's day: the day's
-# open, pnl.daily and the Risk Guard), whatever the dashboard's time range: the latest reading
-# of trade_agent.pnl.total minus the day's first one, per scope (series of every agent
-# instance, one value per minute as in the builder's panels). ``now()`` appears once, so a
-# test can evaluate the query at another instant.
+# open, pnl.daily and the Risk Guard), whatever the dashboard's time range: per scope and per
+# minute, trade_agent.pnl.total minus the day's first reading (series of every agent instance
+# averaged, as in the builder's panels). ``now()`` appears once, so a test can evaluate the
+# query at another instant.
 DAILY_SCOPE_PNL = """
 WITH now() AS instant,
     toUnixTimestamp(toStartOfDay(instant, 'UTC')) * 1000 AS day_start,
     toUnixTimestamp(instant) * 1000 AS day_end
-SELECT scope AS escopo, argMax(value, minute) - argMin(value, minute) AS resultado
+SELECT scope, toDateTime(minute * 60, 'UTC') AS ts,
+    value - first_value(value) OVER (PARTITION BY scope ORDER BY minute) AS value
 FROM (
     SELECT JSONExtractString(series.labels, 'scope') AS scope,
         intDiv(samples.unix_milli, 60000) AS minute, avg(samples.value) AS value
@@ -74,8 +75,7 @@ FROM (
         AND samples.unix_milli >= day_start AND samples.unix_milli <= day_end
     GROUP BY scope, minute
 )
-GROUP BY scope
-ORDER BY scope != 'global', scope
+ORDER BY scope, ts
 """
 
 type Json = dict[str, Any]
@@ -147,9 +147,9 @@ def events(
     return spec
 
 
-def sql(query: str, *, name: str = "A") -> Json:
+def sql(query: str, *, legend: str = "", name: str = "A") -> Json:
     """ClickHouse SQL with its own time bounds (the dashboard's range does not reach it)."""
-    return {"name": name, "query": " ".join(query.split()), "disabled": False, "legend": ""}
+    return {"name": name, "query": " ".join(query.split()), "disabled": False, "legend": legend}
 
 
 def rows(signal: str, *, where: str, limit: int = 50) -> Json:
@@ -200,8 +200,10 @@ def series(
     steps: bool = False,
     description: str = "",
     colors: Sequence[str] = (),
+    window: str = "global_time",
 ) -> Json:
-    """``colors``: one per query, in order, for the line and its legend (by the legend text)."""
+    """``colors``: one per query, in order, for the line and its legend (by the legend text);
+    ``window``: the panel's own time range (``last_1_day``...) instead of the dashboard's."""
     legend: Json = {"position": "bottom"}
     if colors:
         legends = [q["legend"] for q in queries]
@@ -209,7 +211,7 @@ def series(
             raise ValueError(f"{title}: one color per named series")
         legend["customColors"] = dict(zip(legends, colors, strict=True))
     spec: Json = {
-        "visualization": {"timePreference": "global_time"},
+        "visualization": {"timePreference": window},
         "formatting": _formatting(unit, decimals),
         "legend": legend,
     }
@@ -261,20 +263,6 @@ def number(
     }
     return _panel(
         title, "signoz/NumberPanel", spec, [query], request="scalar", description=description
-    )
-
-
-def table(
-    title: str, query: Json, *, units: Json, decimals: int = 2, description: str = ""
-) -> Json:
-    """One row per group; ``units``: column name → unit."""
-    spec = {
-        "visualization": {"timePreference": "global_time"},
-        "formatting": {"columnUnits": units, "decimalPrecision": str(decimals)},
-        "thresholds": [],
-    }
-    return _panel(
-        title, "signoz/TablePanel", spec, [query], request="scalar", description=description
     )
 
 
@@ -449,18 +437,19 @@ def _operation() -> Json:
                         ),
                         cell(
                             "pnl-scope-today",
-                            table(
+                            series(
                                 "Ganhos e perdas por escopo do dia (USDT)",
-                                sql(DAILY_SCOPE_PNL),
-                                units={"resultado": "none"},
+                                sql(DAILY_SCOPE_PNL, legend="{{scope}}"),
+                                window="last_1_day",
                                 description=(
                                     "Resultado de cada escopo só no dia corrente, em UTC (o dia "
                                     "do agente, do resultado do dia e do Risk Guard): os ganhos e "
-                                    "perdas por escopo de agora menos os da primeira leitura do "
-                                    "dia. Zera na virada do dia UTC (21h em Brasília) e não "
-                                    "depende do intervalo selecionado. Sem leitura no dia (logo "
-                                    "após a virada, com o agente parado) fica sem dados; "
-                                    "reinícios do agente não zeram o dia."
+                                    "perdas por escopo a cada minuto menos os da primeira leitura "
+                                    "do dia. Zera na virada do dia UTC (21h em Brasília) e não "
+                                    "depende do intervalo selecionado (o gráfico mostra sempre as "
+                                    "últimas 24 h). Sem leitura no dia (logo após a virada, com o "
+                                    "agente parado) fica sem dados; reinícios do agente não zeram "
+                                    "o dia."
                                 ),
                             ),
                             6,

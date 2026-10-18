@@ -709,34 +709,34 @@
         "spec": {
           "display": {
             "name": "Ganhos e perdas por escopo do dia (USDT)",
-            "description": "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do resultado do dia e do Risk Guard): os ganhos e perdas por escopo de agora menos os da primeira leitura do dia. Zera na virada do dia UTC (21h em Brasília) e não depende do intervalo selecionado. Sem leitura no dia (logo após a virada, com o agente parado) fica sem dados; reinícios do agente não zeram o dia."
+            "description": "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do resultado do dia e do Risk Guard): os ganhos e perdas por escopo a cada minuto menos os da primeira leitura do dia. Zera na virada do dia UTC (21h em Brasília) e não depende do intervalo selecionado (o gráfico mostra sempre as últimas 24 h). Sem leitura no dia (logo após a virada, com o agente parado) fica sem dados; reinícios do agente não zeram o dia."
           },
           "plugin": {
-            "kind": "signoz/TablePanel",
+            "kind": "signoz/TimeSeriesPanel",
             "spec": {
               "visualization": {
-                "timePreference": "global_time"
+                "timePreference": "last_1_day"
               },
               "formatting": {
-                "columnUnits": {
-                  "resultado": "none"
-                },
+                "unit": "none",
                 "decimalPrecision": "2"
               },
-              "thresholds": []
+              "legend": {
+                "position": "bottom"
+              }
             }
           },
           "queries": [
             {
-              "kind": "scalar",
+              "kind": "time_series",
               "spec": {
                 "plugin": {
                   "kind": "signoz/ClickHouseSQL",
                   "spec": {
                     "name": "A",
-                    "query": "WITH now() AS instant, toUnixTimestamp(toStartOfDay(instant, 'UTC')) * 1000 AS day_start, toUnixTimestamp(instant) * 1000 AS day_end SELECT scope AS escopo, argMax(value, minute) - argMin(value, minute) AS resultado FROM ( SELECT JSONExtractString(series.labels, 'scope') AS scope, intDiv(samples.unix_milli, 60000) AS minute, avg(samples.value) AS value FROM signoz_metrics.distributed_samples_v4 AS samples INNER JOIN ( SELECT DISTINCT fingerprint, labels FROM signoz_metrics.distributed_time_series_v4 WHERE metric_name = 'trade_agent.pnl.total' AND unix_milli >= day_start - 3600000 AND unix_milli <= day_end ) AS series ON samples.fingerprint = series.fingerprint WHERE samples.metric_name = 'trade_agent.pnl.total' AND samples.unix_milli >= day_start AND samples.unix_milli <= day_end GROUP BY scope, minute ) GROUP BY scope ORDER BY scope != 'global', scope",
+                    "query": "WITH now() AS instant, toUnixTimestamp(toStartOfDay(instant, 'UTC')) * 1000 AS day_start, toUnixTimestamp(instant) * 1000 AS day_end SELECT scope, toDateTime(minute * 60, 'UTC') AS ts, value - first_value(value) OVER (PARTITION BY scope ORDER BY minute) AS value FROM ( SELECT JSONExtractString(series.labels, 'scope') AS scope, intDiv(samples.unix_milli, 60000) AS minute, avg(samples.value) AS value FROM signoz_metrics.distributed_samples_v4 AS samples INNER JOIN ( SELECT DISTINCT fingerprint, labels FROM signoz_metrics.distributed_time_series_v4 WHERE metric_name = 'trade_agent.pnl.total' AND unix_milli >= day_start - 3600000 AND unix_milli <= day_end ) AS series ON samples.fingerprint = series.fingerprint WHERE samples.metric_name = 'trade_agent.pnl.total' AND samples.unix_milli >= day_start AND samples.unix_milli <= day_end GROUP BY scope, minute ) ORDER BY scope, ts",
                     "disabled": false,
-                    "legend": ""
+                    "legend": "{{scope}}"
                   }
                 }
               }

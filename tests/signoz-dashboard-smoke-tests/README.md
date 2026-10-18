@@ -11,8 +11,7 @@ telemetry is sent, and Chromium (Playwright) checks every dashboard, panel and v
 >   the change (renamed panels, new series, other units or formats).
 > - Every new chart, metric, indicator or feature comes with more test coverage: the seed
 >   must emit what the new panel reads, and its expected values go into
->   `test_signoz_dashboards.py` (`EXPECTED_NUMBERS`, `EXPECTED_LEGENDS`, `EXPECTED_ROWS`,
->   `EXPECTED_TABLES`).
+>   `test_signoz_dashboards.py` (`EXPECTED_NUMBERS`, `EXPECTED_LEGENDS`, `EXPECTED_ROWS`).
 > - The tests evolve with the dashboards: a dashboard change is not done until this suite is
 >   green with it.
 
@@ -184,13 +183,13 @@ exactly.
   (SigNoz truncates), with the sign SigNoz renders in a prefix element and in the time unit it
   switches to (1149 ms shows as "1 s"); legends list exactly the seeded series (the legend is a virtual list:
   it is scrolled to the end and checked against its "Showing N of M series" line); lists show
-  the seeded rows and columns; tables show the seeded rows and values (the day's result per
-  scope: global first, then each profile);
-- the day's result per scope (a ClickHouse SQL panel with its own window): the API returns the
-  seed's day so far for a 1 h, 6 h and 7-day range alike; evaluated at other instants, the day
-  before keeps its result up to 23:59:59, there is no row before the day's first reading and
-  that reading shows zero; in the browser, the table keeps its values on the last hour and the
-  last week;
+  the seeded rows and columns;
+- the day's result per scope (a ClickHouse SQL chart with its own window, the last 24 h): the
+  API returns the seed's series for the day so far (one point per minute, starting at zero)
+  for a 1 h, 6 h and 7-day range alike; evaluated at other instants, the day before keeps its
+  series up to 23:59:59, there is none before the day's first reading and that reading is
+  zero; in the browser, the chart asks for the last 24 h and keeps its series on the last hour
+  and the last week, while the other panels follow the selected range;
 - the time range selector (6 h, 1 day, 1 hour) re-queries with the new range and changes the
   numbers; the refresh button re-queries; sections collapse and expand; a panel opens in the
   full-size view and closes; a legend entry hides and shows its series; the legend search
