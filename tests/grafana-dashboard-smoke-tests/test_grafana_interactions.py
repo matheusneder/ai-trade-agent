@@ -3,11 +3,12 @@ and the panel view. Each interaction must refetch the panels without errors, and
 values must still match the synthetic day."""
 
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from playwright.sync_api import Page, expect
 
-from tests.support.grafana_seed import Dataset
+from tests.support.grafana_seed import Dataset, daily_scope_series
 from tests.support.grafana_ui import (
     BOARDS,
     Watch,
@@ -43,6 +44,38 @@ def test_time_range_picker_refetches_and_filters(grafana: GrafanaPage, seeded: D
     assert result.value("trades") == len(inside)
     expect(panel(page, "Trades")).to_contain_text(str(len(inside)))
     assert len(inside) < seeded.expected.closed_trades  # the window really filtered
+
+
+DAILY = query_text(
+    next(
+        p
+        for p in BOARDS["ta-overview"]["panels"]
+        if p["title"] == "Ganhos e perdas por escopo do dia (USDT)"
+    )["targets"][0]
+)
+
+
+@pytest.mark.parametrize(
+    "window",
+    ["&from=now-1h&to=now", "&from=now-7d&to=now", "&from=now-3d&to=now-2d"],
+    ids=["last-hour", "last-7-days", "two-days-ago"],
+)
+def test_daily_scope_pnl_ignores_the_time_range(
+    grafana: GrafanaPage, seeded: Dataset, window: str
+) -> None:
+    """The day's chart asks for the UTC day so far whatever range the dashboard shows, even
+    one that ends before today, and draws every scope."""
+    page, watch = grafana
+    open_dashboard(page, watch, "ta-overview", window)
+    result = watch.latest(DAILY)
+    assert result is not None and result.error is None
+    now = datetime.now(UTC)
+    assert result.start == now.replace(hour=0, minute=0, second=0, microsecond=0)
+    assert now - result.end < timedelta(minutes=2)
+    expect(panel(page, "Ganhos e perdas por escopo do dia (USDT)")).to_contain_text("Today so far")
+    chart = panel(page, "Ganhos e perdas por escopo do dia (USDT)")
+    for scope in daily_scope_series(seeded, now):
+        expect(chart.get_by_test_id(f"data-testid VizLegend series {scope}")).to_be_visible()
 
 
 def test_refresh_button_runs_every_query_again(grafana: GrafanaPage) -> None:

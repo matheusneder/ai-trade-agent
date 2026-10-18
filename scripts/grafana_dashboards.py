@@ -27,6 +27,35 @@ LATEST = "id = (SELECT max(id) FROM telemetry_snapshots)"
 PROBLEMS = 'level=~"warning|warn|error|critical|fatal"'
 # backticks: a raw LogQL string, so a regex such as decision\.cycle needs no escaping
 FILTERED = '{service=~"$service", level=~"$level"} |~ `(?i)$busca`'
+# The result of each scope since the start of the current UTC day (the agent's day: the day's
+# open, pnl.daily and the Risk Guard), whatever the dashboard's time range (no $__timeFilter;
+# the panel shows "today so far"): per scope and per snapshot, the result of "Ganhos e perdas
+# por escopo" minus the day's first one. ``now()`` appears once, so a test can evaluate the
+# query at another instant.
+DAILY_SCOPE_PNL = """
+WITH bounds AS (
+    SELECT date_trunc('day', instant, 'UTC') AS day_start, instant
+    FROM (SELECT now() AS instant) AS clock
+), today AS (
+    SELECT at, 'global' AS escopo, realized_pnl + unrealized_pnl AS pnl
+    FROM telemetry_snapshots, bounds WHERE at >= day_start AND at <= instant
+    UNION ALL
+    SELECT at, key, (value->>'pnl')::numeric
+    FROM telemetry_snapshots, bounds, jsonb_each(profiles)
+    WHERE at >= day_start AND at <= instant AND value->>'pnl' IS NOT NULL
+)
+SELECT at AS time, escopo AS metric,
+    (pnl - first_value(pnl) OVER (PARTITION BY escopo ORDER BY at))::float AS value
+FROM today ORDER BY 1, 2
+"""
+DAILY_SCOPE_PNL_HELP = (
+    "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do PnL do dia e do "
+    "Risk Guard): os ganhos e perdas por escopo de cada foto menos os da primeira foto do dia. "
+    "Zera na virada do dia UTC (21h em Brasília) e não depende do intervalo selecionado (o "
+    "gráfico mostra sempre o dia até agora). "
+    "Sem foto no dia (logo após a virada, com o agente parado) fica sem dados; reinícios do "
+    "agente não zeram o dia."
+)
 
 
 def panel(
@@ -38,11 +67,14 @@ def panel(
     unit: str | None = None,
     w: int = 12,
     h: int = 8,
+    description: str | None = None,
 ) -> dict[str, Any]:
     defaults: dict[str, Any] = {"unit": unit} if unit else {}
+    described = {"description": description} if description else {}
     return {
         "type": kind,
         "title": title,
+        **described,
         "datasource": DATASOURCE,
         "gridPos": {"w": w, "h": h},
         "targets": [
@@ -76,6 +108,11 @@ def stat(
 
 def table(title: str, sql: str, w: int = 24, h: int = 9) -> dict[str, Any]:
     return panel(title, sql, kind="table", fmt="table", w=w, h=h)
+
+
+def today(chart: dict[str, Any]) -> dict[str, Any]:
+    """The panel's own time range: the dashboard's UTC day so far ("Today so far")."""
+    return chart | {"timeFrom": "now/d"}
 
 
 def logql(
@@ -177,7 +214,8 @@ def build() -> dict[str, dict[str, Any]]:
         panel("Patrimônio e pico", "SELECT at AS time, equity::float AS patrimonio, peak_equity::float AS pico FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="currencyUSD"),
         panel("Drawdown (%)", "SELECT at AS time, drawdown_pct AS drawdown FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="percent"),
         # the result since the start (realized + open) of the whole agent and of each profile
-        panel("Ganhos e perdas por escopo (USDT)", "SELECT at AS time, 'global' AS metric, (realized_pnl + unrealized_pnl)::float AS value FROM telemetry_snapshots WHERE $__timeFilter(at) UNION ALL SELECT at AS time, key AS metric, (value->>'pnl')::float AS value FROM telemetry_snapshots, jsonb_each(profiles) WHERE $__timeFilter(at) AND value->>'pnl' IS NOT NULL ORDER BY 1, 2", unit="currencyUSD", w=24),
+        panel("Ganhos e perdas por escopo (USDT)", "SELECT at AS time, 'global' AS metric, (realized_pnl + unrealized_pnl)::float AS value FROM telemetry_snapshots WHERE $__timeFilter(at) UNION ALL SELECT at AS time, key AS metric, (value->>'pnl')::float AS value FROM telemetry_snapshots, jsonb_each(profiles) WHERE $__timeFilter(at) AND value->>'pnl' IS NOT NULL ORDER BY 1, 2", unit="currencyUSD"),
+        today(panel("Ganhos e perdas por escopo do dia (USDT)", DAILY_SCOPE_PNL, unit="currencyUSD", description=DAILY_SCOPE_PNL_HELP)),
         table("Estado operacional", f"SELECT key AS escopo, value AS estado FROM telemetry_snapshots, jsonb_each_text(states) WHERE {LATEST} ORDER BY 1", w=8, h=8),
         table("Mudanças de estado (risco)", "SELECT created_at AS time, payload->>'scope' AS escopo, payload->>'state' AS estado, payload->>'reason' AS motivo, payload->>'source' AS origem FROM events WHERE kind = 'risk.state_changed' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50", w=16, h=8),
         table("Última execução por tarefa", "SELECT kind AS tarefa, max(created_at) AS ultima FROM events WHERE kind IN ('agent.started', 'decision.cycle', 'risk.state_changed') GROUP BY kind ORDER BY 2 DESC", h=6),

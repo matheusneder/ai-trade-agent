@@ -184,6 +184,12 @@ exactly.
   switches to (1149 ms shows as "1 s"); legends list exactly the seeded series (the legend is a virtual list:
   it is scrolled to the end and checked against its "Showing N of M series" line); lists show
   the seeded rows and columns;
+- the day's result per scope (a ClickHouse SQL chart with its own window, the last 24 h): the
+  API returns the seed's series for the day so far (one point per minute, starting at zero)
+  for a 1 h, 6 h and 7-day range alike; evaluated at other instants, the day before keeps its
+  series up to 23:59:59, there is none before the day's first reading and that reading is
+  zero; in the browser, the chart asks for the last 24 h and keeps its series on the last hour
+  and the last week, while the other panels follow the selected range;
 - the time range selector (6 h, 1 day, 1 hour) re-queries with the new range and changes the
   numbers; the refresh button re-queries; sections collapse and expand; a panel opens in the
   full-size view and closes; a legend entry hides and shows its series; the legend search

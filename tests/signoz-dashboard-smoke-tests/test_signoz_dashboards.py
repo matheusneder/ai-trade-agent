@@ -2,10 +2,11 @@
 
 The panels, sections and series come from ``scripts/signoz_dashboards.py`` itself, so a new
 panel is already checked for rendering and errors. Its *values* are not: add them to
-``EXPECTED_NUMBERS``/``EXPECTED_LEGENDS``/``EXPECTED_ROWS`` below (and the facts they need to
-``tests.support.signoz_smoke.seed.Summary``). See README.md.
+``EXPECTED_NUMBERS``/``EXPECTED_LEGENDS``/``EXPECTED_ROWS`` below (and the facts they need
+to ``tests.support.signoz_smoke.seed.Summary``). See README.md.
 """
 
+import json
 import re
 from collections.abc import Callable
 from typing import Any
@@ -61,6 +62,7 @@ EXPECTED_LEGENDS: dict[str, Expect] = {
     "equity": lambda s: {"patrimônio", "abertura do dia", "pico"},
     "pnl": lambda s: {"do dia", "realizado", "aberto"},
     "pnl-scope": lambda s: {"global", "swing_trend", "momentum_alpha"},
+    "pnl-scope-today": lambda s: {"global", "swing_trend", "momentum_alpha"},
     "risk-state": lambda s: {"global", "swing_trend", "momentum_alpha"},
     "state-changes": lambda s: set(s.state_changes),
     "cycles": lambda s: set(s.decision_cycles),
@@ -216,6 +218,28 @@ def test_list_panels_show_the_seeded_rows(
         expect(header).to_contain_text(field["name"])
 
 
+def _fixed_window(query: dict[str, Any]) -> bool:
+    """A request of a panel with its own time range (the day's result: the last 24 h)."""
+    return "clickhouse_sql" in json.dumps(query["compositeQuery"])
+
+
+@pytest.mark.parametrize("relative", ["1h", "1w"])
+def test_daily_chart_ignores_the_time_range(
+    open_board: Callable[[str], Dashboard], telemetry: Telemetry, relative: str
+) -> None:
+    """The day's chart asks for the last 24 h whatever the dashboard shows (the seeded window,
+    the last hour, the last week), with the same series."""
+    board = open_board("trade-agent-operacao")
+    legend = board.legend("pnl-scope-today")
+    with board.queries() as sent:
+        board.open(relative=relative)
+        assert board.legend("pnl-scope-today") == legend
+    daily = [q for q in sent if _fixed_window(q)]
+    assert daily and {round((q["end"] - q["start"]) / 60_000) for q in daily} == {1440}
+    others = {round((q["end"] - q["start"]) / 60_000) for q in sent if not _fixed_window(q)}
+    assert others == {{"1h": 60, "1w": 7 * 24 * 60}[relative]}
+
+
 def test_every_expectation_points_at_a_real_panel() -> None:
     """A renamed panel key must not leave its expectation silently unused."""
     keys = {key for board in BOARDS.values() for key in board["spec"]["panels"]}
@@ -244,7 +268,8 @@ def test_time_range_selector_reloads_the_panels(
             board.rendered(first)
         assert sent, "no query after changing the time range"
         # SigNoz aligns start and end to the millisecond: 6 h may be 359.99 minutes
-        assert {round((q["end"] - q["start"]) / 60_000) for q in sent} == {minutes}
+        follow = [q for q in sent if not _fixed_window(q)]
+        assert {round((q["end"] - q["start"]) / 60_000) for q in follow} == {minutes}
 
 
 def test_shorter_range_shows_fewer_requests(
