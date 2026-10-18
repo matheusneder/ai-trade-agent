@@ -24,6 +24,7 @@ from trade_agent.execution.service import PositionService, RulesCache
 from trade_agent.market.universe import UniverseConfig
 from trade_agent.metrics import configure_metrics
 from trade_agent.metrics import install as install_metrics
+from trade_agent.metrics import prime as prime_metrics
 from trade_agent.notify.commands import CommandCenter, Query
 from trade_agent.notify.notifier import LogNotifier, Notifier, TelegramNotifier
 from trade_agent.notify.status import (
@@ -205,6 +206,16 @@ def assemble(
         Heartbeat(http, settings.healthcheck_url.get_secret_value())
         if settings.healthcheck_url is not None
         else None
+    )
+    models = research_config.models
+    prime_metrics(
+        llm=(
+            [(models.triage, "triage"), (models.analyst, "research"), (models.analyst, "analyst")]
+            if llm is not None
+            else []
+        ),
+        profiles=list(strategy.enabled_profiles()),
+        dry_run=not settings.trading_enabled,
     )
     log.debug(
         "app.assembled",
