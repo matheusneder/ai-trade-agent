@@ -32,6 +32,8 @@ from trade_agent.research.config import ModelPrice, PricingConfig, ResearchConfi
 log = structlog.get_logger(__name__)
 
 MILLION = Decimal(1_000_000)
+DEFAULT_API_URL = "https://api.anthropic.com"
+"""Used in the spans when the client has no ``base_url`` (test doubles)."""
 
 
 class LlmError(Exception):
@@ -210,6 +212,10 @@ class ClaudeClient:
             cost_usd=str(record.cost_usd),
         )
 
+    def _messages_url(self) -> str:
+        base = getattr(self._client, "base_url", None) or DEFAULT_API_URL
+        return f"{str(base).rstrip('/')}/v1/messages"
+
     def _system(self, text: str) -> list[dict[str, Any]]:
         return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 
@@ -222,8 +228,11 @@ class ClaudeClient:
             "gen_ai.request.max_tokens": params.get("max_tokens") or 0,
             "peer.service": "anthropic",
             "trade_agent.purpose": purpose,
+            **tracing.http_attributes("POST", self._messages_url()),
         }
-        with tracing.span("llm", f"chat {model}", kind=SpanKind.CLIENT, attributes=attributes):
+        with tracing.span(
+            "llm", f"chat {model}", kind=SpanKind.CLIENT, attributes=attributes
+        ) as span:
             if self._budget_per_call:
                 await self.check_budget()
             log.debug(
@@ -239,7 +248,10 @@ class ClaudeClient:
                     timeout=self._config.models.timeout_s, **params
                 )
             except anthropic.APIError as exc:
+                if isinstance(exc, anthropic.APIStatusError):
+                    span.set_attribute("http.response.status_code", exc.status_code)
                 raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
+            span.set_attribute("http.response.status_code", 200)
             await self._record(purpose, model, response)
             return response
 

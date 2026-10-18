@@ -207,3 +207,21 @@ def test_job_name(qualname: str, expected: str) -> None:
     action.__qualname__ = qualname
     assert job_name(action) == expected
     assert job_name(SimpleNamespace()) == "SimpleNamespace"  # type: ignore[arg-type]
+
+
+def test_http_attributes_never_carry_the_query() -> None:
+    attributes = tracing.http_attributes(
+        "GET", "https://demo-api.binance.com/api/v3/account?timestamp=1&signature=abc"
+    )
+    assert attributes == {
+        "http.request.method": "GET",
+        "url.full": "https://demo-api.binance.com/api/v3/account",
+        "url.path": "/api/v3/account",
+        "server.address": "demo-api.binance.com",
+    }
+    masked = tracing.http_attributes(
+        "POST", "http://localhost:8081/botSECRET/sendMessage", path="/bot<token>/sendMessage"
+    )
+    assert masked["url.full"] == "http://localhost:8081/bot<token>/sendMessage"
+    assert masked["server.port"] == 8081
+    assert "SECRET" not in json.dumps(masked)
