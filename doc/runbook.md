@@ -11,6 +11,13 @@ docker compose -f deploy/docker-compose.yml up -d     # the whole stack (agent a
 docker compose -f deploy/docker-compose.yml logs -f agent
 ```
 
+**After updating the code** (`git pull`, a merged PR), rebuild the agent's image. `up -d` alone reuses the image already built (the `agent` service has `build:` and no tag), so the new code and migrations do not run. On 2026-10-18 a restart without `--build` kept an image from the day before, without migration 0005:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml exec postgres psql -U trade_agent -d trade_agent -c "select version_num from alembic_version"   # the newest file in src/trade_agent/persistence/migrations/versions/
+```
+
 | Check | Where | Expected |
 |-------|-------|----------|
 | Agent started | `agent.started` log / Telegram `/status` | reconciliation without orphans; state `running` |

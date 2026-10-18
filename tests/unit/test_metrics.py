@@ -105,6 +105,31 @@ def test_counters(measured: Measured) -> None:
     )
 
 
+def test_prime_exports_the_counters_at_zero_before_the_first_event(measured: Measured) -> None:
+    metrics.prime(
+        llm=[("claude-sonnet-5", "triage"), ("claude-opus-5", "analyst")],
+        profiles=["swing_trend"],
+        dry_run=False,
+    )
+    llm = {"model": "claude-opus-5", "purpose": "analyst"}
+    assert measured.value("trade_agent.llm.cost", **llm) == 0
+    assert measured.value("trade_agent.llm.tokens", **llm, direction="output") == 0
+    cycle = {"profile": "swing_trend", "state": "running", "dry_run": False}
+    assert measured.value("trade_agent.decision.cycles", **cycle) == 0
+    assert measured.value("trade_agent.decision.entries", profile="swing_trend", dry_run=False) == 0
+    # the first event lands on top of the 0 point, so increase/rate see it
+    metrics.record_llm(
+        model="claude-opus-5", purpose="analyst", cost_usd=D("0.04"), input_tokens=2477,
+        output_tokens=655,
+    )  # fmt: skip
+    assert measured.value("trade_agent.llm.tokens", **llm, direction="output") == 655
+
+
+def test_prime_without_configuration_does_nothing() -> None:
+    metrics.install(None)
+    metrics.prime(llm=[("m", "p")], profiles=["c"], dry_run=True)
+
+
 class FakeExporter(MetricExporter):
     instances: list["FakeExporter"] = []  # noqa: RUF012 - the test's record
 

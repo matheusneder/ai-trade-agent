@@ -198,6 +198,27 @@ def observe(reading: Reading) -> None:
         _active.observe(reading)
 
 
+def prime(*, llm: Iterable[tuple[str, str]], profiles: Iterable[str], dry_run: bool) -> None:
+    """Exports the known counter series at 0 before their first event.
+
+    A cumulative counter only has a series after its first ``add``, and that first point
+    already carries the increment: with no earlier point, ``increase``/``rate`` (SigNoz)
+    see nothing, so the first LLM call or cycle after every restart vanished from the
+    charts. ``llm`` holds the ``(model, purpose)`` pairs the analyst uses.
+    """
+    if _active is None:
+        return
+    for model, purpose in llm:
+        attributes = {"model": model, "purpose": purpose}
+        _active.llm_cost.add(0, attributes)
+        _active.llm_tokens.add(0, {**attributes, "direction": "input"})
+        _active.llm_tokens.add(0, {**attributes, "direction": "output"})
+    for profile in profiles:
+        _active.cycles.add(0, {"profile": profile, "state": "running", "dry_run": dry_run})
+        _active.entries.add(0, {"profile": profile, "dry_run": dry_run})
+        _active.exits.add(0, {"profile": profile, "dry_run": dry_run})
+
+
 def record_llm(
     *, model: str, purpose: str, cost_usd: Decimal, input_tokens: int, output_tokens: int
 ) -> None:
