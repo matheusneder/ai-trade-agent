@@ -51,6 +51,33 @@ PROBLEMS = "severity_text IN ('warn', 'warning', 'error', 'critical', 'fatal')"
 ERRORS = "severity_text IN ('error', 'critical', 'fatal')"
 CONTAINERS = "service.namespace = 'trade-agent'"
 
+# The result of each scope since the start of the current UTC day (the agent's day: the day's
+# open, pnl.daily and the Risk Guard), whatever the dashboard's time range: the latest reading
+# of trade_agent.pnl.total minus the day's first one, per scope (series of every agent
+# instance, one value per minute as in the builder's panels). ``now()`` appears once, so a
+# test can evaluate the query at another instant.
+DAILY_SCOPE_PNL = """
+WITH now() AS instant,
+    toUnixTimestamp(toStartOfDay(instant, 'UTC')) * 1000 AS day_start,
+    toUnixTimestamp(instant) * 1000 AS day_end
+SELECT scope AS escopo, argMax(value, minute) - argMin(value, minute) AS resultado
+FROM (
+    SELECT JSONExtractString(series.labels, 'scope') AS scope,
+        intDiv(samples.unix_milli, 60000) AS minute, avg(samples.value) AS value
+    FROM signoz_metrics.distributed_samples_v4 AS samples
+    INNER JOIN (
+        SELECT DISTINCT fingerprint, labels FROM signoz_metrics.distributed_time_series_v4
+        WHERE metric_name = 'trade_agent.pnl.total'
+            AND unix_milli >= day_start - 3600000 AND unix_milli <= day_end
+    ) AS series ON samples.fingerprint = series.fingerprint
+    WHERE samples.metric_name = 'trade_agent.pnl.total'
+        AND samples.unix_milli >= day_start AND samples.unix_milli <= day_end
+    GROUP BY scope, minute
+)
+GROUP BY scope
+ORDER BY scope != 'global', scope
+"""
+
 type Json = dict[str, Any]
 type Cell = tuple[str, Json, int, int]  # panel key, panel, width, height
 
@@ -120,6 +147,11 @@ def events(
     return spec
 
 
+def sql(query: str, *, name: str = "A") -> Json:
+    """ClickHouse SQL with its own time bounds (the dashboard's range does not reach it)."""
+    return {"name": name, "query": " ".join(query.split()), "disabled": False, "legend": ""}
+
+
 def rows(signal: str, *, where: str, limit: int = 50) -> Json:
     """Most recent raw records (logs or spans), for the list panels."""
     return {
@@ -140,7 +172,8 @@ def _panel(
     description: str,
 ) -> Json:
     if len(queries) == 1:
-        plugin: Json = {"kind": "signoz/BuilderQuery", "spec": queries[0]}
+        kind_of_query = "signoz/ClickHouseSQL" if "query" in queries[0] else "signoz/BuilderQuery"
+        plugin: Json = {"kind": kind_of_query, "spec": queries[0]}
     else:
         composite = [{"type": "builder_query", "spec": q} for q in queries]
         plugin = {"kind": "signoz/CompositeQuery", "spec": {"queries": composite}}
@@ -228,6 +261,20 @@ def number(
     }
     return _panel(
         title, "signoz/NumberPanel", spec, [query], request="scalar", description=description
+    )
+
+
+def table(
+    title: str, query: Json, *, units: Json, decimals: int = 2, description: str = ""
+) -> Json:
+    """One row per group; ``units``: column name → unit."""
+    spec = {
+        "visualization": {"timePreference": "global_time"},
+        "formatting": {"columnUnits": units, "decimalPrecision": str(decimals)},
+        "thresholds": [],
+    }
+    return _panel(
+        title, "signoz/TablePanel", spec, [query], request="scalar", description=description
     )
 
 
@@ -398,7 +445,25 @@ def _operation() -> Json:
                                     "o agente todo."
                                 ),
                             ),
-                            12,
+                            6,
+                        ),
+                        cell(
+                            "pnl-scope-today",
+                            table(
+                                "Ganhos e perdas por escopo do dia (USDT)",
+                                sql(DAILY_SCOPE_PNL),
+                                units={"resultado": "none"},
+                                description=(
+                                    "Resultado de cada escopo só no dia corrente, em UTC (o dia "
+                                    "do agente, do resultado do dia e do Risk Guard): os ganhos e "
+                                    "perdas por escopo de agora menos os da primeira leitura do "
+                                    "dia. Zera na virada do dia UTC (21h em Brasília) e não "
+                                    "depende do intervalo selecionado. Sem leitura no dia (logo "
+                                    "após a virada, com o agente parado) fica sem dados; "
+                                    "reinícios do agente não zeram o dia."
+                                ),
+                            ),
+                            6,
                         ),
                     ],
                     [
@@ -1156,6 +1221,8 @@ def _queries(panel: Json) -> list[tuple[str, Json]]:
     plugin = query["spec"]["plugin"]
     if plugin["kind"] == "signoz/CompositeQuery":
         envelopes = plugin["spec"]["queries"]
+    elif plugin["kind"] == "signoz/ClickHouseSQL":
+        envelopes = [{"type": "clickhouse_sql", "spec": plugin["spec"]}]
     else:
         envelopes = [{"type": "builder_query", "spec": plugin["spec"]}]
     return [(query["kind"], {"queries": envelopes})]

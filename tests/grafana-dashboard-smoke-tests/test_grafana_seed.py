@@ -9,6 +9,7 @@ import pytest
 from tests.support.grafana_seed import (
     STEP,
     Dataset,
+    daily_scope_pnl,
     generate,
     log_counts,
     loki_streams,
@@ -101,6 +102,24 @@ def test_equity_follows_the_trades(day: Dataset) -> None:
     assert all(b.at - a.at == STEP for a, b in zip(day.telemetry, day.telemetry[1:], strict=False))
     assert all(t.peak_equity >= t.equity for t in day.telemetry)
     assert day.expected.realized_total == pytest.approx(float(closed_pnl))
+
+
+def test_daily_scope_pnl_restarts_at_the_utc_midnight(day: Dataset) -> None:
+    """Zero at the day's first snapshot, the day so far after it; the day before keeps its own
+    result up to the last second before midnight."""
+    midnight = END.replace(hour=0, minute=0, second=0)
+    first = next(t.at for t in day.telemetry if t.at >= midnight)
+    scopes = {"global", *day.telemetry[-1].profiles}
+    assert daily_scope_pnl(day, first) == dict.fromkeys(scopes, 0.0)
+    assert daily_scope_pnl(day, midnight) == {}  # no snapshot yet today
+    before = daily_scope_pnl(day, midnight - timedelta(seconds=1))
+    today = daily_scope_pnl(day, END)
+    assert set(before) == set(today) == scopes
+    assert before != today and today["global"] != 0
+    last = day.telemetry[-1]
+    start = next(t for t in day.telemetry if t.at == first)
+    expected = last.realized_pnl + last.unrealized_pnl - start.realized_pnl - start.unrealized_pnl
+    assert today["global"] == float(expected)
 
 
 def test_events_and_logs_tell_the_same_story(day: Dataset) -> None:

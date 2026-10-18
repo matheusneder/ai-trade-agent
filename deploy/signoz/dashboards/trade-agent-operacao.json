@@ -704,6 +704,47 @@
           "links": []
         }
       },
+      "pnl-scope-today": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ganhos e perdas por escopo do dia (USDT)",
+            "description": "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do resultado do dia e do Risk Guard): os ganhos e perdas por escopo de agora menos os da primeira leitura do dia. Zera na virada do dia UTC (21h em Brasília) e não depende do intervalo selecionado. Sem leitura no dia (logo após a virada, com o agente parado) fica sem dados; reinícios do agente não zeram o dia."
+          },
+          "plugin": {
+            "kind": "signoz/TablePanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "columnUnits": {
+                  "resultado": "none"
+                },
+                "decimalPrecision": "2"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/ClickHouseSQL",
+                  "spec": {
+                    "name": "A",
+                    "query": "WITH now() AS instant, toUnixTimestamp(toStartOfDay(instant, 'UTC')) * 1000 AS day_start, toUnixTimestamp(instant) * 1000 AS day_end SELECT scope AS escopo, argMax(value, minute) - argMin(value, minute) AS resultado FROM ( SELECT JSONExtractString(series.labels, 'scope') AS scope, intDiv(samples.unix_milli, 60000) AS minute, avg(samples.value) AS value FROM signoz_metrics.distributed_samples_v4 AS samples INNER JOIN ( SELECT DISTINCT fingerprint, labels FROM signoz_metrics.distributed_time_series_v4 WHERE metric_name = 'trade_agent.pnl.total' AND unix_milli >= day_start - 3600000 AND unix_milli <= day_end ) AS series ON samples.fingerprint = series.fingerprint WHERE samples.metric_name = 'trade_agent.pnl.total' AND samples.unix_milli >= day_start AND samples.unix_milli <= day_end GROUP BY scope, minute ) GROUP BY scope ORDER BY scope != 'global', scope",
+                    "disabled": false,
+                    "legend": ""
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
       "drawdown": {
         "kind": "Panel",
         "spec": {
@@ -1356,10 +1397,19 @@
             {
               "x": 0,
               "y": 6,
-              "width": 12,
+              "width": 6,
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/pnl-scope"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/pnl-scope-today"
               }
             },
             {

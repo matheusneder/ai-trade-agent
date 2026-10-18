@@ -3,11 +3,12 @@ and the panel view. Each interaction must refetch the panels without errors, and
 values must still match the synthetic day."""
 
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from playwright.sync_api import Page, expect
 
-from tests.support.grafana_seed import Dataset
+from tests.support.grafana_seed import Dataset, daily_scope_pnl
 from tests.support.grafana_ui import (
     BOARDS,
     Watch,
@@ -43,6 +44,39 @@ def test_time_range_picker_refetches_and_filters(grafana: GrafanaPage, seeded: D
     assert result.value("trades") == len(inside)
     expect(panel(page, "Trades")).to_contain_text(str(len(inside)))
     assert len(inside) < seeded.expected.closed_trades  # the window really filtered
+
+
+DAILY = query_text(
+    next(
+        p
+        for p in BOARDS["ta-overview"]["panels"]
+        if p["title"] == "Ganhos e perdas por escopo do dia (USDT)"
+    )["targets"][0]
+)
+
+
+@pytest.mark.parametrize(
+    ("window", "length"),
+    [
+        ("&from=now-1h&to=now", timedelta(hours=1)),
+        ("&from=now-7d&to=now", timedelta(days=7)),
+        ("&from=now-3d&to=now-2d", timedelta(days=1)),
+    ],
+    ids=["last-hour", "last-7-days", "two-days-ago"],
+)
+def test_daily_scope_pnl_ignores_the_time_range(
+    grafana: GrafanaPage, seeded: Dataset, window: str, length: timedelta
+) -> None:
+    """The day's result per scope is the same whatever range the dashboard shows, even one
+    that ends before today."""
+    page, watch = grafana
+    open_dashboard(page, watch, "ta-overview", window)
+    result = watch.latest(DAILY)
+    assert result is not None and result.error is None
+    expected = daily_scope_pnl(seeded, datetime.now(UTC))
+    found = dict(zip(result.column("escopo"), result.column("resultado"), strict=True))
+    assert found == pytest.approx(expected, abs=1e-9)
+    assert result.end - result.start == length  # the range reached the request, not the SQL
 
 
 def test_refresh_button_runs_every_query_again(grafana: GrafanaPage) -> None:

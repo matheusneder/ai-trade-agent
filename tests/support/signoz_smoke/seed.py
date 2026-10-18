@@ -28,7 +28,7 @@ import json
 import math
 import random
 from collections import Counter, defaultdict
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import IntEnum
@@ -38,6 +38,7 @@ type Attributes = Mapping[str, AttributeValue]
 
 SECOND = 1_000_000_000
 MINUTE = 60 * SECOND
+DAY = 24 * 60 * MINUTE
 MS = 1_000_000
 ENVIRONMENT = "smoke"
 VERSION = "0.1.0"
@@ -164,6 +165,18 @@ class Summary:
     problem_logs: list[str]  # "service severity" of the warnings and errors
     agent_problems: int
     last: Mapping[str, float]  # last value of each gauge of the "Agora" row
+    scope_pnl: Mapping[str, Sequence[tuple[int, float]]]  # trade_agent.pnl.total: (ns, value)
+
+    def daily_scope_pnl(self, instant: int) -> dict[str, float]:
+        """What "Ganhos e perdas por escopo do dia" shows at ``instant`` (unix ns): per scope,
+        the last reading of the UTC day so far minus its first one; no readings, no row."""
+        day_start = instant - instant % DAY  # the epoch starts at a UTC midnight
+        result = {}
+        for scope, points in self.scope_pnl.items():
+            today = [value for at, value in points if day_start <= at <= instant]
+            if today:
+                result[scope] = today[-1] - today[0]
+        return result
 
     def to_json(self) -> str:
         return json.dumps(
@@ -905,6 +918,14 @@ class _Generator:
             metrics.append(metric)
         return metrics
 
+    def scope_points(self) -> dict[str, list[tuple[int, float]]]:
+        points: dict[str, list[tuple[int, float]]] = {scope: [] for scope in SCOPES}
+        for (name, _), metric in self.gauges.items():
+            if name == "trade_agent.pnl.total":
+                for point in metric.points:
+                    points[str(point.attributes["scope"])].append((point.time, point.value))
+        return points
+
     def telemetry(self) -> Telemetry:
         metrics = list(self.gauges.values()) + self.counters()
         error_levels = {"error", "critical", "fatal"}
@@ -938,6 +959,7 @@ class _Generator:
             problem_logs=sorted({f"{log.service} {log.severity}" for log in problems}),
             agent_problems=sum(1 for log in problems if log.service == "agent"),
             last=dict(self.last),
+            scope_pnl=self.scope_points(),
         )
         return Telemetry(self.spans, self.logs, metrics, summary)
 

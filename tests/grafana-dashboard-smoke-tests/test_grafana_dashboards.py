@@ -4,12 +4,18 @@ the synthetic day (``Dataset.expected``, computed from the generated rows, not b
 The ``grafana`` fixture fails the test on any console error or failed request (4xx/5xx).
 """
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from playwright.sync_api import Page, expect
+from scripts.grafana_dashboards import DAILY_SCOPE_PNL
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.support.grafana_seed import Dataset, log_counts
+from tests.support.grafana_seed import Dataset, daily_scope_pnl, log_counts
+from tests.support.grafana_stack import Stack
 from tests.support.grafana_ui import (
     BOARDS,
     NO_DATA,
@@ -22,6 +28,7 @@ from tests.support.grafana_ui import (
 )
 
 GrafanaPage = tuple[Page, Watch]
+DAILY = "Ganhos e perdas por escopo do dia (USDT)"
 
 
 def _result(watch: Watch, uid: str, title: str) -> Result:
@@ -77,6 +84,48 @@ def test_overview_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
     scopes = panel(page, "Ganhos e perdas por escopo (USDT)")
     for scope in expected.states:  # global and each profile: one series each
         expect(scopes.get_by_test_id(f"data-testid VizLegend series {scope}")).to_be_visible()
+    daily = _result(watch, "ta-overview", DAILY)
+    found = dict(zip(daily.column("escopo"), daily.column("resultado"), strict=True))
+    assert found == pytest.approx(daily_scope_pnl(seeded, datetime.now(UTC)), abs=1e-9)
+    assert next(iter(found)) == "global" and set(found) == set(expected.states)
+    for scope in found:  # one row per scope, in the table the user sees
+        expect(panel(page, DAILY).get_by_text(scope, exact=True)).to_be_visible()
+
+
+def _daily_at(stack: Stack, instant: datetime) -> dict[str, float]:
+    """The daily panel's query evaluated at ``instant`` instead of ``now()``, straight on the
+    ephemeral PostgreSQL (the query reads nothing else from the clock)."""
+    query = text(DAILY_SCOPE_PNL.replace("now()", "CAST(:instant AS timestamptz)"))
+
+    async def run() -> dict[str, float]:
+        engine = create_async_engine(stack.database_url)
+        try:
+            async with engine.connect() as connection:
+                rows = (await connection.execute(query, {"instant": instant})).all()
+        finally:
+            await engine.dispose()
+        return {row[0]: row[1] for row in rows}
+
+    with ThreadPoolExecutor(max_workers=1) as pool:  # Playwright's sync API owns this loop
+        return pool.submit(asyncio.run, run()).result()
+
+
+def test_daily_scope_pnl_restarts_at_the_utc_midnight(stack: Stack, seeded: Dataset) -> None:
+    """Around the seeded midnight: the day before keeps its result up to 23:59:59, nothing
+    shows before the day's first snapshot, which starts the day at zero."""
+    assert DAILY_SCOPE_PNL.count("now()") == 1
+    midnight = seeded.end.replace(hour=0, minute=0, second=0)
+    first = next(t.at for t in seeded.telemetry if t.at >= midnight)
+    before = midnight - timedelta(seconds=1)
+    yesterday = _daily_at(stack, before)
+    assert yesterday == pytest.approx(daily_scope_pnl(seeded, before), abs=1e-9)
+    assert set(yesterday) == {"global", *seeded.telemetry[-1].profiles}
+    if first > midnight:
+        assert _daily_at(stack, midnight) == {}
+    assert set(_daily_at(stack, first).values()) == {0.0}
+    assert _daily_at(stack, seeded.end) == pytest.approx(
+        daily_scope_pnl(seeded, seeded.end), abs=1e-9
+    )
 
 
 def test_positions_match_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
