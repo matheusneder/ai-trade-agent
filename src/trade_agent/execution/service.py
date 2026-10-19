@@ -10,6 +10,7 @@ Every action that changes the exchange follows the **intent → send → confirm
 The position's state is always **derived from the exchange** (:func:`sync`), never assumed.
 """
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -110,6 +111,7 @@ class PositionService:
         self.rules = rules
         self.config = config or ServiceConfig()
         self._now = now
+        self._sync_locks: dict[int, asyncio.Lock] = {}
 
     # ================================================================== open
     @tracing.traced("execution", "position.open")
@@ -163,7 +165,23 @@ class PositionService:
     # ================================================================== sync
     @tracing.traced("execution", "position.sync")
     async def sync(self, position: Position) -> Position:
-        """Derives the position's state from the exchange and acts if needed."""
+        """Derives the position's state from the exchange and acts if needed.
+
+        Serialized per position: the open flow and the user stream / reconciler may sync the
+        same position at once, and each would otherwise act on a stale state (e.g. both
+        recording ``position.protected``). The state is re-read once the lock is held.
+        """
+        if position.state.is_terminal:  # a terminal state is never left
+            return position
+        lock = self._sync_locks.setdefault(position.id, asyncio.Lock())
+        async with lock:
+            position = await self.store.get_position(position.id)
+            result = await self._sync_locked(position)
+        if result.state.is_terminal and not lock.locked():
+            self._sync_locks.pop(position.id, None)
+        return result
+
+    async def _sync_locked(self, position: Position) -> Position:
         tracing.annotate(symbol=position.symbol, position=position.id, state=position.state)
         if position.state.is_terminal:
             return position

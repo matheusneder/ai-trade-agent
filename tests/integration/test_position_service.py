@@ -1,5 +1,6 @@
 """Position service against the simulated Binance and a real PostgreSQL."""
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -184,6 +185,19 @@ async def test_maker_entry_waits_then_protects(service: PositionService, fake: F
     protected = await service.sync(position)
     assert protected.state is S.PROTECTED
     assert protected.entry_price == D("62500")
+
+
+async def test_concurrent_syncs_record_protected_once(
+    service: PositionService, fake: FakeBinance, store: Store
+) -> None:
+    # The open flow and the user stream / reconciler may sync the same (stale) position at once.
+    position = await _open(service, price="62500", mode=EntryMode.LIMIT_MAKER_GTC)
+    fake.set_price("BTCUSDT", D("62400"))
+    first, second = await asyncio.gather(service.sync(position), service.sync(position))
+    assert first.state is S.PROTECTED and second.state is S.PROTECTED
+    assert (await _kinds(store)).count("position.protected") == 1
+    assert len(fake.calls("GET", "/api/v3/myTrades")) == 1
+    assert len(await store.fills_for(position.id)) == 1
 
 
 async def test_partial_maker_entry(
