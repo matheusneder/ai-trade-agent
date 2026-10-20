@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from decimal import Decimal
 
@@ -10,7 +11,7 @@ from tests.support.fake_binance import FakeBinance, Fault
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.models import BookTicker, Ticker24h
 from trade_agent.exchange.rules import SymbolRules
-from trade_agent.market.candles import closed_only, fetch_candles, to_frame
+from trade_agent.market.candles import ClosedCandleCache, closed_only, fetch_candles, to_frame
 from trade_agent.market.universe import (
     Tier,
     UniverseConfig,
@@ -23,6 +24,32 @@ D = Decimal
 
 
 # ============================================================================ candles
+async def test_closed_cache_shares_snapshots_without_mutation_or_stale_data() -> None:
+    fake = FakeBinance()
+    frame = uptrend_with_pullback(50)
+    raw = raw_klines(frame)
+    fake.candles[("BTCUSDT", "1h")] = raw
+    now = int(frame["close_time"].iloc[-1]) + 1
+    async with fake_api(fake) as api:
+        cache = ClosedCandleCache(api, max_entries=1)
+        first, second = await asyncio.gather(
+            *[cache.fetch("BTCUSDT", "1h", limit=20, now_ms=now) for _ in range(2)]
+        )
+        first.loc[first.index[-1], "close"] = 0
+        assert second["close"].iloc[-1] > 0
+        fake.candles[("BTCUSDT", "1h")] = []
+        assert not (await cache.fetch("BTCUSDT", "1h", limit=20, now_ms=now)).empty
+        assert (await cache.fetch("BTCUSDT", "1h", limit=20, now_ms=now + 3_600_000)).empty
+        # Empty responses are not cached; restored data is visible immediately.
+        fake.candles[("BTCUSDT", "1h")] = raw
+        assert not (await cache.fetch("BTCUSDT", "1h", limit=20, now_ms=now + 3_600_000)).empty
+        fake.candles[("ETHUSDT", "1h")] = raw
+        await cache.fetch("ETHUSDT", "1h", limit=20, now_ms=now)
+        before = len(fake.calls("GET", "/api/v3/klines"))
+        await cache.fetch("BTCUSDT", "1h", limit=20, now_ms=now)
+        assert len(fake.calls("GET", "/api/v3/klines")) == before + 1  # evicted, downloaded again
+
+
 def test_to_frame_and_closed_only() -> None:
     frame = uptrend_with_pullback(250)
     rebuilt = to_frame(raw_klines(frame))

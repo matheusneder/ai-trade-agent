@@ -139,12 +139,52 @@ class ClaudeClient:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         *,
         budget_per_call: bool = True,
+        cycle_allowance: Decimal | None = None,
     ) -> None:
-        self._client = client
+        self._client = client.with_options(max_retries=0) if cycle_allowance is not None else client
         self._config = config
         self._ledger = ledger
         self._clock = clock
         self._budget_per_call = budget_per_call
+        self._cycle_allowance = cycle_allowance
+        self._cycle_cost = Decimal(0)
+        self._inflight = False
+        self._uncertain_charge = False
+        self.budget_notes: list[str] = []
+
+    @property
+    def uncertain_charge(self) -> bool:
+        return self._inflight or self._uncertain_charge
+
+    async def _fit_budget(self, purpose: str, params: dict[str, Any]) -> None:
+        if self._cycle_allowance is None:
+            return
+        if self.uncertain_charge:
+            raise BudgetExceededError("cobrança anterior incerta; ciclo interrompido")
+        if params.get("tools"):
+            raise BudgetExceededError("ferramentas web sem custo máximo previsível")
+        count_params = {
+            k: params[k] for k in ("model", "messages", "system", "output_config") if k in params
+        }
+        try:
+            count = await self._client.messages.count_tokens(
+                **count_params, timeout=self._config.models.timeout_s
+            )
+        except anthropic.APIError as exc:
+            raise LlmError("contagem de tokens indisponível; chamada omitida") from exc
+        price = self._config.pricing.models[params["model"]]
+        # Token counting is an estimate; reserve headroom and assume uncached writes.
+        input_cost = (Decimal(count.input_tokens) * Decimal("1.1") + 1024) * price.input
+        input_cost *= max(Decimal(1), self._config.pricing.cache_write_multiplier) / MILLION
+        remaining = self._cycle_allowance - self._cycle_cost
+        if purpose == "triage":
+            remaining = min(remaining, self._cycle_allowance / 4)
+        affordable = int(max(Decimal(0), remaining - input_cost) * MILLION / price.output)
+        if affordable < 1024:
+            raise BudgetExceededError("saldo insuficiente para uma resposta útil")
+        if affordable < params["max_tokens"]:
+            params["max_tokens"] = affordable
+            self.budget_notes.append(f"{purpose}: saída reduzida para {affordable} tokens")
 
     async def check_budget(self) -> None:
         """Raises ``BudgetExceededError`` if the day's spending already reached the cap."""
@@ -173,6 +213,8 @@ class ClaudeClient:
             at=self._clock(),
         )
         await self._ledger.record(record)
+        self._cycle_cost += record.cost_usd
+        self._inflight = False
         metrics.record_llm(
             model=model,
             purpose=purpose,
@@ -235,6 +277,7 @@ class ClaudeClient:
         ) as span:
             if self._budget_per_call:
                 await self.check_budget()
+            await self._fit_budget(purpose, params)
             log.debug(
                 "llm.request",
                 purpose=purpose,
@@ -244,10 +287,12 @@ class ClaudeClient:
                 turns=len(params.get("messages", [])),
             )
             try:
+                self._inflight = True
                 response: Message = await self._client.messages.create(
                     timeout=self._config.models.timeout_s, **params
                 )
             except anthropic.APIError as exc:
+                self._uncertain_charge = True
                 if isinstance(exc, anthropic.APIStatusError):
                     span.set_attribute("http.response.status_code", exc.status_code)
                 raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc

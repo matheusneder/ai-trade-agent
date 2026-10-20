@@ -109,6 +109,7 @@ def assemble(
         collector=NewsCollector(http, research_config.sources, AssetTagger(names, names)),
         client=llm,
         config=research_config,
+        notify=notifier.notify,
     )
     engine = DecisionEngine(
         api=api,

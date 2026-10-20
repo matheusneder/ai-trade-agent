@@ -76,6 +76,11 @@ class TradeAgentStrategy(IStrategy):
     round_trip_fee = DecimalParameter(
         0, 0.01, default=0.002, decimals=4, space="buy", optimize=False
     )
+    execution_slippage = DecimalParameter(
+        0, 0.1, default=0, decimals=4, space="buy", optimize=False
+    )
+    cost_adjusted = DecimalParameter(0, 1, default=0, decimals=0, space="buy", optimize=False)
+    trailing_floor = DecimalParameter(0, 1, default=0, decimals=0, space="buy", optimize=False)
 
     # ------------------------------------------------------------------ exit (space=sell)
     # Parameters with optimize=False define the profile's risk and are never optimized.
@@ -127,8 +132,10 @@ class TradeAgentStrategy(IStrategy):
         dataframe["score"] = score_frame(dataframe, params)
         dataframe["setup"] = setup_frame(dataframe, params)
         dataframe["stop_pct"] = stop_pct_frame(dataframe, params)
-        fee = float(self.round_trip_fee.value)
+        fee = float(self.round_trip_fee.value) + float(self.execution_slippage.value)
         activation = dataframe["atr_pct"].map(self._activation_for)
+        if self.trailing_floor.value:
+            activation = (1 + activation) * (1 - float(self.tp_trailing.value)) - 1
         reward_risk = (activation - fee) / (dataframe["stop_pct"] + fee)
         entry = (
             (dataframe["setup"] != "")
@@ -239,5 +246,7 @@ class TradeAgentStrategy(IStrategy):
             else float(self.stop_max_pct.value)
         )
         wallet = self.wallets.get_total_stake_amount()
+        if self.cost_adjusted.value:
+            stop_pct += float(self.round_trip_fee.value) + float(self.execution_slippage.value)
         stake = wallet * float(self.risk_per_trade.value) / max(stop_pct, 1e-6)
         return min(stake, wallet * float(self.max_position_pct.value), max_stake)

@@ -5,13 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from trade_agent.persistence.db import Database
-from trade_agent.persistence.models import LlmUsageRecord, NewsItemRecord, ResearchReportRecord
-from trade_agent.research.llm import LlmUsage
+from trade_agent.persistence.models import (
+    CheckpointRecord,
+    LlmUsageRecord,
+    NewsItemRecord,
+    ResearchReportRecord,
+)
+from trade_agent.research.llm import BudgetExceededError, LlmUsage
 from trade_agent.research.models import NewsCategory, NewsItem, Severity, StoredNews, Triage
 
 
@@ -50,6 +56,46 @@ def _to_news(record: NewsItemRecord) -> StoredNews:
 class ResearchStore:
     def __init__(self, db: Database) -> None:
         self.db = db
+
+    async def reserve_budget(
+        self, day: datetime, daily: Decimal, amount: Decimal
+    ) -> tuple[str, str]:
+        """Atomic across the agent and manual research CLI; crashes retain reservations."""
+        key, token = f"research.budget.{day.date().isoformat()}", uuid4().hex
+        async with self.db.session() as session:
+            await session.execute(text("SELECT pg_advisory_xact_lock(824172001)"))
+            record = await session.get(CheckpointRecord, key)
+            reserved = dict(record.value) if record else {}
+            outstanding = await session.scalars(
+                select(CheckpointRecord.value).where(
+                    CheckpointRecord.key.startswith("research.budget.")
+                )
+            )
+            spent = await session.scalar(
+                select(func.coalesce(func.sum(LlmUsageRecord.cost_usd), 0)).where(
+                    LlmUsageRecord.at >= day
+                )
+            )
+            committed = Decimal(spent or 0) + sum(
+                (Decimal(v) for pending in outstanding for v in pending.values()), Decimal(0)
+            )
+            if committed + amount > daily:
+                raise BudgetExceededError("saldo diário insuficiente para reservar o ciclo")
+            reserved[token] = str(amount)
+            if record is None:
+                session.add(CheckpointRecord(key=key, value=reserved))
+            else:
+                record.value = reserved
+        return key, token
+
+    async def release_budget(self, reservation: tuple[str, str]) -> None:
+        async with self.db.session() as session:
+            await session.execute(text("SELECT pg_advisory_xact_lock(824172001)"))
+            record = await session.get(CheckpointRecord, reservation[0])
+            if record is not None:
+                reserved = dict(record.value)
+                reserved.pop(reservation[1], None)
+                record.value = reserved
 
     # ================================================================== news
     async def add_news(self, items: Iterable[NewsItem]) -> int:
@@ -145,11 +191,12 @@ class ResearchStore:
                 )
             )
 
-    async def spent_since(self, start: datetime) -> Decimal:
+    async def spent_since(self, start: datetime, *, until: datetime | None = None) -> Decimal:
         async with self.db.session() as session:
             total = await session.scalar(
                 select(func.coalesce(func.sum(LlmUsageRecord.cost_usd), 0)).where(
-                    LlmUsageRecord.at >= start
+                    LlmUsageRecord.at >= start,
+                    *([LlmUsageRecord.at < until] if until is not None else []),
                 )
             )
             return Decimal(total or 0)

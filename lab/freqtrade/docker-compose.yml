@@ -5,7 +5,7 @@ name: trade-agent-lab
 
 services:
   freqtrade:
-    image: freqtradeorg/freqtrade:stable
+    image: freqtradeorg/freqtrade@sha256:7031bca43ed7668ebf421725dd5016acade6ef88b0771db3e08c96e6d19a42db
     working_dir: /freqtrade
     volumes:
       - ./user_data:/freqtrade/user_data

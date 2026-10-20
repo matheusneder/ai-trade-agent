@@ -5,7 +5,8 @@ exhausted, API error, invalid output): the caller then degrades to pure TA accor
 profile (``research.reading``).
 """
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -15,6 +16,7 @@ import structlog
 
 from trade_agent import tracing
 from trade_agent.persistence.research_store import ReportEntry, ResearchStore
+from trade_agent.persistence.store import Severity as EventSeverity
 from trade_agent.research.analyst import Analysis, MarketAnalyst
 from trade_agent.research.collector import NewsCollector
 from trade_agent.research.config import ResearchConfig
@@ -63,12 +65,14 @@ class ResearchService:
         client: anthropic.AsyncAnthropic | None,
         config: ResearchConfig,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        notify: Callable[[EventSeverity, str], Awaitable[None]] | None = None,
     ) -> None:
         self._store = store
         self._collector = collector
         self._client = client
         self._config = config
         self._clock = clock
+        self._notify = notify
         self.metrics = MarketMetrics()
         """Metrics of the latest collection (used in the next research cycle)."""
 
@@ -120,27 +124,51 @@ class ResearchService:
         notes: list[str] = []
         analysis: Analysis | None = None
         error: str | None = None
+        reservation: tuple[str, str] | None = None
+        llm: ClaudeClient | None = None
         try:
             if self._client is None:
                 raise LlmError("chave da API Claude ausente (ANTHROPIC_API_KEY)")
-            # The cap applies per cycle (D-033): checked once, before the first call. A
-            # check before each call let the web step (most of the cost) run and then refused
-            # the reading, paying for nothing (2026-10-06, 20:03).
+            budget = self._config.budget
+            if budget.cycle_reserve_usd is not None:
+                day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                reservation = await self._store.reserve_budget(
+                    day, budget.daily_usd, budget.cycle_reserve_usd
+                )
+                if web and self._config.web.enabled:
+                    web = False
+                    notes.append("pesquisa web omitida: custo de ferramentas remotas não limitado")
             llm = ClaudeClient(
-                self._client, self._config, ledger, self._clock, budget_per_call=False
+                self._client,
+                self._config,
+                ledger,
+                self._clock,
+                budget_per_call=False,
+                cycle_allowance=budget.cycle_reserve_usd,
             )
             await llm.check_budget()
             analyst = MarketAnalyst(llm, self._config)
-            news = await self._triaged_news(analyst, since, known, notes)
-            analysis = await analyst.analyze(
-                as_of=now,
-                metrics=self.metrics,
-                candidates=candidates,
-                news=select_news(news, self._config.digest, now=now),
-                web=web,
-            )
-        except LlmError as exc:
+            async with asyncio.timeout(budget.cycle_timeout_s):
+                news = await self._triaged_news(analyst, since, known, notes)
+                analysis = await analyst.analyze(
+                    as_of=now,
+                    metrics=self.metrics,
+                    candidates=candidates,
+                    news=select_news(news, self._config.digest, now=now),
+                    web=web,
+                )
+        except (LlmError, TimeoutError) as exc:
             error = str(exc)
+            if isinstance(exc, TimeoutError):
+                error = "prazo total da pesquisa excedido"
+        finally:
+            if llm is not None:
+                notes.extend(llm.budget_notes)
+            if reservation is not None:
+                if llm is not None and llm.uncertain_charge:
+                    notes.append("reserva retida: cobrança incerta; conferir com provedor")
+                else:
+                    await self._store.release_budget(reservation)
         entry = ReportEntry(
             as_of=now,
             trigger=trigger,
@@ -155,6 +183,11 @@ class ResearchService:
             cost_usd=ledger.total,
         )
         report_id = await self._store.add_report(entry)
+        if self._notify is not None and (notes or error):
+            await self._notify(
+                EventSeverity.HIGH,
+                "Pesquisa reduzida/omitida: " + "; ".join([*notes, *([error] if error else [])]),
+            )
         log.debug(
             "research.cycle",
             trigger=trigger,

@@ -85,6 +85,8 @@ class FakeClaude:
         self._queue.append(httpx2.Response(status, json=body))
 
     def _handle(self, request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return httpx2.Response(200, json={"input_tokens": 1000})
         self.requests.append(json.loads(request.content))
         if not self._queue:
             raise AssertionError("chamada à API Claude sem resposta enfileirada")

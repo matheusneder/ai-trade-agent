@@ -1,7 +1,10 @@
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
+from unittest.mock import AsyncMock
 
+import anthropic
+import httpx2
 import pytest
 from anthropic.types import ServerToolUsage, Usage
 from structlog.testing import capture_logs
@@ -10,6 +13,7 @@ from tests.support.claude import NOW, FakeClaude, research_config
 from trade_agent.research.config import WebResearchConfig
 from trade_agent.research.llm import (
     BudgetExceededError,
+    ClaudeClient,
     LlmError,
     LlmOutputError,
     LlmUsage,
@@ -25,6 +29,85 @@ TRIAGE = {
         {"id": 1, "relevance": 0.8, "category": "hack", "severity": "critical", "assets": ["SOL"]}
     ]
 }
+
+
+async def test_cycle_allowance_reduces_output_and_omits_unaffordable_calls() -> None:
+    fake = FakeClaude()
+    fake.reply_json(TRIAGE)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(".1")
+    )
+    await client.structured(
+        purpose="triage",
+        model="claude-sonnet-5",
+        system="S",
+        content="C",
+        output=TriageDraft,
+        max_tokens=10000,
+    )
+    assert 1024 <= fake.requests[0]["max_tokens"] < 10000
+    assert client.budget_notes and "reduzida" in client.budget_notes[0]
+    poor = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(".001")
+    )
+    with pytest.raises(BudgetExceededError, match="saldo insuficiente"):
+        await poor.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=10000,
+        )
+    assert len(fake.requests) == 1
+
+
+async def test_bounded_calls_fail_closed_on_counting_and_connection_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ClaudeClient(
+        FakeClaude().client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    request = httpx2.Request("POST", "https://api.example/messages")
+    monkeypatch.setattr(
+        client._client.messages,
+        "count_tokens",
+        AsyncMock(side_effect=anthropic.APIConnectionError(request=request)),
+    )
+    with pytest.raises(LlmError, match="contagem"):
+        await client.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert bool(client.uncertain_charge) is False
+    with pytest.raises(BudgetExceededError, match="ferramentas"):
+        await client._fit_budget("web", {"tools": [{"type": "web_search"}]})
+    monkeypatch.setattr(
+        client._client.messages,
+        "count_tokens",
+        AsyncMock(return_value=anthropic.types.MessageTokensCount(input_tokens=1000)),
+    )
+    monkeypatch.setattr(
+        client._client.messages,
+        "create",
+        AsyncMock(side_effect=anthropic.APIConnectionError(request=request)),
+    )
+    with pytest.raises(LlmError, match="APIConnectionError"):
+        await client.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert client.uncertain_charge
+    with pytest.raises(BudgetExceededError, match="cobrança anterior"):
+        await client._fit_budget("triage", {})
 
 
 def _usage(cost: str, *, hours_ago: float = 0) -> LlmUsage:

@@ -164,6 +164,34 @@ def test_llm_opinion_blends_score_when_confident() -> None:
     assert [i.symbol for i in result.ideas] == ["BBBUSDT"]
 
 
+def test_bullish_llm_cannot_promote_technical_score() -> None:
+    low = _candidate("AAAUSDT", score=0.59, opinion=MarketOpinion(D(1), D(1)))
+    assert low.final_score(CONSERVATIVE) == D("0.59")
+    assert _plan(candidates=[low]).ideas == ()
+
+
+def test_disabled_llm_ignores_veto_and_penalty() -> None:
+    profile = CONSERVATIVE.model_copy(
+        update={
+            "llm": CONSERVATIVE.llm.model_copy(update={"enabled": False}),
+        }
+    )
+    candidate = _candidate("AAAUSDT", opinion=MarketOpinion(D(-1), D(1), veto=True))
+    assert candidate.final_score(profile) == D("0.8")
+    assert len(_plan(profile=profile, candidates=[candidate]).ideas) == 1
+
+
+def test_cost_adjusted_sizing_keeps_loss_inside_budget() -> None:
+    candidate = _candidate("AAAUSDT", stop_pct=0.04)
+    nominal = _plan(candidates=[candidate]).ideas[0]
+    adjusted = _plan(candidates=[candidate], execution_cost_pct=D("0.4")).ideas[0]
+    assert adjusted.notional < nominal.notional
+    assert adjusted.risk <= D(5)
+    assert adjusted.risk == adjusted.notional * D("0.044")
+    with pytest.raises(ValueError, match="nonnegative"):
+        _plan(candidates=[candidate], execution_cost_pct=D(-1))
+
+
 def test_maker_entry_uses_bid() -> None:
     maker = CONSERVATIVE.model_copy(
         update={"entry": CONSERVATIVE.entry.model_copy(update={"order": EntryMode.LIMIT_MAKER_GTC})}

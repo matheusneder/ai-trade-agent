@@ -7,7 +7,7 @@ together with the managed capital in force when they were recorded.
 """
 
 import statistics
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -44,16 +44,6 @@ def open_pnl(position: Position, books: Mapping[str, BookTicker]) -> Decimal:
         return Decimal(0)
     qty = position.protected_qty or position.entry_qty or 0
     return (books[position.symbol].bid_price - position.entry_price) * qty
-
-
-def consecutive_losses(closed: Sequence[Position]) -> int:
-    """Consecutive losses starting from the most recently closed position."""
-    streak = 0
-    for position in closed:
-        if position.realized_pnl is None or position.realized_pnl >= 0:
-            break
-        streak += 1
-    return streak
 
 
 def quote_deviation(books: dict[str, BookTicker]) -> float | None:
@@ -146,7 +136,6 @@ class RiskMonitor:
     async def snapshot(self) -> RiskSnapshot:
         now = self._clock()
         active = await self._store.active_positions()
-        closed = await self._store.closed_positions()
         wanted = {p.symbol for p in active} | {BENCHMARK, *STABLE_PAIRS}
         books = {b.symbol: b for b in await self._api.book_tickers() if b.symbol in wanted}
         unrealized = sum((open_pnl(p, books) for p in active), Decimal(0))
@@ -160,30 +149,23 @@ class RiskMonitor:
         )
 
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        history = await self._store.risk_history(midnight)
         daily: dict[str, Decimal] = {}
         streaks: dict[str, int] = {}
         results: dict[str, Decimal] = {}
         for code, name in self._names.items():
-            own = [p for p in closed if p.profile == code]
-            streaks[name] = consecutive_losses(own)
+            streaks[name] = history.streaks.get(code, 0)
             results[name] = realized_by_code.get(code, Decimal(0)) + sum(
                 (open_pnl(p, books) for p in active if p.profile == code), Decimal(0)
             )
-            daily[name] = sum(
-                (
-                    p.realized_pnl or Decimal(0)
-                    for p in own
-                    if p.closed_at and p.closed_at >= midnight
-                ),
-                Decimal(0),
-            )
+            daily[name] = history.daily.get(code, Decimal(0))
         snapshot = RiskSnapshot(
             now=now,
             equity=equity,
             day_start_equity=day_start,
             peak_equity=peak,
             baseline_equity=baseline,
-            consecutive_losses=consecutive_losses(closed),
+            consecutive_losses=history.consecutive_losses,
             profile_consecutive_losses=streaks,
             profile_daily_pnl=daily,
             profile_pnl=results,
