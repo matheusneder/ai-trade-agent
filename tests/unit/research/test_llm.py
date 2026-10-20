@@ -116,6 +116,84 @@ def _usage(cost: str, *, hours_ago: float = 0) -> LlmUsage:
     )
 
 
+@pytest.mark.parametrize(
+    ("status", "uncertain"),
+    [
+        (400, False),
+        (401, False),
+        (403, False),
+        (404, False),
+        (408, True),
+        (409, False),
+        (413, False),
+        (422, False),
+        (429, False),
+        (500, True),
+        (504, True),
+        (529, True),
+    ],
+)
+async def test_rejections_do_not_create_uncertain_charges(status: int, uncertain: bool) -> None:
+    fake = FakeClaude()
+    fake.fail(status)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    with pytest.raises(LlmError):
+        await client.structured(
+            purpose="analyst",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert client.uncertain_charge is uncertain
+    assert len(fake.requests) == 1  # retry policy is unchanged pending operator alignment
+
+
+@pytest.mark.parametrize(
+    ("failure", "uncertain"),
+    [
+        (httpx2.ConnectError, False),
+        (httpx2.ConnectTimeout, False),
+        (httpx2.PoolTimeout, False),
+        (httpx2.ReadTimeout, True),
+        (httpx2.WriteTimeout, True),
+        (httpx2.ReadError, True),
+        (httpx2.WriteError, True),
+        (httpx2.RemoteProtocolError, True),
+    ],
+)
+async def test_transport_cause_distinguishes_pre_send_from_lost_response(
+    failure: type[httpx2.TransportError],
+    uncertain: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+
+    def fail_after_count(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        raise failure("simulated transport failure", request=request)
+
+    monkeypatch.setattr(fake, "_handle", fail_after_count)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    with pytest.raises(LlmError):
+        await client.structured(
+            purpose="analyst",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert client.uncertain_charge is uncertain
+
+
 def test_usage_cost_counts_tokens_cache_and_searches() -> None:
     usage = Usage(
         input_tokens=1_000_000,

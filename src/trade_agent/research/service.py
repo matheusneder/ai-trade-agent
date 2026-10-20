@@ -99,19 +99,19 @@ class ResearchService:
         since: datetime,
         known_assets: Iterable[str],
         notes: list[str],
-    ) -> list[StoredNews]:
+    ) -> tuple[list[StoredNews], bool]:
         news = await self._store.recent_news(since)
         pending = [n for n in news if n.relevance is None][:TRIAGE_BATCH]
         if not pending:
-            return news
+            return news, False
         try:
             await self._store.set_triage(await analyst.triage(pending, known_assets))
         except BudgetExceededError:
             raise
         except LlmError as exc:  # goes on with the untriaged news
             notes.append(f"triagem indisponível: {exc}")
-            return news
-        return await self._store.recent_news(since)
+            return news, True
+        return await self._store.recent_news(since), False
 
     @tracing.traced("research", "research.cycle")
     async def run_cycle(
@@ -126,6 +126,8 @@ class ResearchService:
         error: str | None = None
         reservation: tuple[str, str] | None = None
         llm: ClaudeClient | None = None
+        triage_failed = False
+        reservation_retained = False
         try:
             if self._client is None:
                 raise LlmError("chave da API Claude ausente (ANTHROPIC_API_KEY)")
@@ -149,7 +151,7 @@ class ResearchService:
             await llm.check_budget()
             analyst = MarketAnalyst(llm, self._config)
             async with asyncio.timeout(budget.cycle_timeout_s):
-                news = await self._triaged_news(analyst, since, known, notes)
+                news, triage_failed = await self._triaged_news(analyst, since, known, notes)
                 analysis = await analyst.analyze(
                     as_of=now,
                     metrics=self.metrics,
@@ -166,6 +168,7 @@ class ResearchService:
                 notes.extend(llm.budget_notes)
             if reservation is not None:
                 if llm is not None and llm.uncertain_charge:
+                    reservation_retained = True
                     notes.append("reserva retida: cobrança incerta; conferir com provedor")
                 else:
                     await self._store.release_budget(reservation)
@@ -184,8 +187,13 @@ class ResearchService:
         )
         report_id = await self._store.add_report(entry)
         if self._notify is not None and (notes or error):
+            severity = (
+                EventSeverity.HIGH
+                if error or triage_failed or reservation_retained
+                else EventSeverity.INFO
+            )
             await self._notify(
-                EventSeverity.HIGH,
+                severity,
                 "Pesquisa reduzida/omitida: " + "; ".join([*notes, *([error] if error else [])]),
             )
         log.debug(

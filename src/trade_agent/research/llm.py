@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 
 import anthropic
+import httpx2
 import structlog
 from anthropic.types import Message, Usage
 from opentelemetry import trace
@@ -34,6 +35,20 @@ log = structlog.get_logger(__name__)
 MILLION = Decimal(1_000_000)
 DEFAULT_API_URL = "https://api.anthropic.com"
 """Used in the spans when the client has no ``base_url`` (test doubles)."""
+
+
+def uncertain_api_error(error: anthropic.APIError) -> bool:
+    """Distinguish rejected/pre-send attempts from an unobserved processing result.
+
+    The SDK wraps connect, read and write failures in APIConnectionError. Only its
+    concrete transport cause can establish that no request was sent. HTTP 408 and
+    server errors remain uncertain; a local usage row is not proof of non-billing.
+    """
+    if isinstance(error, anthropic.APIStatusError):
+        return not (400 <= error.status_code < 500 and error.status_code != 408)
+    return not isinstance(
+        error.__cause__, (httpx2.ConnectError, httpx2.ConnectTimeout, httpx2.PoolTimeout)
+    )
 
 
 class LlmError(Exception):
@@ -292,7 +307,8 @@ class ClaudeClient:
                     timeout=self._config.models.timeout_s, **params
                 )
             except anthropic.APIError as exc:
-                self._uncertain_charge = True
+                self._inflight = False
+                self._uncertain_charge = self._uncertain_charge or uncertain_api_error(exc)
                 if isinstance(exc, anthropic.APIStatusError):
                     span.set_attribute("http.response.status_code", exc.status_code)
                 raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc

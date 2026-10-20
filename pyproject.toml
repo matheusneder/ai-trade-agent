@@ -12,6 +12,7 @@ dependencies = [
     "cryptography>=45",
     "feedparser>=6.0.14",
     "httpx>=0.28",
+    "httpx2>=2.13.1",
     "numpy>=2.0",
     "opentelemetry-api>=1.45",
     "opentelemetry-exporter-otlp-proto-http>=1.45",
