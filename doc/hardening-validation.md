@@ -21,7 +21,11 @@ decision-cycle research and uses neutral exposure. `weight: 0` alone does not di
 The active research configuration reserves US$1/cycle against US$5/day (UTC), disables
 automatic SDK retries for bounded calls and limits a cycle to 600 seconds. Token estimates
 include headroom and can reduce output tokens. Provider web tools are omitted in bounded
-mode, with alerts; RSS sources and analysis remain. Failed requests with uncertain billing
+mode, with INFO notifications; RSS sources and analysis remain. Errors (including a failed
+triage followed by successful analysis) and retained reservations use HIGH. Explicit
+4xx rejections other than 408 and transport-proven connection/pool failures before sending
+release the reservation. Read/write failures, ambiguous connection errors, HTTP 408 and
+server errors remain uncertain. Failed requests with uncertain billing
 retain reservations across UTC days. This also covers requests crossing midnight.
 After a crash, reconcile retained reservations
 against provider usage before removing a reservation from the corresponding
@@ -126,7 +130,20 @@ unset until the operator selects the external service.
 
 ## Review gates
 
-Local verification on 2026-10-20 (Python 3.14.3): **742 unit/integration tests passed**
+PR review follow-up verification on 2026-10-20 (Python 3.14.3): **769 unit/integration
+tests passed** in 106.20 seconds, with **100% statement and branch coverage** (5,627
+statements, 1,088 branches). Ruff, formatting, mypy (192 files), and `git diff --check`
+passed. Added cases exercise explicit HTTP rejections, pre-send connection failures,
+uncertain read/write failures, reservation reuse, and INFO versus HIGH notifications.
+The changes were validated in an isolated worktree without restarting the running bot.
+
+Review decisions still awaiting operator alignment: the active bounded-research/web
+policy, reservation reconciliation/expiry after uncertain failures or restarts, retry
+policy, and whether to split the PR. No changes to those policies are included in this
+follow-up. D-037 and D-038 document the previously implemented TA eligibility and fee
+accounting decisions; they do not change strategy parameters or rewrite trade history.
+
+Initial implementation verification on 2026-10-20 (Python 3.14.3): **742 unit/integration tests passed**
 in 97.83 seconds. The configured source coverage gate passed at **100% statements and
 branches** (5,617 statements, 1,086 branches). Ruff, formatting, mypy (192 files) and
 `git diff --check` also passed. Coverage does not establish market profitability.
