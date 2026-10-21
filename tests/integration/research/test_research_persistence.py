@@ -1,17 +1,20 @@
+import asyncio
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 import respx
 
 from tests.support.claude import NOW, FakeClaude, research_config
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.research_store import ReportEntry, ResearchStore
+from trade_agent.persistence.store import Severity as EventSeverity
 from trade_agent.research.collector import NewsCollector
 from trade_agent.research.config import BudgetConfig, SourcesConfig
-from trade_agent.research.llm import LlmUsage
+from trade_agent.research.llm import BudgetExceededError, LlmUsage
 from trade_agent.research.models import (
     CandidateContext,
     NewsCategory,
@@ -220,3 +223,258 @@ async def test_a_started_cycle_is_not_cut_short_by_the_cap(db: Database) -> None
         refused = await tight.run_cycle(trigger="t", candidates=CANDIDATES)
     assert not refused.ok and "orçamento" in (refused.error or "")
     assert refused.cost_usd == 0 and len(fake.requests) == 2  # the next cycle calls nothing
+
+
+async def test_budget_reservations_are_atomic_across_clients(db: Database) -> None:
+    day = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    outcomes = await asyncio.gather(
+        *[ResearchStore(db).reserve_budget(day, Decimal(5), Decimal(1)) for _ in range(6)],
+        return_exceptions=True,
+    )
+    assert sum(isinstance(x, BudgetExceededError) for x in outcomes) == 1
+    held = [x for x in outcomes if isinstance(x, tuple)]
+    assert len(held) == 5
+    await ResearchStore(db).release_budget(held[0])
+    assert await ResearchStore(db).reserve_budget(day, Decimal(5), Decimal(1))
+
+
+async def test_reserved_cycle_omits_unbounded_web_and_alerts(db: Database) -> None:
+    fake = FakeClaude()
+    fake.reply_json(VIEW)
+    alerts: list[str] = []
+    severities: list[EventSeverity] = []
+
+    async def notify(severity: Any, text: str) -> None:
+        alerts.append(text)
+        severities.append(severity)
+
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=BudgetConfig(cycle_reserve_usd=Decimal(1)))
+        service._notify = notify
+        result = await service.run_cycle(trigger="bounded", candidates=CANDIDATES)
+    assert result.ok and len(fake.requests) == 1
+    assert "tools" not in fake.requests[0]
+    assert alerts and "web omitida" in alerts[0]
+    assert severities == [EventSeverity.INFO]
+    day = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Successful usage is charged, but the unused reservation is released.
+    assert await ResearchStore(db).reserve_budget(day, Decimal(5), Decimal(4))
+
+
+async def test_failed_billed_call_keeps_reservation(db: Database) -> None:
+    fake = FakeClaude()
+    fake.fail()
+    budget = BudgetConfig(daily_usd=Decimal(1), cycle_reserve_usd=Decimal(1))
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=budget)
+        failed = await service.run_cycle(trigger="uncertain", candidates=CANDIDATES, web=False)
+        refused = await service.run_cycle(trigger="retry", candidates=CANDIDATES, web=False)
+    assert not failed.ok and any("reserva retida" in n for n in failed.notes)
+    assert not refused.ok and len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("failure", [529, "read"])
+async def test_retention_alert_includes_failure_reason(
+    db: Database, failure: int | str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+
+    def fail(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        if failure == "read":
+            raise httpx2.ReadTimeout("lost response", request=request)
+        return httpx2.Response(529, json={"error": {"message": "overloaded"}})
+
+    monkeypatch.setattr(fake, "_handle", fail)
+    alerts: list[str] = []
+
+    async def notify(severity: EventSeverity, text: str) -> None:
+        assert severity == EventSeverity.HIGH
+        alerts.append(text)
+
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=BudgetConfig(cycle_reserve_usd=Decimal(1)))
+        service._notify = notify
+        result = await service.run_cycle(trigger="failure", candidates=CANDIDATES, web=False)
+    assert not result.ok and result.error
+    assert len(alerts) == 1 and result.error in alerts[0]
+    assert "Reserva retida" in alerts[0] and "; motivo:" in alerts[0]
+
+
+@pytest.mark.parametrize("status", [400, 401, 429])
+async def test_rejected_call_releases_reservation_for_next_cycle(db: Database, status: int) -> None:
+    fake = FakeClaude()
+    fake.fail(status)
+    if status == 429:
+        fake.fail(status)
+    fake.reply_json(VIEW)
+    budget = BudgetConfig(daily_usd=Decimal(1), cycle_reserve_usd=Decimal(1))
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=budget)
+        rejected = await service.run_cycle(trigger="rejected", candidates=CANDIDATES, web=False)
+        retried = await service.run_cycle(trigger="new-cycle", candidates=CANDIDATES, web=False)
+    assert not rejected.ok and not any("reserva retida" in n for n in rejected.notes)
+    assert retried.ok and len(fake.requests) == (3 if status == 429 else 2)
+
+
+@pytest.mark.parametrize("triage", [False, True])
+async def test_failures_still_raise_high_alerts(db: Database, triage: bool) -> None:
+    fake = FakeClaude()
+    fake.fail(500)
+    if triage:
+        await ResearchStore(db).add_news([NewsItem("rss", "Solana news", NOW)])
+        fake.reply_json(VIEW)
+    alerts: list[EventSeverity] = []
+
+    async def notify(severity: EventSeverity, text: str) -> None:
+        alerts.append(severity)
+
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http)
+        service._notify = notify
+        result = await service.run_cycle(trigger="failure", candidates=CANDIDATES, web=False)
+    assert result.ok is triage  # successful analysis after failed triage is still degraded
+    assert alerts == [EventSeverity.HIGH]
+
+
+async def test_outstanding_budget_survives_midnight(db: Database) -> None:
+    store = ResearchStore(db)
+    await store.release_budget(("research.budget.absent", "absent"))  # idempotent recovery
+    day = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    reservation = await store.reserve_budget(day, Decimal(1), Decimal(1), now=NOW)
+    with pytest.raises(BudgetExceededError):
+        await store.reserve_budget(day + timedelta(days=1), Decimal(1), Decimal(1))
+    await store.release_budget(reservation)
+    assert await store.reserve_budget(day + timedelta(days=1), Decimal(1), Decimal(1))
+
+
+async def test_cycle_timeout_retains_inflight_reservation(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+    started = asyncio.Event()
+
+    async def delayed(request: httpx2.Request) -> httpx2.Response:
+        if not request.url.path.endswith("/count_tokens"):
+            started.set()
+            await asyncio.sleep(10)
+        return handler(request)
+
+    monkeypatch.setattr(fake, "_handle", delayed)
+    budget = BudgetConfig(cycle_reserve_usd=Decimal(1), cycle_timeout_s=0.2)
+    async with httpx.AsyncClient() as http:
+        result = await _service(db, fake, http, budget=budget).run_cycle(
+            trigger="timeout",
+            candidates=CANDIDATES,
+            web=False,
+        )
+    assert started.is_set()
+    assert not result.ok and result.error == "prazo total da pesquisa excedido"
+    assert any("reserva retida" in note for note in result.notes)
+
+
+async def test_unaffordable_triage_omits_analysis(db: Database) -> None:
+    await ResearchStore(db).add_news([NewsItem("rss", "Solana news", NOW)])
+    fake = FakeClaude()
+    async with httpx.AsyncClient() as http:
+        result = await _service(
+            db,
+            fake,
+            http,
+            budget=BudgetConfig(cycle_reserve_usd=Decimal(".001")),
+        ).run_cycle(trigger="too-small", candidates=CANDIDATES, web=False)
+    assert not result.ok and "saldo insuficiente" in (result.error or "")
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize("notifications", [True, False])
+async def test_restart_during_research_recovers_by_expiry(
+    db: Database, monkeypatch: pytest.MonkeyPatch, notifications: bool
+) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+    started = asyncio.Event()
+    alerts: list[tuple[EventSeverity, str]] = []
+
+    async def notify(severity: EventSeverity, text: str) -> None:
+        alerts.append((severity, text))
+
+    async def interrupted(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(fake, "_handle", interrupted)
+    budget = BudgetConfig(daily_usd=Decimal(1), cycle_reserve_usd=Decimal(1))
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=budget)
+        service._notify = notify if notifications else None
+        task = asyncio.ensure_future(service.run_cycle(trigger="restart", candidates=CANDIDATES))
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        if notifications:
+            assert len(alerts) == 1 and alerts[0][0] == EventSeverity.HIGH
+            assert "Reserva retida" in alerts[0][1]
+        replacement = FakeClaude()
+        replacement.reply_json(VIEW)
+        restarted = _service(db, replacement, http, budget=budget)
+        restarted._clock = lambda: NOW + timedelta(hours=24)
+        restarted._notify = notify if notifications else None
+        result = await restarted.run_cycle(trigger="recovered", candidates=CANDIDATES, web=False)
+    assert result.ok
+    if notifications:
+        assert len(alerts) == 2 and alerts[1][0] == EventSeverity.HIGH
+        assert "expiradas" in alerts[1][1]
+    store = ResearchStore(db)
+    assert (
+        await store.spent_since(NOW.replace(hour=0), until=NOW.replace(hour=0) + timedelta(days=1))
+        == 1
+    )
+
+
+@pytest.mark.parametrize("before_send", [True, False])
+async def test_transport_failure_reservation_matches_send_certainty(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    before_send: bool,
+) -> None:
+    fake = FakeClaude()
+    fake.reply_json(VIEW)
+    handler = fake._handle
+    attempts = 0
+
+    def fail_once(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        attempts += 1
+        if attempts <= (2 if before_send else 1):
+            error = httpx2.ConnectTimeout if before_send else httpx2.ReadTimeout
+            raise error("simulated", request=request)
+        return handler(request)
+
+    monkeypatch.setattr(fake, "_handle", fail_once)
+    budget = BudgetConfig(daily_usd=Decimal(1), cycle_reserve_usd=Decimal(1))
+    alerts: list[EventSeverity] = []
+
+    async def notify(severity: EventSeverity, text: str) -> None:
+        alerts.append(severity)
+
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=budget)
+        service._notify = notify
+        failed = await service.run_cycle(trigger="failure", candidates=CANDIDATES, web=False)
+        subsequent = await service.run_cycle(trigger="next", candidates=CANDIDATES, web=False)
+    assert not failed.ok
+    assert any("reserva retida" in n for n in failed.notes) is not before_send
+    assert subsequent.ok is before_send
+    assert attempts == (3 if before_send else 1)
+    assert alerts[0] is EventSeverity.HIGH

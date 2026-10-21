@@ -838,11 +838,16 @@ def _health() -> Json:
 
 def _llm() -> Json:
     model, purpose = key("model", "attribute"), key("purpose", "attribute")
+    cost_help = (
+        "Telemetria de uso observado nas respostas do LLM. Não inclui estimativas de reservas "
+        "expiradas nem ajustes contábeis. O painel de custo do Grafana usa llm_usage e inclui "
+        "esses lançamentos no dia UTC de origem; os totais podem divergir."
+    )
     return dashboard(
         "trade-agent-llm",
         "Trade Agent · LLM",
         "Custo, tokens e latência do analista de mercado. O orçamento diário fica em "
-        "config/research.yaml (budget.daily_usd).",
+        "config/research.yaml (budget.daily_usd). " + cost_help,
         [
             (
                 "Período",
@@ -859,6 +864,7 @@ def _llm() -> Json:
                                     reduce="sum",
                                 ),
                                 decimals=4,
+                                description=cost_help,
                             ),
                             3,
                             3,
@@ -917,6 +923,7 @@ def _llm() -> Json:
                                     legend="{{model}} · {{purpose}}",
                                 ),
                                 decimals=4,
+                                description=cost_help,
                             ),
                             6,
                         ),

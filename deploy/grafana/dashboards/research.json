@@ -124,6 +124,7 @@
     {
       "type": "barchart",
       "title": "Custo diário do LLM",
+      "description": "Contabilidade em llm_usage: inclui estimativas de reservas expiradas e ajustes no dia UTC de origem. O custo no SigNoz usa apenas telemetria de respostas observadas e não inclui esses lançamentos; os totais podem divergir.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "trade-agent-pg"

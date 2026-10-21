@@ -19,7 +19,9 @@ Usage::
 import argparse
 import dataclasses
 import gzip
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -59,6 +61,9 @@ RISK_PARAMS = frozenset(
         "tp_activation_max",
         "min_reward_risk",
         "round_trip_fee",
+        "execution_slippage",
+        "cost_adjusted",
+        "trailing_floor",
     }
 )
 
@@ -186,6 +191,9 @@ def strategy_params(
                 "max_position_pct": float(profile.allocation.max_position_pct),
                 "min_reward_risk": pre_trade.min_reward_risk,
                 "round_trip_fee": pre_trade.round_trip_fee_pct / 100,
+                "execution_slippage": pre_trade.slippage_pct / 100,
+                "cost_adjusted": int(pre_trade.risk_model == "cost_adjusted"),
+                "trailing_floor": int(pre_trade.reward_model == "trailing_floor"),
             },
             "sell": {
                 "atr_stop_mult": atr_mult,
@@ -400,7 +408,7 @@ def optimize(
     return chosen_params(exported)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--profile", required=True, help="perfil de config/profiles.yaml")
     parser.add_argument("--profiles-file", type=Path, default=ROOT / "config" / "profiles.yaml")
@@ -425,13 +433,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--detail",
-        help="timeframe das saídas dentro do candle (ex.: 5m): stop e TP seguem o preço",
+        default="5m",
+        choices=["1m", "3m", "5m"],
+        help="timeframe das saídas dentro do candle (padrão: 5m)",
+    )
+    parser.add_argument(
+        "--exploratory-no-detail",
+        action="store_true",
+        help="desativa detalhe intrabar; resultado exploratório, impróprio para aprovação",
     )
     args = parser.parse_args(argv)
+    if args.exploratory_no_detail:
+        args.detail = None
+    return args
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
 
     strategy_config = load_strategy_config(args.profiles_file)
     profile = strategy_config.profiles[args.profile]
     pre_trade = load_stop_conditions(args.stop_conditions).pre_trade
+    if pre_trade.max_portfolio_risk_pct or pre_trade.max_portfolio_exposure_pct:
+        raise ValueError(
+            "portfolio limits require the portfolio replay, not independent Freqtrade windows"
+        )
     config_path = prepare(strategy_config, args.profile, args.pairs, pre_trade)
     periods = windows(args.start, args.end, args.window_months)
     if args.download:
@@ -450,11 +476,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     btc_file = DATA / f"{BENCHMARK.replace('/', '_')}-{profile.timeframe}.json.gz"
     results: list[WindowResult] = []
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
     for index, (start, end) in enumerate(periods):
         chosen: dict[str, float] = {}
         if args.optimize:
             chosen = optimize(profile, config_path, train_range(start, args.train_months), args)
-        directory = f"user_data/backtest_results/wf-{args.profile}-{mode}-{index:02d}"
+        directory = f"user_data/backtest_results/wf-{args.profile}-{mode}-{stamp}-{index:02d}"
         (LAB / directory).mkdir(parents=True, exist_ok=True)
         _freqtrade(
             "backtesting", "--config", config_path, "--strategy", STRATEGY,
@@ -472,16 +499,53 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.detail:
         subtitle += f" Saídas simuladas dentro do candle com candles de {args.detail}."
+    else:
+        subtitle += " EXPLORATÓRIO: sem detalhe intrabar; não usar para aprovação da estratégia."
     if args.pairs:
         subtitle += f" Pares: {', '.join(args.pairs)}."
     report = summarize(args.profile, results, subtitle)
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     name = f"walk-forward-{args.profile}-{mode}-{stamp}.md"
     (OUTPUT / name).write_text(report, encoding="utf-8")
+    write_manifest(OUTPUT / name.replace(".md", ".json"), args, results)
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"  # e.g. cp1252 on Windows
     sys.stdout.write(report.encode(encoding, errors="replace").decode(encoding))
     return 0
+
+
+def write_manifest(path: Path, args: argparse.Namespace, results: list[WindowResult]) -> None:
+    """Hash configuration, implementation and available data; never include environment secrets."""
+    source_root = Path(os.environ.get("TA_LAB_SRC", str(ROOT / "src")))
+    if not source_root.is_absolute():
+        source_root = (LAB / source_root).resolve()
+    sources = [
+        Path(__file__),
+        args.profiles_file,
+        args.stop_conditions,
+        ROOT / "uv.lock",
+        ROOT / "lab/freqtrade/docker-compose.yml",
+        ROOT / "lab/freqtrade/user_data/strategies/trade_agent_strategy.py",
+        *sorted((source_root / "trade_agent").rglob("*.py")),
+        *sorted(DATA.rglob("*.json.gz")),
+    ]
+    hashes: dict[str, str] = {}
+    for source in sources:
+        if source.is_file():
+            with source.open("rb") as handle:
+                hashes[str(source)] = hashlib.file_digest(handle, "sha256").hexdigest()
+    payload = {
+        "args": vars(args),
+        "sha256": hashes,
+        "results": [dataclasses.asdict(r) for r in results],
+        "validation": "exploratory" if not args.detail else "intrabar_simulation",
+        "limitations": [
+            "static universe",
+            "idealized fills",
+            "no full-portfolio risk simulation",
+            "intrabar ordering within the detail candle remains approximate",
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
 if __name__ == "__main__":

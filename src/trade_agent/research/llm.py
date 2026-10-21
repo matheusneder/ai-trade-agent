@@ -13,13 +13,17 @@
 * The *system prompt* is marked for *prompt caching* (stable prefix).
 """
 
+import asyncio
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 import anthropic
+import httpx2
 import structlog
 from anthropic.types import Message, Usage
 from opentelemetry import trace
@@ -36,8 +40,39 @@ DEFAULT_API_URL = "https://api.anthropic.com"
 """Used in the spans when the client has no ``base_url`` (test doubles)."""
 
 
+def uncertain_api_error(error: anthropic.APIError) -> bool:
+    """Distinguish rejected/pre-send attempts from an unobserved processing result.
+
+    The SDK wraps connect, read and write failures in APIConnectionError. Only its
+    concrete transport cause can establish that no request was sent. HTTP 408 and
+    server errors remain uncertain; a local usage row is not proof of non-billing.
+    """
+    if isinstance(error, anthropic.APIStatusError):
+        return not (400 <= error.status_code < 500 and error.status_code != 408)
+    return not isinstance(
+        error.__cause__, (httpx2.ConnectError, httpx2.ConnectTimeout, httpx2.PoolTimeout)
+    )
+
+
 class LlmError(Exception):
     """Analyst failure; the caller degrades to pure TA."""
+
+
+def retry_delay(error: anthropic.APIError, now: datetime) -> float | None:
+    """One retry, only for explicit rate rejection or proven pre-send failure."""
+    if isinstance(error, anthropic.APIStatusError):
+        if error.status_code != 429:
+            return None
+        value = error.response.headers.get("retry-after", "1")
+        try:
+            delay = float(value)
+        except ValueError:
+            try:
+                delay = (parsedate_to_datetime(value) - now).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                delay = 1.0
+        return max(0.0, delay) if math.isfinite(delay) else 1.0
+    return 1.0 if not uncertain_api_error(error) else None
 
 
 class BudgetExceededError(LlmError):
@@ -139,12 +174,52 @@ class ClaudeClient:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         *,
         budget_per_call: bool = True,
+        cycle_allowance: Decimal | None = None,
     ) -> None:
-        self._client = client
+        self._client = client.with_options(max_retries=0) if cycle_allowance is not None else client
         self._config = config
         self._ledger = ledger
         self._clock = clock
         self._budget_per_call = budget_per_call
+        self._cycle_allowance = cycle_allowance
+        self._cycle_cost = Decimal(0)
+        self._inflight = False
+        self._uncertain_charge = False
+        self.budget_notes: list[str] = []
+
+    @property
+    def uncertain_charge(self) -> bool:
+        return self._inflight or self._uncertain_charge
+
+    async def _fit_budget(self, purpose: str, params: dict[str, Any]) -> None:
+        if self._cycle_allowance is None:
+            return
+        if self.uncertain_charge:
+            raise BudgetExceededError("cobrança anterior incerta; ciclo interrompido")
+        if params.get("tools"):
+            raise BudgetExceededError("ferramentas web sem custo máximo previsível")
+        count_params = {
+            k: params[k] for k in ("model", "messages", "system", "output_config") if k in params
+        }
+        try:
+            count = await self._client.messages.count_tokens(
+                **count_params, timeout=self._config.models.timeout_s
+            )
+        except anthropic.APIError as exc:
+            raise LlmError("contagem de tokens indisponível; chamada omitida") from exc
+        price = self._config.pricing.models[params["model"]]
+        # Token counting is an estimate; reserve headroom and assume uncached writes.
+        input_cost = (Decimal(count.input_tokens) * Decimal("1.1") + 1024) * price.input
+        input_cost *= max(Decimal(1), self._config.pricing.cache_write_multiplier) / MILLION
+        remaining = self._cycle_allowance - self._cycle_cost
+        if purpose == "triage":
+            remaining = min(remaining, self._cycle_allowance / 4)
+        affordable = int(max(Decimal(0), remaining - input_cost) * MILLION / price.output)
+        if affordable < 1024:
+            raise BudgetExceededError("saldo insuficiente para uma resposta útil")
+        if affordable < params["max_tokens"]:
+            params["max_tokens"] = affordable
+            self.budget_notes.append(f"{purpose}: saída reduzida para {affordable} tokens")
 
     async def check_budget(self) -> None:
         """Raises ``BudgetExceededError`` if the day's spending already reached the cap."""
@@ -173,6 +248,8 @@ class ClaudeClient:
             at=self._clock(),
         )
         await self._ledger.record(record)
+        self._cycle_cost += record.cost_usd
+        self._inflight = False
         metrics.record_llm(
             model=model,
             purpose=purpose,
@@ -235,6 +312,7 @@ class ClaudeClient:
         ) as span:
             if self._budget_per_call:
                 await self.check_budget()
+            await self._fit_budget(purpose, params)
             log.debug(
                 "llm.request",
                 purpose=purpose,
@@ -243,14 +321,25 @@ class ClaudeClient:
                 tools=[t["type"] for t in params.get("tools", [])],
                 turns=len(params.get("messages", [])),
             )
-            try:
-                response: Message = await self._client.messages.create(
-                    timeout=self._config.models.timeout_s, **params
-                )
-            except anthropic.APIError as exc:
-                if isinstance(exc, anthropic.APIStatusError):
-                    span.set_attribute("http.response.status_code", exc.status_code)
-                raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
+            retried = False
+            while True:
+                try:
+                    self._inflight = True
+                    response: Message = await self._client.messages.create(
+                        timeout=self._config.models.timeout_s, **params
+                    )
+                    break
+                except anthropic.APIError as exc:
+                    self._inflight = False
+                    self._uncertain_charge = self._uncertain_charge or uncertain_api_error(exc)
+                    delay = retry_delay(exc, self._clock())
+                    if self._cycle_allowance is not None and not retried and delay is not None:
+                        retried = True
+                        await asyncio.sleep(delay)  # Included in the service's cycle timeout.
+                        continue
+                    if isinstance(exc, anthropic.APIStatusError):
+                        span.set_attribute("http.response.status_code", exc.status_code)
+                    raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
             span.set_attribute("http.response.status_code", 200)
             await self._record(purpose, model, response)
             return response

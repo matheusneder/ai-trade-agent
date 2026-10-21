@@ -4,7 +4,7 @@ import re
 from datetime import datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -83,6 +83,11 @@ class ProfileConditions(_Strict):
 
 
 class PreTradeConfig(_Strict):
+    risk_model: Literal["nominal", "cost_adjusted"] = "nominal"
+    reward_model: Literal["activation", "trailing_floor"] = "activation"
+    slippage_pct: float = Field(default=0, ge=0, lt=100)
+    max_portfolio_risk_pct: float | None = Field(default=None, gt=0, le=100)
+    max_portfolio_exposure_pct: float | None = Field(default=None, gt=0, le=100)
     min_reward_risk: float = Field(default=1.5, gt=0)
     """Target (take-profit activation) ÷ stop, after the round-trip fees."""
     round_trip_fee_pct: float = Field(default=0.2, ge=0)

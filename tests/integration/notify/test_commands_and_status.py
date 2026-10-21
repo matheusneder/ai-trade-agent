@@ -15,7 +15,7 @@ from tests.support.risk import CONDITIONS, NOW, POLICY, snapshot
 from trade_agent.execution.orders import EntryOrder
 from trade_agent.execution.service import PositionService
 from trade_agent.notify.commands import OFFSET_KEY, CommandCenter, until_stopped
-from trade_agent.notify.status import status_text
+from trade_agent.notify.status import config_text, status_text
 from trade_agent.notify.telegram import TelegramBot, TelegramError
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.research_store import ReportEntry, ResearchStore
@@ -28,6 +28,18 @@ D = Decimal
 API = "https://tg.example/botTOKEN"
 CHAT = 4242
 PROFILES = load_strategy_config(Path(__file__).parents[2] / "fixtures" / "profiles.yaml")
+
+
+def test_config_displays_atr_activation_range() -> None:
+    strategy = PROFILES.model_copy(deep=True)
+    profile = strategy.profiles["conservador"]
+    take = profile.protection.take_profit.model_copy(
+        update={"activation_atr_mult": 3.0, "activation_max_pct": D(10)}
+    )
+    strategy.profiles["conservador"] = profile.model_copy(
+        update={"protection": profile.protection.model_copy(update={"take_profit": take})}
+    )
+    assert "3.0×ATR (3–10%)" in config_text(strategy, CONDITIONS, "test")
 
 
 class Clock:

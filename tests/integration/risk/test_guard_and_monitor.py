@@ -1,5 +1,6 @@
 """Risk Guard and monitor with PostgreSQL and simulated Binance (Phase 5 exit criterion)."""
 
+import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -41,6 +42,45 @@ def _guard(store: Store, clock: Clock, alerts: list[tuple[Severity, str]]) -> Ri
     return RiskGuard(
         conditions=CONDITIONS, states=StateStore(store), store=store, notify=notify, clock=clock
     )
+
+
+async def test_halt_waits_for_inflight_entry_and_blocks_the_next(store: Store) -> None:
+    guard = _guard(store, Clock(NOW), [])
+    async with guard.entry_authorization("conservador") as state:
+        assert state.allows_entries
+        halted = asyncio.ensure_future(guard.halt(GLOBAL))
+        await asyncio.sleep(0)
+        assert not halted.done()
+    await asyncio.wait_for(halted, timeout=3)
+    async with guard.entry_authorization("conservador") as state:
+        assert state is OpState.HALTED
+
+
+async def test_queued_trigger_cannot_downgrade_manual_halt(
+    store: Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = _guard(store, Clock(NOW), [])
+    pause = evaluate(CONDITIONS, snapshot(btc_change_1h=-0.07))
+    queued = asyncio.Event()
+    original = guard._set
+
+    async def set_state(scope: str, new: ScopeState, *, source: str) -> bool:
+        if source == "gatilho":
+            queued.set()
+        return await original(scope, new, source=source)
+
+    monkeypatch.setattr(guard, "_set", set_state)
+    async with guard.entry_authorization("conservador"):
+        halted = asyncio.ensure_future(guard.halt(GLOBAL))
+        await asyncio.sleep(0)
+        applied = asyncio.ensure_future(guard.apply(pause))
+        # Let the trigger finish reading RUNNING before authorization is released.
+        await asyncio.wait_for(queued.wait(), timeout=3)
+    await halted
+    assert await applied == []
+    assert (await guard.effective("conservador")) is OpState.HALTED
+    assert await guard.fired(GLOBAL) == []
 
 
 @pytest.mark.parametrize(("condition", "scope", "overrides", "action"), TRIGGERS)

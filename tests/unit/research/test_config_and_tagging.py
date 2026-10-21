@@ -15,6 +15,8 @@ def test_repository_research_config_is_valid() -> None:
     assert config.models.analyst in config.pricing.models
     assert config.models.triage in config.pricing.models
     assert config.budget.daily_usd > 0
+    assert config.budget.cycle_reserve_usd is None
+    assert config.web.enabled
     assert config.sources.rss_feeds
     assert all(names for names in config.asset_names.values())
 
