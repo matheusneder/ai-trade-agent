@@ -13,10 +13,13 @@
 * The *system prompt* is marked for *prompt caching* (stable prefix).
 """
 
+import asyncio
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 import anthropic
@@ -53,6 +56,23 @@ def uncertain_api_error(error: anthropic.APIError) -> bool:
 
 class LlmError(Exception):
     """Analyst failure; the caller degrades to pure TA."""
+
+
+def retry_delay(error: anthropic.APIError, now: datetime) -> float | None:
+    """One retry, only for explicit rate rejection or proven pre-send failure."""
+    if isinstance(error, anthropic.APIStatusError):
+        if error.status_code != 429:
+            return None
+        value = error.response.headers.get("retry-after", "1")
+        try:
+            delay = float(value)
+        except ValueError:
+            try:
+                delay = (parsedate_to_datetime(value) - now).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                delay = 1.0
+        return max(0.0, delay) if math.isfinite(delay) else 1.0
+    return 1.0 if not uncertain_api_error(error) else None
 
 
 class BudgetExceededError(LlmError):
@@ -156,7 +176,7 @@ class ClaudeClient:
         budget_per_call: bool = True,
         cycle_allowance: Decimal | None = None,
     ) -> None:
-        self._client = client.with_options(max_retries=0) if cycle_allowance is not None else client
+        self._client = client.with_options(max_retries=0)
         self._config = config
         self._ledger = ledger
         self._clock = clock
@@ -301,17 +321,25 @@ class ClaudeClient:
                 tools=[t["type"] for t in params.get("tools", [])],
                 turns=len(params.get("messages", [])),
             )
-            try:
-                self._inflight = True
-                response: Message = await self._client.messages.create(
-                    timeout=self._config.models.timeout_s, **params
-                )
-            except anthropic.APIError as exc:
-                self._inflight = False
-                self._uncertain_charge = self._uncertain_charge or uncertain_api_error(exc)
-                if isinstance(exc, anthropic.APIStatusError):
-                    span.set_attribute("http.response.status_code", exc.status_code)
-                raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
+            retried = False
+            while True:
+                try:
+                    self._inflight = True
+                    response: Message = await self._client.messages.create(
+                        timeout=self._config.models.timeout_s, **params
+                    )
+                    break
+                except anthropic.APIError as exc:
+                    self._inflight = False
+                    self._uncertain_charge = self._uncertain_charge or uncertain_api_error(exc)
+                    delay = retry_delay(exc, self._clock())
+                    if not retried and delay is not None:
+                        retried = True
+                        await asyncio.sleep(delay)  # Included in the service's cycle timeout.
+                        continue
+                    if isinstance(exc, anthropic.APIStatusError):
+                        span.set_attribute("http.response.status_code", exc.status_code)
+                    raise LlmError(f"{purpose}: {type(exc).__name__}: {exc}") from exc
             span.set_attribute("http.response.status_code", 200)
             await self._record(purpose, model, response)
             return response

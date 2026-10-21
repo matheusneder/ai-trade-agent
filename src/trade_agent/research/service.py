@@ -113,6 +113,16 @@ class ResearchService:
             return news, True
         return await self._store.recent_news(since), False
 
+    async def _expire_reservations(self, now: datetime) -> None:
+        expired = await self._store.expire_budget(now)
+        if expired:
+            log.warning("research.reservations_expired", tokens=expired)
+            if self._notify is not None:
+                await self._notify(
+                    EventSeverity.HIGH,
+                    "Reservas expiradas convertidas em cobrança estimada: " + ", ".join(expired),
+                )
+
     @tracing.traced("research", "research.cycle")
     async def run_cycle(
         self, *, trigger: str, candidates: Sequence[CandidateContext], web: bool = True
@@ -129,13 +139,14 @@ class ResearchService:
         triage_failed = False
         reservation_retained = False
         try:
+            await self._expire_reservations(now)
             if self._client is None:
                 raise LlmError("chave da API Claude ausente (ANTHROPIC_API_KEY)")
             budget = self._config.budget
             if budget.cycle_reserve_usd is not None:
                 day = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 reservation = await self._store.reserve_budget(
-                    day, budget.daily_usd, budget.cycle_reserve_usd
+                    day, budget.daily_usd, budget.cycle_reserve_usd, now=now
                 )
                 if web and self._config.web.enabled:
                     web = False
@@ -170,6 +181,13 @@ class ResearchService:
                 if llm is not None and llm.uncertain_charge:
                     reservation_retained = True
                     notes.append("reserva retida: cobrança incerta; conferir com provedor")
+                    # Cancellation propagates after finally, so notify here rather than
+                    # relying on the normal report path below.
+                    if self._notify is not None:
+                        await self._notify(
+                            EventSeverity.HIGH,
+                            "Reserva retida por cobrança incerta: " + reservation[1],
+                        )
                 else:
                     await self._store.release_budget(reservation)
         entry = ReportEntry(
@@ -186,12 +204,8 @@ class ResearchService:
             cost_usd=ledger.total,
         )
         report_id = await self._store.add_report(entry)
-        if self._notify is not None and (notes or error):
-            severity = (
-                EventSeverity.HIGH
-                if error or triage_failed or reservation_retained
-                else EventSeverity.INFO
-            )
+        if self._notify is not None and (notes or error) and not reservation_retained:
+            severity = EventSeverity.HIGH if error or triage_failed else EventSeverity.INFO
             await self._notify(
                 severity,
                 "Pesquisa reduzida/omitida: " + "; ".join([*notes, *([error] if error else [])]),

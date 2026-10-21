@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -19,6 +20,7 @@ from trade_agent.research.llm import (
     LlmUsage,
     MemoryLedger,
     TrackingLedger,
+    retry_delay,
     usage_cost,
 )
 from trade_agent.research.models import TriageDraft
@@ -29,6 +31,93 @@ TRIAGE = {
         {"id": 1, "relevance": 0.8, "category": "hack", "severity": "critical", "assets": ["SOL"]}
     ]
 }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2.5", 2.5),
+        ("-1", 0),
+        ("NaN", 1),
+        ("garbage", 1),
+        ("Sat, 26 Sep 2026 12:00:07 GMT", 7),
+        ("Sat, 26 Sep 2026 12:00:07", 1),
+    ],
+)
+def test_retry_after_header(value: str, expected: float) -> None:
+    response = httpx2.Response(
+        429, headers={"retry-after": value}, request=httpx2.Request("POST", "https://example.test")
+    )
+    error = anthropic.RateLimitError("limited", response=response, body=None)
+    assert retry_delay(error, NOW) == expected
+
+
+@pytest.mark.parametrize(
+    "failure", [None, httpx2.ConnectError, httpx2.ConnectTimeout, httpx2.PoolTimeout]
+)
+async def test_selective_retry_success(
+    failure: type[httpx2.TransportError] | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeClaude()
+    fake.reply_json(TRIAGE)
+    handler = fake._handle
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    def transient(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        attempts += 1
+        if attempts == 1:
+            if failure is not None:
+                raise failure("pre-send", request=request)
+            return httpx2.Response(
+                429,
+                headers={"retry-after": "3"},
+                json={"error": {"type": "rate_limit_error", "message": "limited"}},
+            )
+        return handler(request)
+
+    monkeypatch.setattr(fake, "_handle", transient)
+    monkeypatch.setattr("trade_agent.research.llm.asyncio.sleep", sleep)
+    client = fake.claude()
+    await client.structured(
+        purpose="triage",
+        model="claude-sonnet-5",
+        system="S",
+        content="C",
+        output=TriageDraft,
+        max_tokens=2000,
+    )
+    assert attempts == 2 and not client.uncertain_charge
+    assert sleeps == [1 if failure else 3]
+
+
+async def test_retry_wait_is_cancelled_by_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeClaude()
+
+    def limited(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            429, headers={"retry-after": "3600"}, json={"error": {"message": "limited"}}
+        )
+
+    monkeypatch.setattr(fake, "_handle", limited)
+    client = fake.claude()
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.05):
+            await client.structured(
+                purpose="triage",
+                model="claude-sonnet-5",
+                system="S",
+                content="C",
+                output=TriageDraft,
+                max_tokens=2000,
+            )
+    assert not client.uncertain_charge
 
 
 async def test_cycle_allowance_reduces_output_and_omits_unaffordable_calls() -> None:
@@ -136,6 +225,8 @@ def _usage(cost: str, *, hours_ago: float = 0) -> LlmUsage:
 async def test_rejections_do_not_create_uncertain_charges(status: int, uncertain: bool) -> None:
     fake = FakeClaude()
     fake.fail(status)
+    if status == 429:
+        fake.fail(status)
     client = ClaudeClient(
         fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
     )
@@ -149,7 +240,7 @@ async def test_rejections_do_not_create_uncertain_charges(status: int, uncertain
             max_tokens=2000,
         )
     assert client.uncertain_charge is uncertain
-    assert len(fake.requests) == 1  # retry policy is unchanged pending operator alignment
+    assert len(fake.requests) == (2 if status == 429 else 1)
 
 
 @pytest.mark.parametrize(
