@@ -18,18 +18,45 @@ TA eligibility is mandatory. Positive LLM sentiment never promotes a candidate; 
 sentiment, veto and exposure reduction can restrict it. `llm.enabled: false` disables
 decision-cycle research and uses neutral exposure. `weight: 0` alone does not disable veto.
 
-The active research configuration reserves US$1/cycle against US$5/day (UTC), disables
-automatic SDK retries for bounded calls and limits a cycle to 600 seconds. Token estimates
-include headroom and can reduce output tokens. Provider web tools are omitted in bounded
-mode, with INFO notifications; RSS sources and analysis remain. Errors (including a failed
+The shipped research configuration preserves web research under US$5/day (UTC), with the
+possible one-started-cycle overshoot accepted in D-033 and a 600-second cycle timeout.
+Setting `budget.cycle_reserve_usd` explicitly opts into bounded RSS-only research. Token
+estimates include headroom and can reduce output tokens. Provider web tools are omitted in
+that opt-in mode, with INFO notifications; RSS sources and analysis remain. Errors (including a failed
 triage followed by successful analysis) and retained reservations use HIGH. Explicit
 4xx rejections other than 408 and transport-proven connection/pool failures before sending
 release the reservation. Read/write failures, ambiguous connection errors, HTTP 408 and
 server errors remain uncertain. Failed requests with uncertain billing
 retain reservations across UTC days. This also covers requests crossing midnight.
-After a crash, reconcile retained reservations
-against provider usage before removing a reservation from the corresponding
-`research.budget.YYYY-MM-DD` checkpoint. Do not automatically clear uncertain charges.
+At the next research cycle after 24 hours from creation, expired reservations are converted
+atomically into full-value `llm_usage` estimates (`purpose=reservation_expired`,
+`model=reservation:<token>`, zero tokens), attributed to their original UTC day, then removed.
+Recovery also runs when bounded mode is disabled and after a process restart; it does not
+depend on manual reconciliation. Only unexpired reservations count as outstanding. Legacy
+reservations have no creation timestamp: their UTC day's end is used as a conservative
+upper bound, so they expire at most 48 hours after that day's start. Retention and expiry
+send HIGH notifications with reservation tokens. A hard-killed process cannot send a
+retention notification; the next cycle still recovers its durable reservation and alerts
+on expiry. Expiry is transactional; notifications are best effort after the transaction.
+
+Automatic SDK retries are disabled. Message calls get at most two total attempts, only
+for HTTP 429 or proven pre-send ConnectError/ConnectTimeout/PoolTimeout. `Retry-After`
+seconds or HTTP dates are honored (one second fallback); the wait counts against the
+cycle timeout. HTTP 408, all 5xx including 529, and read/write failures are not retried.
+
+To correct an estimate using provider evidence, run against the intended database:
+
+```bash
+uv run python -m scripts.reconcile_research --token RESERVATION_TOKEN --settled-usd 0.25 --reason "Provider invoice/reference and explanation"
+```
+
+This is the verified total replacing the estimate only, excluding usage already recorded
+for successful responses. A signed `reservation_adjustment` row is appended on the original
+UTC day; `research.settlement.<token>` retains the estimate, expiry time, current settled
+total and adjustment reasons/timestamps. Repeating the same total is idempotent. Never
+delete a reservation or usage row to reconcile it. Full-value estimates may double-count
+partially recorded cycles until corrected; this intentional conservative bias is visible
+through the special purpose/model fields in the same usage table used by SQL cost dashboards.
 Pricing configuration and token counts are estimates, not a provider invoice guarantee.
 The implementation conservatively counts recorded usage plus outstanding reservations,
 so concurrency can temporarily reserve more than the eventual expense.
@@ -130,6 +157,16 @@ unset until the operator selects the external service.
 
 ## Review gates
 
+Final review verification on 2026-10-21 (Python 3.14.3): **785 unit/integration tests
+passed** in 128.49 seconds, with **100% statement and branch coverage** (5,705 statements,
+1,114 branches). Ruff lint/format, mypy (194 files), and `git diff --check` passed.
+Tests cover automatic expiry across UTC midnight, independent concurrent workers,
+cancellation followed by a replacement service, conservative legacy-checkpoint expiry,
+audited/idempotent adjustments and their CLI, selective retry success/exhaustion, HTTP
+`Retry-After`, and cancellation during retry waits. A separate configuration assertion
+confirms web is enabled and bounded mode is unset by default. Exchange/Claude calls are
+simulated; PostgreSQL tests use an isolated container. The production checkout was untouched.
+
 PR review follow-up verification on 2026-10-20 (Python 3.14.3): **769 unit/integration
 tests passed** in 106.20 seconds, with **100% statement and branch coverage** (5,627
 statements, 1,088 branches). Ruff, formatting, mypy (192 files), and `git diff --check`
@@ -137,11 +174,11 @@ passed. Added cases exercise explicit HTTP rejections, pre-send connection failu
 uncertain read/write failures, reservation reuse, and INFO versus HIGH notifications.
 The changes were validated in an isolated worktree without restarting the running bot.
 
-Review decisions still awaiting operator alignment: the active bounded-research/web
-policy, reservation reconciliation/expiry after uncertain failures or restarts, retry
-policy, and whether to split the PR. No changes to those policies are included in this
-follow-up. D-037 and D-038 document the previously implemented TA eligibility and fee
-accounting decisions; they do not change strategy parameters or rewrite trade history.
+The subsequent review chose web research by default, opt-in bounded RSS-only research,
+24-hour expiry with conservative estimates, selective retries, and focused commits in
+the existing PR. Strict TA-first behavior was reconfirmed directly by the operator after
+the review requested an uncapped default. D-037 records that clarification; D-038 retains
+the prospective fee-accounting boundary. No production deployment is part of this review.
 
 Initial implementation verification on 2026-10-20 (Python 3.14.3): **742 unit/integration tests passed**
 in 97.83 seconds. The configured source coverage gate passed at **100% statements and
