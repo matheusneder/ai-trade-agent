@@ -189,3 +189,12 @@ def test_reading_maps_view_to_opinions() -> None:
         Decimal("0.8"),
         True,
     )
+
+
+def test_disabled_research_is_pure_ta_even_without_reading() -> None:
+    for view in (None, _view(), _view(as_of=NOW - timedelta(days=1))):
+        reading = market_reading(
+            view, LlmConfig(enabled=False), now=NOW, max_age=timedelta(hours=8)
+        )
+        assert reading.exposure_multiplier == 1
+        assert not reading.opinions and not reading.degraded

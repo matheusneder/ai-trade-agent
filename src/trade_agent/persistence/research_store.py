@@ -2,16 +2,22 @@
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from trade_agent.persistence.db import Database
-from trade_agent.persistence.models import LlmUsageRecord, NewsItemRecord, ResearchReportRecord
-from trade_agent.research.llm import LlmUsage
+from trade_agent.persistence.models import (
+    CheckpointRecord,
+    LlmUsageRecord,
+    NewsItemRecord,
+    ResearchReportRecord,
+)
+from trade_agent.research.llm import BudgetExceededError, LlmUsage
 from trade_agent.research.models import NewsCategory, NewsItem, Severity, StoredNews, Triage
 
 
@@ -50,6 +56,141 @@ def _to_news(record: NewsItemRecord) -> StoredNews:
 class ResearchStore:
     def __init__(self, db: Database) -> None:
         self.db = db
+
+    async def reserve_budget(
+        self, day: datetime, daily: Decimal, amount: Decimal, *, now: datetime | None = None
+    ) -> tuple[str, str]:
+        """Atomic across the agent and manual research CLI; crashes retain reservations."""
+        now = now or day
+        key, token = f"research.budget.{day.date().isoformat()}", uuid4().hex
+        async with self.db.session() as session:
+            await session.execute(text("SELECT pg_advisory_xact_lock(824172001)"))
+            record = await session.get(CheckpointRecord, key)
+            reserved = dict(record.value) if record else {}
+            outstanding = await session.scalars(
+                select(CheckpointRecord).where(CheckpointRecord.key.startswith("research.budget."))
+            )
+            spent = await session.scalar(
+                select(func.coalesce(func.sum(LlmUsageRecord.cost_usd), 0)).where(
+                    LlmUsageRecord.at >= day, LlmUsageRecord.at < day + timedelta(days=1)
+                )
+            )
+            committed = Decimal(spent or 0) + sum(
+                (
+                    self._reservation(pending.key, v)[0]
+                    for pending in outstanding
+                    for v in pending.value.values()
+                    if now < self._reservation(pending.key, v)[1] + timedelta(hours=24)
+                ),
+                Decimal(0),
+            )
+            if committed + amount > daily:
+                raise BudgetExceededError("saldo diário insuficiente para reservar o ciclo")
+            reserved[token] = {"amount": str(amount), "created_at": now.isoformat()}
+            if record is None:
+                session.add(CheckpointRecord(key=key, value=reserved))
+            else:
+                record.value = reserved
+        return key, token
+
+    @staticmethod
+    def _reservation(key: str, value: Any) -> tuple[Decimal, datetime]:
+        if isinstance(value, dict):
+            return Decimal(value["amount"]), datetime.fromisoformat(value["created_at"])
+        # Old checkpoints have no creation time. End of their UTC day is a conservative
+        # upper bound; never expire an old reservation earlier than its actual 24h TTL.
+        day = datetime.fromisoformat(key.removeprefix("research.budget.")).replace(tzinfo=UTC)
+        return Decimal(value), day + timedelta(days=1)
+
+    @staticmethod
+    def _accounting_row(token: str, day: datetime, amount: Decimal, purpose: str) -> LlmUsageRecord:
+        return LlmUsageRecord(
+            at=day,
+            purpose=purpose,
+            model=f"reservation:{token}",
+            cost_usd=amount,
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
+            web_search_requests=0,
+            web_fetch_requests=0,
+        )
+
+    async def expire_budget(self, now: datetime) -> list[str]:
+        """Atomically charge estimates before releasing expired reservations, once only."""
+        expired: list[str] = []
+        async with self.db.session() as session:
+            await session.execute(text("SELECT pg_advisory_xact_lock(824172001)"))
+            records = await session.scalars(
+                select(CheckpointRecord).where(CheckpointRecord.key.startswith("research.budget."))
+            )
+            for record in records:
+                reserved = dict(record.value)
+                for token, value in record.value.items():
+                    amount, created = self._reservation(record.key, value)
+                    if now < created + timedelta(hours=24):
+                        continue
+                    day = datetime.fromisoformat(
+                        record.key.removeprefix("research.budget.")
+                    ).replace(tzinfo=UTC)
+                    session.add(self._accounting_row(token, day, amount, "reservation_expired"))
+                    session.add(
+                        CheckpointRecord(
+                            key=f"research.settlement.{token}",
+                            value={
+                                "day": day.isoformat(),
+                                "estimated_usd": str(amount),
+                                "settled_usd": str(amount),
+                                "expired_at": now.isoformat(),
+                                "adjustments": [],
+                            },
+                        )
+                    )
+                    del reserved[token]
+                    expired.append(token)
+                record.value = reserved
+        return expired
+
+    async def adjust_estimate(
+        self, token: str, settled_usd: Decimal, reason: str, now: datetime
+    ) -> None:
+        """Append a signed correction on the original UTC day; repeat totals are idempotent."""
+        if not settled_usd.is_finite() or settled_usd < 0 or not reason.strip():
+            raise ValueError("a finite nonnegative settled amount and an audit reason are required")
+        async with self.db.session() as session:
+            await session.execute(text("SELECT pg_advisory_xact_lock(824172001)"))
+            record = await session.get(CheckpointRecord, f"research.settlement.{token}")
+            if record is None:
+                raise ValueError("unknown expired reservation")
+            audit = dict(record.value)
+            delta = settled_usd - Decimal(audit["settled_usd"])
+            if delta == 0:
+                return
+            session.add(
+                self._accounting_row(
+                    token, datetime.fromisoformat(audit["day"]), delta, "reservation_adjustment"
+                )
+            )
+            audit["settled_usd"] = str(settled_usd)
+            audit["adjustments"] = [
+                *audit["adjustments"],
+                {
+                    "at": now.isoformat(),
+                    "delta_usd": str(delta),
+                    "reason": reason,
+                },
+            ]
+            record.value = audit
+
+    async def release_budget(self, reservation: tuple[str, str]) -> None:
+        async with self.db.session() as session:
+            await session.execute(text("SELECT pg_advisory_xact_lock(824172001)"))
+            record = await session.get(CheckpointRecord, reservation[0])
+            if record is not None:
+                reserved = dict(record.value)
+                reserved.pop(reservation[1], None)
+                record.value = reserved
 
     # ================================================================== news
     async def add_news(self, items: Iterable[NewsItem]) -> int:
@@ -145,11 +286,12 @@ class ResearchStore:
                 )
             )
 
-    async def spent_since(self, start: datetime) -> Decimal:
+    async def spent_since(self, start: datetime, *, until: datetime | None = None) -> Decimal:
         async with self.db.session() as session:
             total = await session.scalar(
                 select(func.coalesce(func.sum(LlmUsageRecord.cost_usd), 0)).where(
-                    LlmUsageRecord.at >= start
+                    LlmUsageRecord.at >= start,
+                    *([LlmUsageRecord.at < until] if until is not None else []),
                 )
             )
             return Decimal(total or 0)

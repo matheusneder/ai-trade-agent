@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, get_args
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -15,7 +16,7 @@ from structlog.testing import capture_logs
 
 from tests.support.candles import HOUR_MS, ohlcv, raw_klines, uptrend_with_pullback
 from tests.support.claude import FakeClaude, research_config
-from tests.support.fake_binance import FakeBinance
+from tests.support.fake_binance import FakeBinance, Fault
 from tests.support.metrics import Measured
 from tests.support.risk import CONDITIONS, POLICY
 from tests.support.tracing import Recorded
@@ -23,7 +24,7 @@ from trade_agent.decision import engine as engine_module
 from trade_agent.decision.engine import UNIVERSE_TTL, DecisionEngine, UniverseCache
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.orders import EntryMode, EntryOrder
-from trade_agent.execution.positions import PositionState
+from trade_agent.execution.positions import Position, PositionState
 from trade_agent.execution.service import PositionService
 from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.market.universe import Universe, UniverseConfig, build_universe
@@ -32,10 +33,12 @@ from trade_agent.persistence.research_store import ResearchStore
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.research.collector import NewsCollector
 from trade_agent.research.config import WebResearchConfig
+from trade_agent.research.reading import MarketReading
 from trade_agent.research.service import ResearchService
 from trade_agent.research.tagging import AssetTagger
 from trade_agent.risk.guard import RiskGuard
 from trade_agent.risk.state import GLOBAL, StateStore
+from trade_agent.strategy.portfolio import MarketOpinion
 from trade_agent.strategy.profiles import StrategyConfig, Timeframe
 
 D = Decimal
@@ -159,6 +162,62 @@ async def test_profiles_of_the_same_timeframe_never_buy_the_same_asset(
     assert [p.symbol for p in await store.active_positions()] == ["SOLUSDT"]
 
 
+@pytest.mark.parametrize("action", ["pause", "halt", "flatten"])
+async def test_risk_transition_during_research_blocks_entries(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    _setup_market(fake)
+    engine, guard = _engine(api, service, store)
+    reading = engine._reading
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def researching(*args: Any) -> Any:
+        started.set()
+        await release.wait()
+        return await reading(*args)
+
+    monkeypatch.setattr(engine, "_reading", researching)
+    task = asyncio.ensure_future(engine.run_profile("conservador"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await getattr(guard, action)(GLOBAL)
+    release.set()
+    report = await asyncio.wait_for(task, timeout=5)
+    assert report.opened == ()
+    assert await store.active_positions() == []
+
+
+async def test_time_exit_finishes_before_research(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_market(fake)
+    clock = Clock()
+    position = await service.open_position(
+        profile="con",
+        entry=EntryOrder("SOLUSDT", D(1), D(150), EntryMode.LIMIT_FOK),
+        policy=POLICY,
+    )
+    await store.update_position(position.id, opened_at=clock.now - timedelta(days=100))
+    engine, _ = _engine(api, service, store, clock=clock)
+    reading = engine._reading
+
+    async def researching(*args: Any) -> Any:
+        assert (await store.get_position(position.id)).state is PositionState.CLOSED
+        return await reading(*args)
+
+    monkeypatch.setattr(engine, "_reading", researching)
+    report = await engine.run_profile("conservador")
+    assert ("SOLUSDT", "tempo máximo de permanência") in report.exits
+
+
 def _twin_profiles() -> StrategyConfig:
     """Two identical enabled profiles on 4h, like swing_trend and momentum_alpha."""
     data = _strategy_data()
@@ -215,6 +274,10 @@ async def test_a_profile_that_misses_the_shared_research_researches_alone(
         )  # fmt: skip
         alone = await engine.run_profile("conservador")
         late = await engine.run_profile("moderado")
+        assert engine._shared is not None
+        key = next(iter(engine._shared._rounds))
+        _, quiet = await engine._shared.read(key, frozenset(), "empty", [])
+        assert quiet == "ok"
     assert (alone.research, late.research) == ("ok", "ok")
     assert len(claude.requests) == 2
 
@@ -462,6 +525,96 @@ async def test_empty_universe_is_reported(
     assert report.evaluated == 0 and report.opened == ()
     (warning,) = [e for e in logs if e["event"] == "decision.empty_universe"]
     assert warning["excluded"] == {"volume insuficiente": 3}
+
+
+async def test_disabled_llm_never_requests_research(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    research = AsyncMock(spec=ResearchService)
+    strategy = _strategy(llm={"enabled": False})
+    engine, _ = _engine(api, service, store, strategy=strategy, research=research)
+    result = await engine.run_profile("conservador")
+    assert result.research == "analista desabilitado" and result.opened == ("SOLUSDT",)
+    research.run_cycle.assert_not_awaited()
+    research.latest_view.assert_not_awaited()
+
+
+async def test_halt_between_planned_orders_blocks_second_send(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_market(fake)
+    fake.candles[("ETHUSDT", "4h")] = fake.candles[("SOLUSDT", "4h")]
+    engine, guard = _engine(api, service, store)
+    original = service.open_position
+    halt: asyncio.Future[None] | None = None
+
+    async def send(**kwargs: Any) -> Position:
+        nonlocal halt
+        position = await original(**kwargs)
+        halt = asyncio.ensure_future(guard.halt(GLOBAL))
+        await asyncio.sleep(0)  # queue transition while the first send owns authorization
+        return position
+
+    monkeypatch.setattr(service, "open_position", send)
+    result = await engine.run_profile("conservador")
+    assert halt is not None
+    await halt
+    assert len(result.opened) == 1
+    assert len(await store.active_positions()) == 1
+    assert any("halted" in reason for _, reason in result.rejected)
+
+
+async def test_rejected_exchange_entry_is_not_reported_as_opened(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+) -> None:
+    _setup_market(fake)
+    fake.inject(Fault("POST", "/api/v3/orderList/opoco", "reject", code=-2010))
+    engine, _ = _engine(api, service, store)
+    result = await engine.run_profile("conservador")
+    assert result.opened == ()
+    assert ("SOLUSDT", "entrada rejeitada pela corretora") in result.rejected
+
+
+@pytest.mark.parametrize(("halted", "expired"), [(True, False), (False, False), (False, True)])
+async def test_veto_obeys_halt_and_dry_run_does_not_duplicate_exits(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+    halted: bool,
+    expired: bool,
+) -> None:
+    _setup_market(fake)
+    engine, guard = _engine(api, service, store)
+    await engine.run_profile("conservador")
+    [position] = await store.active_positions()
+    if expired:
+        await store.update_position(position.id, opened_at=Clock().now - timedelta(days=30))
+    if halted:
+        await guard.halt(GLOBAL)
+    engine._dry_run = True
+    monkeypatch.setattr(
+        engine,
+        "_reading",
+        AsyncMock(
+            return_value=(
+                MarketReading(D(1), {"SOL": MarketOpinion(D(-1), D(1), True)}),
+                "ok",
+            )
+        ),
+    )
+    result = await engine.run_profile("conservador")
+    assert len(result.exits) == (0 if halted else 1)
+    assert len(await store.active_positions()) == 1  # dry-run never sells
 
 
 async def test_universe_cache_ttl(api: BinanceSpotApi, fake: FakeBinance) -> None:

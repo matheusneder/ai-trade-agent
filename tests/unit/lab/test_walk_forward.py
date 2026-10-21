@@ -273,6 +273,8 @@ def test_main_with_fixed_profile_params(lab: FakeLab) -> None:
     )  # fmt: skip
     assert code == 0
     assert lab.calls[0][0] == "download-data"
+    assert "5m" in lab.calls[0]
+    assert all("--timeframe-detail" in call for call in lab.calls[1:])
     assert "20241001-20250701" in lab.calls[0]
     assert lab.calls[0].count("BTC/USDT") == 1  # reference pair without duplication
     assert [c[0] for c in lab.calls[1:]] == ["backtesting", "backtesting"]
@@ -333,6 +335,25 @@ def test_main_with_custom_pairs_and_candle_detail(lab: FakeLab) -> None:
     reports = lab.reports("walk-forward-conservador-otimizado-detalhe5m-pares-*.md")
     text = reports[0].read_text(encoding="utf-8")
     assert "Saídas simuladas dentro do candle com candles de 5m. Pares: SOL/USDT, ETH/USDT." in text
+
+
+def test_no_detail_requires_explicit_exploratory_mode(lab: FakeLab) -> None:
+    wf.main(
+        [
+            "--profile",
+            "conservador",
+            "--start",
+            "2025-01-01",
+            "--end",
+            "2025-04-01",
+            "--profiles-file",
+            str(PROFILES),
+            "--exploratory-no-detail",
+        ]
+    )
+    assert "--timeframe-detail" not in lab.calls[0]
+    report = lab.reports("*.md")[0].read_text(encoding="utf-8")
+    assert "EXPLORATÓRIO" in report
 
 
 def test_optimize_writes_merged_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

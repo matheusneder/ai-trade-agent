@@ -3,6 +3,7 @@
 The analysis uses ``float64`` (required by TA-Lib); order prices stay in ``Decimal``.
 """
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -55,3 +56,35 @@ async def fetch_candles(
         raise ValueError(f"intervalo não suportado: {interval}")
     raw = await api.klines(symbol, interval, limit=min(limit + 1, 1000))
     return closed_only(to_frame(raw), now_ms).tail(limit)
+
+
+class ClosedCandleCache:
+    """Share a closed-candle snapshot between profiles, with bounded memory and no Redis.
+
+    Requests are serialized to avoid duplicate downloads. A returned frame is a copy;
+    indicator calculations cannot mutate another profile's snapshot. Failed/empty reads
+    are never cached, and advancing a candle invalidates that symbol's previous snapshot.
+    """
+
+    def __init__(self, api: BinanceSpotApi, *, max_entries: int = 256) -> None:
+        self._api = api
+        self._max_entries = max_entries
+        self._lock = asyncio.Lock()
+        self._frames: dict[tuple[str, str, int], tuple[int, pd.DataFrame]] = {}
+
+    async def fetch(self, symbol: str, interval: str, *, limit: int, now_ms: int) -> pd.DataFrame:
+        period = now_ms // INTERVAL_MS[interval]
+        key = (symbol, interval, limit)
+        async with self._lock:
+            cached = self._frames.get(key)
+            if cached is not None and cached[0] == period:
+                return cached[1].copy()
+            frame = await fetch_candles(self._api, symbol, interval, limit=limit, now_ms=now_ms)
+            # Do not pin a stale response for an entire candle if exchange data is delayed.
+            expected_open = (period - 1) * INTERVAL_MS[interval]
+            if not frame.empty and int(frame["open_time"].iloc[-1]) == expected_open:
+                self._frames.pop(key, None)
+                if len(self._frames) >= self._max_entries:
+                    self._frames.pop(next(iter(self._frames)))
+                self._frames[key] = (period, frame)
+            return frame.copy()

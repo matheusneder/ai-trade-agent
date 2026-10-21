@@ -6,7 +6,9 @@ once per occurrence of each trigger.
 ``flatten`` delegates closing the positions to whoever executes orders (the decision engine).
 """
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -164,6 +166,9 @@ class PreTradeContext:
     active_symbols: frozenset[str] = frozenset()
     vetoed_assets: frozenset[str] = frozenset()
     delisted_symbols: frozenset[str] = frozenset()
+    account_capital: Decimal = Decimal(0)
+    open_risk: Decimal = Decimal(0)
+    exposure: Decimal = Decimal(0)
 
 
 def pre_trade_violations(
@@ -193,13 +198,27 @@ def pre_trade_violations(
     policy = idea.policy
     stop_pct = policy.stop_pct or Decimal(policy.stop_trailing_bips or 0) / PCT
     fee = Decimal(str(config.round_trip_fee_pct))
-    reward_risk = (policy.take_profit_pct - fee) / (stop_pct + fee)
+    slippage = Decimal(str(config.slippage_pct))
+    reward = policy.take_profit_pct
+    if config.reward_model == "trailing_floor" and policy.take_profit_trailing_bips:
+        trailing = Decimal(policy.take_profit_trailing_bips) / Decimal(10_000)
+        reward = ((1 + reward / PCT) * (1 - trailing) - 1) * PCT
+    reward_risk = (reward - fee - slippage) / (stop_pct + fee + slippage)
     if reward_risk < Decimal(str(config.min_reward_risk)):
         problems.append(f"R:R {reward_risk:.2f} abaixo de {config.min_reward_risk}")
     tolerance = 1 + Decimal(str(config.risk_tolerance_pct)) / PCT
     max_risk = capital * profile.allocation.risk_per_trade_pct / PCT * tolerance
     if idea.risk > max_risk:
         problems.append(f"risco {idea.risk:.2f} acima do limite {max_risk:.2f}")
+    for label, limit, value in (
+        ("risco agregado", config.max_portfolio_risk_pct, context.open_risk + idea.risk),
+        ("exposição agregada", config.max_portfolio_exposure_pct, context.exposure + idea.notional),
+    ):
+        if limit is not None and (
+            context.account_capital <= 0
+            or value > context.account_capital * Decimal(str(limit)) / PCT
+        ):
+            problems.append(f"{label} acima do limite")
     for bips, order_type in (
         (policy.take_profit_trailing_bips, OrderType.TAKE_PROFIT),
         (policy.stop_trailing_bips, OrderType.STOP_LOSS),
@@ -226,6 +245,7 @@ class RiskGuard:
         self._notify = notify
         self._clock = clock
         self._flatten: Flattener | None = None
+        self._authorization = asyncio.Lock()
 
     def set_flattener(self, flatten: Flattener) -> None:
         self._flatten = flatten
@@ -237,10 +257,28 @@ class RiskGuard:
         """The profile's effective state (the most restrictive of global and the profile's)."""
         return combined(await self.state(GLOBAL), await self.state(profile))
 
-    async def _set(self, scope: str, new: ScopeState, *, source: str) -> None:
+    @asynccontextmanager
+    async def entry_authorization(self, profile: str) -> AsyncIterator[OpState]:
+        """Serialize an entry with state transitions, including an already in-flight send.
+
+        A pause/halt acknowledges only after an authorized send finishes. Once its state
+        is persisted, subsequent entries re-read it under the same lock and cannot send.
+        Never hold this lock while researching, planning or notifying the operator.
+        """
+        async with self._authorization:
+            yield await self.effective(profile)
+
+    async def _set(self, scope: str, new: ScopeState, *, source: str) -> bool:
+        async with self._authorization:
+            if source == "gatilho":
+                # A manual halt may have committed while this trigger waited for a send.
+                escalated = escalate(await self.state(scope), new)
+                if escalated is None:
+                    return False
+                new = escalated
+            await self._states.put(scope, new)
         tracing.annotate(scope=scope, state=new.state, source=source, reason=new.reason)
         metrics.record_state_change(scope=scope, state=new.state.value, source=source)
-        await self._states.put(scope, new)
         severity = Severity.INFO if new.state is OpState.RUNNING else Severity.CRITICAL
         payload = {"scope": scope, "source": source, **new.to_json()}
         await self._store.record_event("risk.state_changed", severity, payload)
@@ -249,6 +287,7 @@ class RiskGuard:
             severity, f"[{scope}] {new.state.value.upper()}{until} — {new.reason or source}"
         )
         log.warning("risk.state_changed", **payload)
+        return True
 
     async def fired(self, scope: str) -> list[Fired]:
         """Triggers of the scope that already acted and whose condition still holds."""
@@ -294,9 +333,10 @@ class RiskGuard:
                 if new is None:
                     log.debug("risk.hit_unchanged", scope=hit.scope, state=current.state.value)
                     continue
+                if not await self._set(hit.scope, new, source="gatilho"):
+                    continue
                 applied.append(hit)
                 fired[hit.key] = Fired(hit.value, hit.reason, now)
-                await self._set(hit.scope, new, source="gatilho")
                 if new.state is OpState.FLATTENING:
                     await self._run_flatten(hit.scope, hit.reason)
         finally:

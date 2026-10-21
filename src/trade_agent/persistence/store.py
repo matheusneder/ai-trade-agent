@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import Enum, StrEnum
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, case, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from trade_agent.exchange.models import Order, Trade
@@ -70,6 +70,13 @@ class Intent:
 
 class PositionNotFoundError(LookupError):
     pass
+
+
+@dataclass(frozen=True)
+class RiskHistory:
+    daily: dict[str, Decimal]
+    streaks: dict[str, int]
+    consecutive_losses: int
 
 
 def to_jsonable(params: Mapping[str, ParamValue]) -> dict[str, Any]:
@@ -215,7 +222,9 @@ class Store:
             )
             return [_to_position(r) for r in records]
 
-    async def closed_positions(self, *, limit: int = 1000) -> list[Position]:
+    async def closed_positions(
+        self, *, limit: int | None = 1000, since: datetime | None = None
+    ) -> list[Position]:
         """Closed positions with a settled result, from the most recent to the oldest."""
         async with self.db.session() as session:
             records = await session.scalars(
@@ -223,11 +232,53 @@ class Store:
                 .where(
                     PositionRecord.state == PositionState.CLOSED.value,
                     PositionRecord.realized_pnl.is_not(None),
+                    *([PositionRecord.closed_at >= since] if since is not None else []),
                 )
                 .order_by(PositionRecord.closed_at.desc(), PositionRecord.id.desc())
                 .limit(limit)
             )
             return [_to_position(r) for r in records]
+
+    async def risk_history(self, since: datetime) -> RiskHistory:
+        """Aggregate the entire settled history; no UI pagination limit affects risk."""
+        p = PositionRecord
+        order: list[ColumnElement[Any]] = [p.closed_at.desc(), p.id.desc()]
+        settled = (p.state == PositionState.CLOSED.value, p.realized_pnl.is_not(None))
+        ranked = (
+            select(
+                p.profile,
+                p.realized_pnl,
+                func.sum(case((p.realized_pnl >= 0, 1), else_=0))
+                .over(order_by=order, rows=(None, 0))
+                .label("global_breaks"),
+                func.sum(case((p.realized_pnl >= 0, 1), else_=0))
+                .over(partition_by=p.profile, order_by=order, rows=(None, 0))
+                .label("profile_breaks"),
+            )
+            .where(*settled)
+            .subquery()
+        )
+        async with self.db.session() as session:
+            daily_rows = await session.execute(
+                select(p.profile, func.sum(p.realized_pnl))
+                .where(*settled, p.closed_at >= since)
+                .group_by(p.profile)
+            )
+            streak_rows = await session.execute(
+                select(ranked.c.profile, func.count())
+                .where(ranked.c.profile_breaks == 0, ranked.c.realized_pnl < 0)
+                .group_by(ranked.c.profile)
+            )
+            total = await session.scalar(
+                select(func.count())
+                .select_from(ranked)
+                .where(ranked.c.global_breaks == 0, ranked.c.realized_pnl < 0)
+            )
+            return RiskHistory(
+                {code: Decimal(value or 0) for code, value in daily_rows},
+                {code: int(value) for code, value in streak_rows},
+                int(total or 0),
+            )
 
     async def realized_pnl_by_profile(self) -> dict[str, Decimal]:
         """Realized PnL of the closed positions, per profile code."""

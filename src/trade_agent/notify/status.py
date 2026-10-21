@@ -68,7 +68,7 @@ async def pnl_text(store: Store, strategy: StrategyConfig, args: list[str], now:
     if period not in PERIODS:
         return f"Invalid period. Use: {', '.join(PERIODS)}."
     since = now - PERIODS[period]
-    closed = [p for p in await store.closed_positions() if p.closed_at and p.closed_at >= since]
+    closed = await store.closed_positions(limit=None, since=since)
     names = {p.code: name for name, p in strategy.profiles.items()}
     total = sum((p.realized_pnl or Decimal(0) for p in closed), Decimal(0))
     wins = sum(1 for p in closed if (p.realized_pnl or 0) > 0)

@@ -37,6 +37,8 @@ def market_reading(
 ) -> MarketReading:
     """Reading that applies to a profile. Vetoes and the exposure cut hold even with
     ``llm.weight = 0``: the LLM's authority is asymmetric and only reduces risk."""
+    if not llm.enabled:
+        return MarketReading(Decimal(1))
     if view is None:
         return MarketReading(FAILURE_EXPOSURE[llm.on_failure], degraded=True, reason="sem leitura")
     if now - view.as_of > max_age:

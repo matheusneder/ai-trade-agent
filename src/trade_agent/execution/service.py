@@ -21,6 +21,7 @@ from typing import Any
 import structlog
 
 from trade_agent import tracing
+from trade_agent.economics import value_external_fees
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.errors import (
     BinanceAPIError,
@@ -313,6 +314,26 @@ class PositionService:
         fills = await self.store.fills_for(position.id)
         entry = summarize_fills(f for f in fills if f.is_buyer)
         exit_ = summarize_fills(f for f in fills if not f.is_buyer)
+        external_fees = await value_external_fees(
+            self.api, self.store, fills, base=position.base_asset, quote=position.quote_asset
+        )
+        await self.store.set_checkpoint(
+            f"position.fee_valuation.{position.id}",
+            {
+                "external_cost": str(external_fees.cost),
+                "missing_fill_ids": list(external_fees.missing_fill_ids),
+            },
+        )
+        if external_fees.missing_fill_ids:
+            await self._event(
+                "position.fee_unpriced",
+                Severity.HIGH,
+                position,
+                {
+                    "missing_fill_ids": list(external_fees.missing_fill_ids),
+                    "message": "PnL provisório: comissão sem cotação histórica",
+                },
+            )
         position = await self.store.update_position(
             position.id,
             **dict(changes or {}),
@@ -321,7 +342,8 @@ class PositionService:
             exit_price=exit_.avg_price,
             realized_pnl=realized_pnl(
                 entry, exit_, base_asset=position.base_asset, quote_asset=position.quote_asset
-            ),
+            )
+            - external_fees.cost,
             fees=merge_fees(entry, exit_),
             exit_reason=reason.value,
         )

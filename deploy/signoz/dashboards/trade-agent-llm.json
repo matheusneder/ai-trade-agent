@@ -12,7 +12,7 @@
   "spec": {
     "display": {
       "name": "Trade Agent · LLM",
-      "description": "Custo, tokens e latência do analista de mercado. O orçamento diário fica em config/research.yaml (budget.daily_usd)."
+      "description": "Custo, tokens e latência do analista de mercado. O orçamento diário fica em config/research.yaml (budget.daily_usd). Telemetria de uso observado nas respostas do LLM. Não inclui estimativas de reservas expiradas nem ajustes contábeis. O painel de custo do Grafana usa llm_usage e inclui esses lançamentos no dia UTC de origem; os totais podem divergir."
     },
     "variables": [],
     "panels": {
@@ -21,7 +21,7 @@
         "spec": {
           "display": {
             "name": "Custo no período (US$)",
-            "description": ""
+            "description": "Telemetria de uso observado nas respostas do LLM. Não inclui estimativas de reservas expiradas nem ajustes contábeis. O painel de custo do Grafana usa llm_usage e inclui esses lançamentos no dia UTC de origem; os totais podem divergir."
           },
           "plugin": {
             "kind": "signoz/NumberPanel",
@@ -245,7 +245,7 @@
         "spec": {
           "display": {
             "name": "Custo por modelo e finalidade (US$)",
-            "description": ""
+            "description": "Telemetria de uso observado nas respostas do LLM. Não inclui estimativas de reservas expiradas nem ajustes contábeis. O painel de custo do Grafana usa llm_usage e inclui esses lançamentos no dia UTC de origem; os totais podem divergir."
           },
           "plugin": {
             "kind": "signoz/BarChartPanel",

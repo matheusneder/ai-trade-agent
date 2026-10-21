@@ -18,6 +18,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import structlog
 
@@ -25,7 +26,7 @@ from trade_agent import metrics, tracing
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService
-from trade_agent.market.candles import INTERVAL_MS, fetch_candles
+from trade_agent.market.candles import INTERVAL_MS, ClosedCandleCache
 from trade_agent.market.universe import (
     Tier,
     Universe,
@@ -235,6 +236,7 @@ class DecisionEngine:
         self._clock = clock
         self._names = {p.code: name for name, p in strategy.profiles.items()}
         self._features = FeatureParams()
+        self._candles = ClosedCandleCache(api)
         self._entry_lock = asyncio.Lock()
         self._shared = SharedResearch(research, wait=research_wait) if research else None
 
@@ -244,8 +246,8 @@ class DecisionEngine:
     ) -> dict[str, Signal]:
         limit = self._features.warmup + 50
         frames = {
-            BENCHMARK: await fetch_candles(
-                self._api, BENCHMARK, profile.timeframe, limit=limit, now_ms=now_ms
+            BENCHMARK: await self._candles.fetch(
+                BENCHMARK, profile.timeframe, limit=limit, now_ms=now_ms
             )
         }
         benchmark = frames[BENCHMARK]["close"]
@@ -254,8 +256,8 @@ class DecisionEngine:
         for member in members:
             frame = frames.get(member.symbol)
             if frame is None:
-                frame = await fetch_candles(
-                    self._api, member.symbol, profile.timeframe, limit=limit, now_ms=now_ms
+                frame = await self._candles.fetch(
+                    member.symbol, profile.timeframe, limit=limit, now_ms=now_ms
                 )
             if len(frame) < self._features.warmup:
                 continue  # not enough history for the indicators
@@ -285,6 +287,8 @@ class DecisionEngine:
         own: list[Position],
     ) -> tuple[MarketReading, str]:
         now = self._clock()
+        if not profile.llm.enabled:
+            return MarketReading(Decimal(1)), "analista desabilitado"
         if self._shared is None:
             return market_reading(
                 None, profile.llm, now=now, max_age=self._view_max_age
@@ -314,7 +318,7 @@ class DecisionEngine:
         peers = frozenset(
             n
             for n, p in self._strategy.enabled_profiles().items()
-            if p.timeframe == profile.timeframe
+            if p.timeframe == profile.timeframe and p.llm.enabled
         )
         view, status = await self._shared.read((profile.timeframe, period), peers, name, contexts)
         return market_reading(view, profile.llm, now=now, max_age=self._view_max_age), status
@@ -341,6 +345,9 @@ class DecisionEngine:
 
         active = await self._store.active_positions()
         own = [p for p in active if p.profile == profile.code]
+        # Time/score exits and break-even must not wait for the remote analyst.
+        state = await self._guard.effective(name)
+        exits = await self._exits(profile, own, signals, MarketReading(Decimal(1)), state)
         reading, research_status = await self._reading(name, profile, universe, signals, own)
         log.debug(
             "decision.reading",
@@ -352,7 +359,18 @@ class DecisionEngine:
             vetoed=sorted(a for a, o in reading.opinions.items() if o.veto),
         )
 
-        exits = await self._exits(profile, own, signals, reading, state)
+        # Re-read positions: deterministic exits or native orders may have filled meanwhile.
+        for position in await self._store.active_positions():
+            if position.profile != profile.code or position.state not in _EXIT_STATES:
+                continue
+            opinion = reading.opinions.get(position.base_asset)
+            if opinion is not None and opinion.veto:
+                state = await self._guard.effective(name)
+                if state.allows_rule_exits and not any(s == position.symbol for s, _ in exits):
+                    exits.append((position.symbol, "veto do analista"))
+                    if not self._dry_run:
+                        await self._positions.close_position(position, ExitReason.DECISION)
+        state = await self._guard.effective(name)
         opened: list[str] = []
         rejected: list[tuple[str, str]] = []
         if state.allows_entries:
@@ -369,6 +387,7 @@ class DecisionEngine:
                     reading=reading,
                     state=state,
                 )
+        state = await self._guard.effective(name)
         report = CycleReport(
             profile=name,
             at=self._clock(),
@@ -483,6 +502,12 @@ class DecisionEngine:
             for p in active
         ]
         capital = self._strategy.profile_capital(name)
+        risk_config = self._guard.conditions.pre_trade
+        cost_pct = (
+            Decimal(str(risk_config.round_trip_fee_pct)) + Decimal(str(risk_config.slippage_pct))
+            if risk_config.risk_model == "cost_adjusted"
+            else Decimal(0)
+        )
         plan = plan_entries(
             name=name,
             profile=profile,
@@ -491,6 +516,7 @@ class DecisionEngine:
             candidates=candidates,
             exposure_multiplier=reading.exposure_multiplier,
             one_position_per_asset=self._strategy.account.one_position_per_asset,
+            execution_cost_pct=cost_pct,
         )
         log.debug(
             "decision.plan",
@@ -505,36 +531,60 @@ class DecisionEngine:
             now=self._clock(),
             active_symbols=frozenset(p.symbol for p in active),
             vetoed_assets=frozenset(a for a, o in reading.opinions.items() if o.veto),
+            account_capital=self._strategy.account.managed_capital,
+            exposure=sum((h.cost for h in holdings), Decimal(0)),
+            open_risk=sum(
+                (
+                    (p.entry_quote or p.planned_qty * p.planned_price)
+                    * (
+                        (p.policy.stop_pct or Decimal(p.policy.stop_trailing_bips or 0) / 100)
+                        + cost_pct
+                    )
+                    / 100
+                    for p in active
+                ),
+                Decimal(0),
+            ),
         )
         opened: list[str] = []
         rejected = [r for r in plan.rejections if r[1] != "sem setup"]
         for idea in plan.ideas:
-            problems = pre_trade_violations(
-                idea,
-                profile=profile,
-                capital=capital,
-                rules=by_symbol[idea.symbol].rules,
-                context=context,
-                conditions=self._guard.conditions,
-            )
-            if problems:
-                log.debug("decision.pre_trade_rejected", symbol=idea.symbol, problems=problems)
-                rejected.append((idea.symbol, "; ".join(problems)))
-                continue
-            if self._dry_run:
-                await self._store.record_event(
-                    "decision.entry_simulated",
-                    Severity.INFO,
-                    {"profile": name, "symbol": idea.symbol, "setup": idea.setup,
-                     "score": str(idea.score), "notional": str(idea.notional),
-                     "risk": str(idea.risk)},
-                )  # fmt: skip
-            else:
-                await self._positions.open_position(
-                    profile=profile.code, entry=idea.entry, policy=idea.policy
+            async with self._guard.entry_authorization(name) as current:
+                context = replace(context, state=current, now=self._clock())
+                problems = pre_trade_violations(
+                    idea,
+                    profile=profile,
+                    capital=capital,
+                    rules=by_symbol[idea.symbol].rules,
+                    context=context,
+                    conditions=self._guard.conditions,
                 )
-            opened.append(idea.symbol)
-            context = replace(context, active_symbols=context.active_symbols | {idea.symbol})
+                if problems:
+                    log.debug("decision.pre_trade_rejected", symbol=idea.symbol, problems=problems)
+                    rejected.append((idea.symbol, "; ".join(problems)))
+                    continue
+                if self._dry_run:
+                    await self._store.record_event(
+                        "decision.entry_simulated",
+                        Severity.INFO,
+                        {"profile": name, "symbol": idea.symbol, "setup": idea.setup,
+                         "score": str(idea.score), "notional": str(idea.notional),
+                         "risk": str(idea.risk)},
+                    )  # fmt: skip
+                else:
+                    position = await self._positions.open_position(
+                        profile=profile.code, entry=idea.entry, policy=idea.policy
+                    )
+                    if position.state is PositionState.REJECTED:
+                        rejected.append((idea.symbol, "entrada rejeitada pela corretora"))
+                        continue
+                opened.append(idea.symbol)
+                context = replace(
+                    context,
+                    active_symbols=context.active_symbols | {idea.symbol},
+                    open_risk=context.open_risk + idea.risk,
+                    exposure=context.exposure + idea.notional,
+                )
         return opened, rejected
 
     # ------------------------------------------------------------------ flatten

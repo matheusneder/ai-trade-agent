@@ -220,6 +220,26 @@ def test_pre_trade_accepts_a_sound_idea() -> None:
     assert _violations(_idea()) == []
 
 
+def test_trailing_floor_and_portfolio_limits_are_opt_in() -> None:
+    idea = _idea(take_profit_pct=D("10.9"), stop_pct=D("6.5"), take_profit_trailing_bips=150)
+    assert _violations(idea) == []
+    conservative = StopConditions.model_validate(
+        {
+            "pre_trade": {
+                "reward_model": "trailing_floor",
+                "slippage_pct": 0.1,
+                "max_portfolio_risk_pct": 1,
+                "max_portfolio_exposure_pct": 50,
+            }
+        }
+    )
+    found = _violations(idea, conservative, account_capital=D(100), open_risk=D(1))
+    assert any("R:R" in value for value in found)
+    assert "risco agregado acima do limite" in found
+    assert "exposição agregada acima do limite" in found
+    assert "risco agregado acima do limite" in _violations(idea, conservative)
+
+
 def test_pre_trade_rejections() -> None:
     windowed = StopConditions.model_validate({"global": {"trading_window_utc": ["00:00-01:00"]}})
     assert _violations(_idea(), state=OpState.PAUSED) == ["estado operacional paused"]

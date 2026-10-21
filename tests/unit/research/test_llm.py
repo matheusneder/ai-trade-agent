@@ -1,7 +1,11 @@
+import asyncio
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
+from unittest.mock import AsyncMock
 
+import anthropic
+import httpx2
 import pytest
 from anthropic.types import ServerToolUsage, Usage
 from structlog.testing import capture_logs
@@ -10,11 +14,13 @@ from tests.support.claude import NOW, FakeClaude, research_config
 from trade_agent.research.config import WebResearchConfig
 from trade_agent.research.llm import (
     BudgetExceededError,
+    ClaudeClient,
     LlmError,
     LlmOutputError,
     LlmUsage,
     MemoryLedger,
     TrackingLedger,
+    retry_delay,
     usage_cost,
 )
 from trade_agent.research.models import TriageDraft
@@ -27,10 +33,310 @@ TRIAGE = {
 }
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2.5", 2.5),
+        ("-1", 0),
+        ("NaN", 1),
+        ("garbage", 1),
+        ("Sat, 26 Sep 2026 12:00:07 GMT", 7),
+        ("Sat, 26 Sep 2026 12:00:07", 1),
+    ],
+)
+def test_retry_after_header(value: str, expected: float) -> None:
+    response = httpx2.Response(
+        429, headers={"retry-after": value}, request=httpx2.Request("POST", "https://example.test")
+    )
+    error = anthropic.RateLimitError("limited", response=response, body=None)
+    assert retry_delay(error, NOW) == expected
+
+
+@pytest.mark.parametrize(
+    "failure", [None, httpx2.ConnectError, httpx2.ConnectTimeout, httpx2.PoolTimeout]
+)
+async def test_selective_retry_success(
+    failure: type[httpx2.TransportError] | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeClaude()
+    fake.reply_json(TRIAGE)
+    handler = fake._handle
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    def transient(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        attempts += 1
+        if attempts == 1:
+            if failure is not None:
+                raise failure("pre-send", request=request)
+            return httpx2.Response(
+                429,
+                headers={"retry-after": "3"},
+                json={"error": {"type": "rate_limit_error", "message": "limited"}},
+            )
+        return handler(request)
+
+    monkeypatch.setattr(fake, "_handle", transient)
+    monkeypatch.setattr("trade_agent.research.llm.asyncio.sleep", sleep)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    await client.structured(
+        purpose="triage",
+        model="claude-sonnet-5",
+        system="S",
+        content="C",
+        output=TriageDraft,
+        max_tokens=2000,
+    )
+    assert attempts == 2 and not client.uncertain_charge
+    assert sleeps == [1 if failure else 3]
+
+
+async def test_retry_wait_is_cancelled_by_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+
+    def limited(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        return httpx2.Response(
+            429, headers={"retry-after": "3600"}, json={"error": {"message": "limited"}}
+        )
+
+    monkeypatch.setattr(fake, "_handle", limited)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.05):
+            await client.structured(
+                purpose="triage",
+                model="claude-sonnet-5",
+                system="S",
+                content="C",
+                output=TriageDraft,
+                max_tokens=2000,
+            )
+    assert not client.uncertain_charge
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("failure", [429, 500, 529, "read"])
+@pytest.mark.parametrize("recover", [False, True])
+async def test_sdk_retries_only_in_default_mode(
+    bounded: bool, failure: int | str, recover: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeClaude()
+    fake.reply_json(TRIAGE)
+    handler = fake._handle
+    attempts = 0
+
+    def transient(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        attempts += 1
+        if not recover or attempts <= 2:
+            if failure == "read":
+                raise httpx2.ReadTimeout("response lost", request=request)
+            return httpx2.Response(int(failure), json={"error": {"message": "transient"}})
+        return handler(request)
+
+    monkeypatch.setattr(fake, "_handle", transient)
+    # Same retry count as a production AsyncAnthropic client; real SDK/transport logic.
+    sdk = fake.client().with_options(max_retries=2)
+    client = ClaudeClient(
+        sdk, CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1) if bounded else None
+    )
+    assert client._client.max_retries == (0 if bounded else 2)
+    kwargs: dict[str, Any] = dict(
+        purpose="triage",
+        model="claude-sonnet-5",
+        system="S",
+        content="C",
+        output=TriageDraft,
+        max_tokens=2000,
+    )
+    if recover and not bounded:
+        await client.structured(**kwargs)
+        assert not client.uncertain_charge
+    else:
+        with pytest.raises(LlmError):
+            await client.structured(**kwargs)
+    expected_attempts = (2 if failure == 429 else 1) if bounded else 3
+    assert attempts == expected_attempts
+
+
+async def test_cycle_allowance_reduces_output_and_omits_unaffordable_calls() -> None:
+    fake = FakeClaude()
+    fake.reply_json(TRIAGE)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(".1")
+    )
+    await client.structured(
+        purpose="triage",
+        model="claude-sonnet-5",
+        system="S",
+        content="C",
+        output=TriageDraft,
+        max_tokens=10000,
+    )
+    assert 1024 <= fake.requests[0]["max_tokens"] < 10000
+    assert client.budget_notes and "reduzida" in client.budget_notes[0]
+    poor = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(".001")
+    )
+    with pytest.raises(BudgetExceededError, match="saldo insuficiente"):
+        await poor.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=10000,
+        )
+    assert len(fake.requests) == 1
+
+
+async def test_bounded_calls_fail_closed_on_counting_and_connection_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ClaudeClient(
+        FakeClaude().client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    request = httpx2.Request("POST", "https://api.example/messages")
+    monkeypatch.setattr(
+        client._client.messages,
+        "count_tokens",
+        AsyncMock(side_effect=anthropic.APIConnectionError(request=request)),
+    )
+    with pytest.raises(LlmError, match="contagem"):
+        await client.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert bool(client.uncertain_charge) is False
+    with pytest.raises(BudgetExceededError, match="ferramentas"):
+        await client._fit_budget("web", {"tools": [{"type": "web_search"}]})
+    monkeypatch.setattr(
+        client._client.messages,
+        "count_tokens",
+        AsyncMock(return_value=anthropic.types.MessageTokensCount(input_tokens=1000)),
+    )
+    monkeypatch.setattr(
+        client._client.messages,
+        "create",
+        AsyncMock(side_effect=anthropic.APIConnectionError(request=request)),
+    )
+    with pytest.raises(LlmError, match="APIConnectionError"):
+        await client.structured(
+            purpose="triage",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert client.uncertain_charge
+    with pytest.raises(BudgetExceededError, match="cobrança anterior"):
+        await client._fit_budget("triage", {})
+
+
 def _usage(cost: str, *, hours_ago: float = 0) -> LlmUsage:
     return LlmUsage(
         "x", "claude-opus-5", 0, 0, 0, 0, 0, 0, Decimal(cost), NOW - timedelta(hours=hours_ago)
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "uncertain"),
+    [
+        (400, False),
+        (401, False),
+        (403, False),
+        (404, False),
+        (408, True),
+        (409, False),
+        (413, False),
+        (422, False),
+        (429, False),
+        (500, True),
+        (504, True),
+        (529, True),
+    ],
+)
+async def test_rejections_do_not_create_uncertain_charges(status: int, uncertain: bool) -> None:
+    fake = FakeClaude()
+    fake.fail(status)
+    if status == 429:
+        fake.fail(status)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    with pytest.raises(LlmError):
+        await client.structured(
+            purpose="analyst",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert client.uncertain_charge is uncertain
+    assert len(fake.requests) == (2 if status == 429 else 1)
+
+
+@pytest.mark.parametrize(
+    ("failure", "uncertain"),
+    [
+        (httpx2.ConnectError, False),
+        (httpx2.ConnectTimeout, False),
+        (httpx2.PoolTimeout, False),
+        (httpx2.ReadTimeout, True),
+        (httpx2.WriteTimeout, True),
+        (httpx2.ReadError, True),
+        (httpx2.WriteError, True),
+        (httpx2.RemoteProtocolError, True),
+    ],
+)
+async def test_transport_cause_distinguishes_pre_send_from_lost_response(
+    failure: type[httpx2.TransportError],
+    uncertain: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+
+    def fail_after_count(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        raise failure("simulated transport failure", request=request)
+
+    monkeypatch.setattr(fake, "_handle", fail_after_count)
+    client = ClaudeClient(
+        fake.client(), CONFIG, MemoryLedger(), lambda: NOW, cycle_allowance=Decimal(1)
+    )
+    with pytest.raises(LlmError):
+        await client.structured(
+            purpose="analyst",
+            model="claude-sonnet-5",
+            system="S",
+            content="C",
+            output=TriageDraft,
+            max_tokens=2000,
+        )
+    assert client.uncertain_charge is uncertain
 
 
 def test_usage_cost_counts_tokens_cache_and_searches() -> None:

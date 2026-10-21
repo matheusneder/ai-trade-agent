@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import update
 
 from tests.support.clients import fake_api
 from tests.support.fake_binance import FakeBinance, Fault
@@ -25,8 +26,10 @@ from trade_agent.execution.orders import (
 )
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService, RulesCache, ServiceConfig
+from trade_agent.persistence.models import FillRecord
 from trade_agent.persistence.store import IntentKind, IntentStatus, Store
 from trade_agent.reconcile.assessment import Verdict, VerdictKind
+from trade_agent.risk.monitor import open_pnl
 
 D = Decimal
 S = PositionState
@@ -228,6 +231,29 @@ async def test_take_profit_closes_with_realized_pnl(
     assert closed.fees == {"BTC": "0.00001", "USDT": "0.652347"}
     assert closed.closed_at is not None
     assert await service.sync(closed) is closed  # terminal position: nothing changes
+
+
+async def test_concurrent_close_sync_with_missing_external_fee(
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+) -> None:
+    position = await _open(service)
+    assert open_pnl(position, {}) == 0  # unavailable book must not invent a marked value
+    async with store.db.session() as session:
+        await session.execute(
+            update(FillRecord)
+            .where(FillRecord.position_id == position.id)
+            .values(commission_asset="BNB", commission=D(".001"))
+        )
+    fake.set_price("BTCUSDT", D(60000))
+    first, second = await asyncio.gather(service.sync(position), service.sync(position))
+    assert first.state is second.state is S.CLOSED
+    kinds = await _kinds(store)
+    assert kinds.count("position.closed") == 1
+    assert kinds.count("position.fee_unpriced") == 1
+    audit = await store.get_checkpoint(f"position.fee_valuation.{position.id}")
+    assert audit and audit["missing_fill_ids"]
 
 
 async def test_stop_loss_closes_with_loss(service: PositionService, fake: FakeBinance) -> None:

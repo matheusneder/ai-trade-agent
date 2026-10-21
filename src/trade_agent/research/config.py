@@ -40,6 +40,9 @@ class PricingConfig(_Strict):
 class BudgetConfig(_Strict):
     daily_usd: Decimal = Field(default=Decimal(5), gt=0)
     """Daily (UTC) cap on LLM spending; once reached, the analyst is not called."""
+    cycle_reserve_usd: Decimal | None = Field(default=None, gt=0)
+    """Reserve before starting; bounded local prompts omit server-side web tools."""
+    cycle_timeout_s: float = Field(default=600, gt=0)
 
 
 class WebResearchConfig(_Strict):

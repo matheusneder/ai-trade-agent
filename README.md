@@ -106,7 +106,7 @@ uv run python -m lab.walk_forward --profile momentum_alpha
 uv run python -m lab.walk_forward --profile swing_trend --download --detail 5m --pairs SOL/USDT ETH/USDT
 ```
 
-Without `--detail`, the stop and the trailing take-profit only see each candle's high and low, and Freqtrade assumes the high came first, so a candle that touched both counts as a win.
+The default is now `--detail 5m`. Use `--exploratory-no-detail` only for exploratory runs: without intrabar detail, candle ordering can make stop/trailing results optimistic. Even 5m detail does not model tick ordering or order-book liquidity. Each run writes a JSON manifest beside its report, recording inputs and SHA-256 hashes.
 
 To compare another version of the code (A/B), point `TA_LAB_SRC` to that version's `src/` folder (e.g. a `git worktree`).
 
@@ -115,6 +115,8 @@ The windows go from 2023-01-01 to 2026-09-01 by default (`--start`, `--end`). Th
 ## Market analyst
 
 Collects public news and metrics, triages them with `claude-sonnet-5` and produces a market reading (`MarketView`) with `claude-opus-5`. The safety rules are enforced by code: the LLM can only veto assets and reduce exposure. Models, sources, budget (US$ 5/day) and limits live in `config/research.yaml`; the key goes in the `.env` (`ANTHROPIC_API_KEY`).
+
+TA must independently meet the entry threshold; positive LLM sentiment cannot raise its score. A profile with `llm.enabled: false` uses neutral exposure and makes no decision-cycle research calls. Research reserves US$1 before a cycle, with a ten-minute cycle timeout. Bounded mode omits provider web tools (their added input cost cannot be bounded), retains RSS/news analysis, and alerts on reductions or omissions. Uncertain billed calls retain their reservation. See [validation and recovery](doc/hardening-validation.md) for economics, experimental risk modes and local recovery tools.
 
 ```bash
 uv run trade-agent research ingest                     # collects news and metrics (PostgreSQL)

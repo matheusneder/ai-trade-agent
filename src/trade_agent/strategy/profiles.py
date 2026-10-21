@@ -133,6 +133,8 @@ class ExitConfig(_Strict):
 
 
 class LlmConfig(_Strict):
+    enabled: bool = True
+    """False is a pure TA baseline: no research, opinions, vetoes or degradation."""
     weight: Fraction = Decimal(0)
     min_confidence: Fraction = Decimal("0.5")
     on_failure: Literal["ta_only", "ta_only_reduced", "pause_entries"] = "ta_only_reduced"

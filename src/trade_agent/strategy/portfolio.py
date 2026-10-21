@@ -2,8 +2,7 @@
 
 Rules (doc 03, §6.3):
 
-* ``final_score = (1 − w)·TA_score + w·(sentiment·confidence)`` when there is an LLM
-  reading with the minimum confidence; otherwise, only the technical score;
+* the LLM may penalize the technical score but never raise it;
 * an LLM veto excludes the asset;
 * ranking by final score, honoring slots, cash reserve, *tier* limits and "one position
   per asset";
@@ -57,9 +56,16 @@ class Candidate:
         technical = Decimal(str(self.signal.score))
         opinion = self.opinion
         weight = profile.llm.weight
-        if opinion is None or weight == 0 or opinion.confidence < profile.llm.min_confidence:
+        if (
+            not profile.llm.enabled
+            or opinion is None
+            or weight == 0
+            or opinion.confidence < profile.llm.min_confidence
+        ):
             return technical
-        return (1 - weight) * technical + weight * opinion.sentiment * opinion.confidence
+        return min(
+            technical, (1 - weight) * technical + weight * opinion.sentiment * opinion.confidence
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +98,10 @@ def plan_entries(
     candidates: Sequence[Candidate],
     exposure_multiplier: Decimal = Decimal(1),
     one_position_per_asset: bool = True,
+    execution_cost_pct: Decimal = ZERO,
 ) -> PlanResult:
+    if execution_cost_pct < 0:
+        raise ValueError("execution_cost_pct must be nonnegative")
     own = [h for h in holdings if h.profile == name]
     held = {h.symbol for h in (holdings if one_position_per_asset else own)}
     allocation = profile.allocation
@@ -111,7 +120,7 @@ def plan_entries(
         symbol, tier = candidate.member.symbol, candidate.member.tier
         score = candidate.final_score(profile)
         reason: str | None = None
-        if candidate.opinion is not None and candidate.opinion.veto:
+        if profile.llm.enabled and candidate.opinion is not None and candidate.opinion.veto:
             reason = "veto do analista"
         elif candidate.signal.setup is None:
             reason = "sem setup"
@@ -131,7 +140,7 @@ def plan_entries(
             Decimal(str(candidate.signal.stop_pct)) * PCT
         )
         notional = exposure_multiplier * min(  # after the limits: caution always reduces
-            risk_budget / (stop_pct / PCT),
+            risk_budget / ((stop_pct + execution_cost_pct) / PCT),
             capital * allocation.max_position_pct,
             budget,
             tier_room,
@@ -159,7 +168,7 @@ def plan_entries(
                     stop_pct, Decimal(str(candidate.signal.atr_pct)) * PCT
                 ),
                 notional=cost,
-                risk=cost * stop_pct / PCT,
+                risk=cost * (stop_pct + execution_cost_pct) / PCT,
             )
         )
         slots -= 1
