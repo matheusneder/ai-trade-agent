@@ -17,8 +17,8 @@ pricing:                     # US$ per million tokens (platform.claude.com/docs/
   web_search_per_1000: 10.00
 
 budget:
-  daily_usd: 5               # UTC day, includes outstanding/uncertain reservations
-  cycle_reserve_usd: 1       # Operator-approved maximum allocation per research cycle
+  daily_usd: 5               # UTC day; D-033 allows one started cycle to overshoot
+  # cycle_reserve_usd: 1     # Optional bounded RSS-only mode; disables server web tools
   cycle_timeout_s: 600
 
 web:                         # research step with web_search/web_fetch (Anthropic's server)
