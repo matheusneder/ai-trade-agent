@@ -273,6 +273,36 @@ async def test_failed_billed_call_keeps_reservation(db: Database) -> None:
     assert not refused.ok and len(fake.requests) == 1
 
 
+@pytest.mark.parametrize("failure", [529, "read"])
+async def test_retention_alert_includes_failure_reason(
+    db: Database, failure: int | str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeClaude()
+    handler = fake._handle
+
+    def fail(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/count_tokens"):
+            return handler(request)
+        if failure == "read":
+            raise httpx2.ReadTimeout("lost response", request=request)
+        return httpx2.Response(529, json={"error": {"message": "overloaded"}})
+
+    monkeypatch.setattr(fake, "_handle", fail)
+    alerts: list[str] = []
+
+    async def notify(severity: EventSeverity, text: str) -> None:
+        assert severity == EventSeverity.HIGH
+        alerts.append(text)
+
+    async with httpx.AsyncClient() as http:
+        service = _service(db, fake, http, budget=BudgetConfig(cycle_reserve_usd=Decimal(1)))
+        service._notify = notify
+        result = await service.run_cycle(trigger="failure", candidates=CANDIDATES, web=False)
+    assert not result.ok and result.error
+    assert len(alerts) == 1 and result.error in alerts[0]
+    assert "Reserva retida" in alerts[0] and "; motivo:" in alerts[0]
+
+
 @pytest.mark.parametrize("status", [400, 401, 429])
 async def test_rejected_call_releases_reservation_for_next_cycle(db: Database, status: int) -> None:
     fake = FakeClaude()

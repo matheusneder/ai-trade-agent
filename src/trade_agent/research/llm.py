@@ -176,7 +176,7 @@ class ClaudeClient:
         budget_per_call: bool = True,
         cycle_allowance: Decimal | None = None,
     ) -> None:
-        self._client = client.with_options(max_retries=0)
+        self._client = client.with_options(max_retries=0) if cycle_allowance is not None else client
         self._config = config
         self._ledger = ledger
         self._clock = clock
@@ -333,7 +333,7 @@ class ClaudeClient:
                     self._inflight = False
                     self._uncertain_charge = self._uncertain_charge or uncertain_api_error(exc)
                     delay = retry_delay(exc, self._clock())
-                    if not retried and delay is not None:
+                    if self._cycle_allowance is not None and not retried and delay is not None:
                         retried = True
                         await asyncio.sleep(delay)  # Included in the service's cycle timeout.
                         continue

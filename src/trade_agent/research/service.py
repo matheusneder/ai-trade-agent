@@ -186,7 +186,9 @@ class ResearchService:
                     if self._notify is not None:
                         await self._notify(
                             EventSeverity.HIGH,
-                            "Reserva retida por cobrança incerta: " + reservation[1],
+                            "Reserva retida por cobrança incerta: "
+                            + reservation[1]
+                            + (f"; motivo: {error}" if error else ""),
                         )
                 else:
                     await self._store.release_budget(reservation)
