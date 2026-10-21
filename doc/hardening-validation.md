@@ -39,7 +39,12 @@ send HIGH notifications with reservation tokens. A hard-killed process cannot se
 retention notification; the next cycle still recovers its durable reservation and alerts
 on expiry. Expiry is transactional; notifications are best effort after the transaction.
 
-Automatic SDK retries are disabled. Message calls get at most two total attempts, only
+Without a reservation, the supplied client's SDK retry policy is preserved (the production
+SDK default is two retries, including transient 5xx/529 and read timeouts). No additional
+application retry is layered on top. A lost response can still leave unobserved provider
+cost; D-033's recorded-usage gate is not a hard invoice ceiling.
+
+In bounded mode only, automatic SDK retries are disabled. Message calls get at most two total attempts, only
 for HTTP 429 or proven pre-send ConnectError/ConnectTimeout/PoolTimeout. `Retry-After`
 seconds or HTTP dates are honored (one second fallback); the wait counts against the
 cycle timeout. HTTP 408, all 5xx including 529, and read/write failures are not retried.
@@ -57,6 +62,12 @@ total and adjustment reasons/timestamps. Repeating the same total is idempotent.
 delete a reservation or usage row to reconcile it. Full-value estimates may double-count
 partially recorded cycles until corrected; this intentional conservative bias is visible
 through the special purpose/model fields in the same usage table used by SQL cost dashboards.
+
+The Grafana LLM cost panel includes these estimates and signed adjustments on their original
+UTC accounting day. SigNoz's `trade_agent.llm.cost` panels include only observed response
+usage emitted as telemetry, excluding reservation estimates and adjustments. The panel
+descriptions explain this difference: a monotonic telemetry counter cannot represent
+negative, retroactive accounting corrections. Use the SQL ledger for reconciled totals.
 Pricing configuration and token counts are estimates, not a provider invoice guarantee.
 The implementation conservatively counts recorded usage plus outstanding reservations,
 so concurrency can temporarily reserve more than the eventual expense.
@@ -156,6 +167,14 @@ Existing heartbeat code and its local tests are retained; `TA_HEALTHCHECK_URL` r
 unset until the operator selects the external service.
 
 ## Review gates
+
+Reopened-review verification on 2026-10-21: **803 unit/integration tests passed** in
+119.54 seconds with **100% statement/branch coverage** (5,705 statements, 1,114 branches).
+Ruff lint/format, mypy (194 files), and `git diff --check` passed. Real-SDK transport tests
+pin recovery and exhaustion for default versus bounded retry modes (429, 500, 529 and
+read timeouts); retention-alert tests verify the failure reason is included. Generated
+dashboard JSON was compared against the previous version: only descriptions changed,
+with queries and layouts identical. SigNoz schema/generator checks also passed.
 
 Final review verification on 2026-10-21 (Python 3.14.3): **785 unit/integration tests
 passed** in 128.49 seconds, with **100% statement and branch coverage** (5,705 statements,
