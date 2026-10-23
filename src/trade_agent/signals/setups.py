@@ -18,6 +18,9 @@ up (benchmark above the slow EMA; can be turned off with ``use_regime_filter``):
   (previous ≤ limit and rising) on an up candle;
 * ``breakout``: close above the high of the previous N candles, with relative volume
   ≥ minimum.
+
+With ``min_stop_atr``, neither setup fires when the capped stop is narrower than that many
+ATRs: on volatile assets the profile's ``max_stop_pct`` would put the stop inside the noise.
 """
 
 from dataclasses import dataclass
@@ -27,6 +30,8 @@ import pandas as pd
 
 TREND_PULLBACK = "trend_pullback"
 BREAKOUT = "breakout"
+RATIO_TOLERANCE = 1e-9
+"""Relative slack in ``min_stop_atr``: a stop of exactly k ATRs passes despite float rounding."""
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,9 @@ class SignalParams:
     min_stop_pct: float = 0.01
     max_stop_pct: float = 0.08
     use_regime_filter: bool = True
+    min_stop_atr: float | None = None
+    """Setups only when the stop, after its ``max_stop_pct`` cap, is at least this many ATRs
+    (``None``: off). A capped stop below it sits inside the asset's normal noise."""
 
 
 @dataclass(frozen=True)
@@ -95,6 +103,9 @@ def setup_frame(features: pd.DataFrame, params: SignalParams | None = None) -> p
     trend = _uptrend(features)
     if p.use_regime_filter:
         trend &= features["regime_up"].astype(bool)
+    if p.min_stop_atr is not None:
+        stop = stop_pct_frame(features, p)
+        trend &= stop >= p.min_stop_atr * _col(features, "atr_pct") * (1 - RATIO_TOLERANCE)
     pullback = (
         trend
         & (_col(features, "adx") >= p.adx_min)
