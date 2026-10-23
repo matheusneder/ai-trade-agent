@@ -73,5 +73,16 @@ def breakout(n: int = 320) -> pd.DataFrame:
     return ohlcv(closes, volumes=volumes)
 
 
+def rally_after_decline(*, interval_ms: int = HOUR_MS, start_ms: int = START_MS) -> pd.DataFrame:
+    """999 candles: a long top at 400, a fall to 100, a range and a rally that breaks out on
+    volume. The last 251 candles alone show an uptrend; the whole history does not, because
+    its EMA 200 still carries the top (COMPUSDT, 2026-10-20)."""
+    fall = np.geomspace(400, 100, 50).tolist()
+    sideways = [100 * (1 + 0.003 * math.sin(i)) for i in range(200)]
+    closes = [400.0] * 700 + fall + sideways + np.geomspace(101, 112, 49).tolist()
+    volumes = [100.0] * (len(closes) - 1) + [400.0]
+    return ohlcv(closes, volumes=volumes, interval_ms=interval_ms, start_ms=start_ms)
+
+
 def downtrend(n: int = 320) -> pd.DataFrame:
     return ohlcv([100 * math.exp(-0.004 * i) for i in range(n)])

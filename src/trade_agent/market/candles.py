@@ -20,6 +20,8 @@ INTERVAL_MS = {
     "4h": 14_400_000,
     "1d": 86_400_000,
 }
+MAX_KLINES = 1000
+"""Largest ``limit`` of one ``/api/v3/klines`` request (weight 2 for any limit)."""
 
 
 def to_frame(raw: Sequence[Sequence[Any]]) -> pd.DataFrame:
@@ -54,7 +56,7 @@ async def fetch_candles(
     """Fetches the symbol's latest **closed** candles."""
     if interval not in INTERVAL_MS:
         raise ValueError(f"intervalo não suportado: {interval}")
-    raw = await api.klines(symbol, interval, limit=min(limit + 1, 1000))
+    raw = await api.klines(symbol, interval, limit=min(limit + 1, MAX_KLINES))
     return closed_only(to_frame(raw), now_ms).tail(limit)
 
 

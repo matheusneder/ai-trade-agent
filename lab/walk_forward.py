@@ -21,6 +21,7 @@ import dataclasses
 import gzip
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -33,8 +34,10 @@ from pathlib import Path
 from typing import Any
 
 from trade_agent.execution.orders import StopMode
+from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.market.universe import Tier
 from trade_agent.risk.conditions import PreTradeConfig, load_stop_conditions
+from trade_agent.signals import FeatureParams
 from trade_agent.strategy.profiles import ProfileConfig, StrategyConfig, load_strategy_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +132,13 @@ def detail_args(detail: str | None) -> list[str]:
     Freqtrade assumes the high came first: a 4h candle that touched both reads as a win.
     """
     return ["--timeframe-detail", detail] if detail else []
+
+
+def warmup_months(timeframe: str) -> int:
+    """Whole months before a window that hold the strategy's startup candles
+    (``FeatureParams.history``); with fewer, Freqtrade moves the window's start forward."""
+    span_ms = FeatureParams().history * INTERVAL_MS[timeframe]
+    return math.ceil(span_ms / (28 * INTERVAL_MS["1d"]))
 
 
 def train_range(start: date, months: int) -> tuple[date, date]:
@@ -461,7 +471,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config_path = prepare(strategy_config, args.profile, args.pairs, pre_trade)
     periods = windows(args.start, args.end, args.window_months)
     if args.download:
-        history = 3 + (args.train_months if args.optimize else 0)
+        history = warmup_months(profile.timeframe) + (args.train_months if args.optimize else 0)
         warmup_start = add_months(args.start.replace(day=1), -history)
         _freqtrade(
             "download-data", "--config", config_path, "--timerange",

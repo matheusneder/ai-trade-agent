@@ -57,7 +57,9 @@ class TradeAgentStrategy(IStrategy):
     trailing_stop = False
     process_only_new_candles = True
     use_exit_signal = True
-    startup_candle_count = FeatureParams().warmup
+    # Freqtrade loads only these candles before each window: the agent's history (D-040), not
+    # the warmup, or the EMA 200 starts every window at its SMA seed.
+    startup_candle_count = FeatureParams().history
     benchmark_pair = "BTC/USDT"
 
     # ------------------------------------------------------------------ entry (space=buy)

@@ -14,7 +14,14 @@ import pytest
 import yaml
 from structlog.testing import capture_logs
 
-from tests.support.candles import HOUR_MS, ohlcv, raw_klines, uptrend_with_pullback
+from tests.support.candles import (
+    HOUR_MS,
+    START_MS,
+    ohlcv,
+    rally_after_decline,
+    raw_klines,
+    uptrend_with_pullback,
+)
 from tests.support.claude import FakeClaude, research_config
 from tests.support.fake_binance import FakeBinance, Fault
 from tests.support.metrics import Measured
@@ -26,7 +33,7 @@ from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.orders import EntryMode, EntryOrder
 from trade_agent.execution.positions import Position, PositionState
 from trade_agent.execution.service import PositionService
-from trade_agent.market.candles import INTERVAL_MS
+from trade_agent.market.candles import INTERVAL_MS, to_frame
 from trade_agent.market.universe import Universe, UniverseConfig, build_universe
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.research_store import ResearchStore
@@ -38,6 +45,7 @@ from trade_agent.research.service import ResearchService
 from trade_agent.research.tagging import AssetTagger
 from trade_agent.risk.guard import RiskGuard
 from trade_agent.risk.state import GLOBAL, StateStore
+from trade_agent.signals import FeatureParams, compute_features, evaluate
 from trade_agent.strategy.portfolio import MarketOpinion
 from trade_agent.strategy.profiles import StrategyConfig, Timeframe
 
@@ -304,6 +312,29 @@ async def test_dry_run_simulates_entries_without_orders(
     kinds = [e.kind for e in await store.recent_events()]
     assert "decision.entry_simulated" in kinds and "decision.cycle" in kinds
     assert alerts == ["[simulação] conservador: entradas ['SOLUSDT']; saídas —"]
+
+
+async def test_signals_read_the_history_where_the_slow_ema_has_converged(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """On 251 candles the EMA 200 still leaned on its SMA seed and showed a breakout that
+    the full history does not have (COMPUSDT, 2026-10-20): the engine reads 999 (D-040)."""
+    _setup_market(fake)
+    btc = to_frame(fake.candles[("BTCUSDT", "4h")])
+    start = START_MS - (999 - len(btc)) * FOUR_HOURS  # the last candle closes with BTC's
+    sol = rally_after_decline(interval_ms=FOUR_HOURS, start_ms=start)
+    fake.candles[("SOLUSDT", "4h")] = raw_klines(sol)
+    short = sol.tail(FeatureParams().warmup + 50)
+    assert evaluate(compute_features(short, benchmark_close=btc["close"])).setup == "breakout"
+    engine, _ = _engine(api, service, store, dry_run=True)
+    with capture_logs() as logs:
+        report = await engine.run_profile("conservador")
+    assert report.opened == ()
+    signal = next(e for e in logs if e["event"] == "decision.signal" and e["symbol"] == "SOLUSDT")
+    assert signal["setup"] is None
+    requests = [r.url.params for r in fake.calls("GET", "/api/v3/klines")]
+    limits = {p["symbol"]: p["limit"] for p in requests if p["interval"] == "4h"}
+    assert limits == {"BTCUSDT": "1000", "ETHUSDT": "1000", "SOLUSDT": "1000"}
 
 
 async def test_live_cycle_opens_protected_position_once(

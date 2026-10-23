@@ -4,7 +4,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tests.support.candles import breakout, downtrend, ohlcv, uptrend_with_pullback
+from tests.support.candles import (
+    breakout,
+    downtrend,
+    ohlcv,
+    rally_after_decline,
+    uptrend_with_pullback,
+)
 from trade_agent.signals import (
     FeatureParams,
     SignalParams,
@@ -63,6 +69,39 @@ def test_warmup_covers_longest_indicator() -> None:
     params = FeatureParams(ema_slow=200)
     assert params.warmup == 201
     assert FeatureParams(ema_slow=10, adx_period=14).warmup == 29
+
+
+def test_history_must_cover_the_warmup() -> None:
+    assert FeatureParams().history == 999
+    assert FeatureParams(ema_slow=10, adx_period=14, history=29).history == 29
+    with pytest.raises(ValueError, match="warmup"):
+        FeatureParams(history=200)
+
+
+def test_history_lets_the_slow_ema_forget_its_seed() -> None:
+    """TA-Lib seeds the EMA 200 with an SMA: 251 candles still lean on it, 999 do not."""
+    params = FeatureParams()
+    frame = ohlcv([100 + 30 * math.sin(2 * math.pi * i / 500) for i in range(3000)])
+    full = compute_features(frame)["ema_slow"]
+
+    def worst_error(size: int) -> float:
+        windows = (frame.iloc[end - size : end] for end in range(2000, 3001, 25))
+        return max(
+            abs(float(compute_features(w)["ema_slow"].iloc[-1] / full.loc[w.index[-1]]) - 1)
+            for w in windows
+        )
+
+    assert worst_error(params.history) < 1e-4
+    assert worst_error(params.warmup + 50) > 0.03
+
+
+def test_short_history_shows_a_breakout_the_full_history_does_not() -> None:
+    frame = rally_after_decline()
+    full = compute_features(frame)
+    short = compute_features(frame.tail(FeatureParams().warmup + 50))
+    assert full["ema_slow"].iloc[-1] > full["close"].iloc[-1] > short["ema_slow"].iloc[-1]
+    assert evaluate(full).setup is None
+    assert evaluate(short).setup == BREAKOUT
 
 
 def test_pullback_setup_detected() -> None:
