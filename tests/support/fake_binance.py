@@ -329,7 +329,8 @@ class FakeBinance:
         key = (params["symbol"], params["interval"])
         if key not in self.candles:
             raise BinanceApiFault(400, -1121, "Invalid symbol.")
-        return self.candles[key][-int(params.get("limit", "500")) :]
+        # like Binance, a limit above 1000 returns the last 1000 candles
+        return self.candles[key][-min(int(params.get("limit", "500")), 1000) :]
 
     def _delist_schedule(self, _: dict[str, str]) -> Any:
         return [{"delistTime": self.clock() + 86_400_000, "symbols": sorted(self.delisted)}]

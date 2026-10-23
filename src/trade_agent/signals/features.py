@@ -22,6 +22,17 @@ class FeatureParams:
     obv_period: int = 10
     breakout_lookback: int = 20
     rs_period: int = 20
+    history: int = 999
+    """Closed candles the indicators are computed on (the agent's fetch, the lab's startup).
+
+    TA-Lib seeds the slow EMA with the SMA of its first ``ema_slow`` candles, and the seed
+    still weighs (1 − 2/201)^51 ≈ 60% of the EMA 200 after 251 candles, but only ≈ 0.03%
+    after 999: the trend and regime checks then match the full history. 999 closed candles
+    are one Binance klines request (1000, the last one still open)."""
+
+    def __post_init__(self) -> None:
+        if self.history < self.warmup:
+            raise ValueError(f"history ({self.history}) abaixo do warmup ({self.warmup})")
 
     @property
     def warmup(self) -> int:

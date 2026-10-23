@@ -13,7 +13,9 @@ into the container through ``PYTHONPATH``) and replicates the agent's native pro
   ``min_reward_risk`` (``pre_trade`` in ``config/stop_conditions.yaml``);
 * risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position;
 * the agent's decision exits: stop at *break-even* after ``break_even_r`` and the maximum
-  holding time.
+  holding time;
+* with ``universe_min_volume`` (``--alts``), entries only while the pair's 24h quote volume
+  reaches the universe's minimum, as the agent only sees a pair inside its universe.
 
 The default parameters are only a starting point: ``lab/walk_forward.py`` generates the
 ``trade_agent_strategy.json`` file with the values of the profile chosen in
@@ -24,11 +26,14 @@ import math
 from datetime import datetime, timedelta
 from typing import Any
 
+from freqtrade.data.converter import trim_dataframe, trim_dataframes
+from freqtrade.optimize import backtesting
 from freqtrade.persistence import Trade
 from freqtrade.strategy import (
     DecimalParameter,
     IStrategy,
     stoploss_from_open,
+    timeframe_to_minutes,
     timeframe_to_prev_date,
 )
 from pandas import DataFrame
@@ -47,6 +52,28 @@ BREAK_EVEN_FEE_BUFFER = 0.003
 RATIO_TOLERANCE = 1e-9
 
 
+# Freqtrade drops ``startup_candle_count`` rows from the start of each pair's data (by count),
+# not the rows before the window's start date. With 999 candles (D-040), a pair with less
+# history before a window would lose the window's first candles, while the agent evaluates any
+# asset with ``FeatureParams.warmup`` candles. Both backtesting call sites pass the window's
+# timerange, so trimming with ``startup_candles=0`` cuts by its start date instead: identical
+# for pairs with the full history, and recent listings trade from the window's start.
+def _trim_dataframe_by_date(
+    df: DataFrame, timerange: Any, *, df_date_col: str = "date", startup_candles: int = 0
+) -> DataFrame:
+    return trim_dataframe(df, timerange, df_date_col=df_date_col)
+
+
+def _trim_dataframes_by_date(
+    preprocessed: dict[str, DataFrame], timerange: Any, startup_candles: int
+) -> dict[str, DataFrame]:
+    return trim_dataframes(preprocessed, timerange, 0)
+
+
+backtesting.trim_dataframe = _trim_dataframe_by_date  # type: ignore[assignment]
+backtesting.trim_dataframes = _trim_dataframes_by_date  # type: ignore[assignment]
+
+
 class TradeAgentStrategy(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = "4h"
@@ -57,7 +84,9 @@ class TradeAgentStrategy(IStrategy):
     trailing_stop = False
     process_only_new_candles = True
     use_exit_signal = True
-    startup_candle_count = FeatureParams().warmup
+    # Freqtrade loads only these candles before each window: the agent's history (D-040), not
+    # the warmup, or the EMA 200 starts every window at its SMA seed.
+    startup_candle_count = FeatureParams().history
     benchmark_pair = "BTC/USDT"
 
     # ------------------------------------------------------------------ entry (space=buy)
@@ -81,6 +110,13 @@ class TradeAgentStrategy(IStrategy):
     )
     cost_adjusted = DecimalParameter(0, 1, default=0, decimals=0, space="buy", optimize=False)
     trailing_floor = DecimalParameter(0, 1, default=0, decimals=0, space="buy", optimize=False)
+    # ``signals.min_stop_atr`` of the profile (``SignalParams``); 0 = off.
+    min_stop_atr = DecimalParameter(0, 10, default=0, decimals=2, space="buy", optimize=False)
+    # Universe emulation: the agent only sees a pair while its 24h quote volume reaches
+    # ``UniverseConfig.min_quote_volume_24h`` (``--alts``); 0 = off (static basket).
+    universe_min_volume = DecimalParameter(
+        0, 1e10, default=0, decimals=0, space="buy", optimize=False
+    )
 
     # ------------------------------------------------------------------ exit (space=sell)
     # Parameters with optimize=False define the profile's risk and are never optimized.
@@ -114,6 +150,7 @@ class TradeAgentStrategy(IStrategy):
             vol_rel_min=float(self.vol_rel_min.value),
             atr_stop_mult=float(self.atr_stop_mult.value),
             max_stop_pct=float(self.stop_max_pct.value),
+            min_stop_atr=float(self.min_stop_atr.value) or None,
         )
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict[str, Any]) -> DataFrame:
@@ -144,6 +181,11 @@ class TradeAgentStrategy(IStrategy):
             # tolerance: the Risk Guard compares Decimals, where 10.8 / 7.2 is exactly 1.5
             & (reward_risk >= float(self.min_reward_risk.value) - RATIO_TOLERANCE)
         )
+        min_volume = float(self.universe_min_volume.value)
+        if min_volume > 0:
+            per_day = 1440 // timeframe_to_minutes(self.timeframe)
+            quote_24h = (dataframe["close"] * dataframe["volume"]).rolling(per_day).sum()
+            entry &= quote_24h >= min_volume
         dataframe.loc[entry, "enter_long"] = 1
         dataframe.loc[entry, "enter_tag"] = dataframe.loc[entry, "setup"]
         return dataframe
