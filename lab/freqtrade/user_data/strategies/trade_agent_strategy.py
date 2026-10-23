@@ -26,6 +26,8 @@ import math
 from datetime import datetime, timedelta
 from typing import Any
 
+from freqtrade.data.converter import trim_dataframe, trim_dataframes
+from freqtrade.optimize import backtesting
 from freqtrade.persistence import Trade
 from freqtrade.strategy import (
     DecimalParameter,
@@ -48,6 +50,28 @@ from trade_agent.signals import (
 BREAK_EVEN_FEE_BUFFER = 0.003
 """Same margin above the entry as ``trade_agent.strategy.exits.DEFAULT_FEE_BUFFER``."""
 RATIO_TOLERANCE = 1e-9
+
+
+# Freqtrade drops ``startup_candle_count`` rows from the start of each pair's data (by count),
+# not the rows before the window's start date. With 999 candles (D-040), a pair with less
+# history before a window would lose the window's first candles, while the agent evaluates any
+# asset with ``FeatureParams.warmup`` candles. Both backtesting call sites pass the window's
+# timerange, so trimming with ``startup_candles=0`` cuts by its start date instead: identical
+# for pairs with the full history, and recent listings trade from the window's start.
+def _trim_dataframe_by_date(
+    df: DataFrame, timerange: Any, *, df_date_col: str = "date", startup_candles: int = 0
+) -> DataFrame:
+    return trim_dataframe(df, timerange, df_date_col=df_date_col)
+
+
+def _trim_dataframes_by_date(
+    preprocessed: dict[str, DataFrame], timerange: Any, startup_candles: int
+) -> dict[str, DataFrame]:
+    return trim_dataframes(preprocessed, timerange, 0)
+
+
+backtesting.trim_dataframe = _trim_dataframe_by_date  # type: ignore[assignment]
+backtesting.trim_dataframes = _trim_dataframes_by_date  # type: ignore[assignment]
 
 
 class TradeAgentStrategy(IStrategy):
