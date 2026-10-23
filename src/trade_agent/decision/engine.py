@@ -244,7 +244,8 @@ class DecisionEngine:
     async def _signals(
         self, members: list[UniverseMember], profile: ProfileConfig, now_ms: int
     ) -> dict[str, Signal]:
-        limit = self._features.warmup + 50
+        # The lab's history: with fewer candles the EMA 200 still leans on its seed (D-040).
+        limit = self._features.history
         frames = {
             BENCHMARK: await self._candles.fetch(
                 BENCHMARK, profile.timeframe, limit=limit, now_ms=now_ms
