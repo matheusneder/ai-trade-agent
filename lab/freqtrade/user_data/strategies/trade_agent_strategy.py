@@ -13,7 +13,9 @@ into the container through ``PYTHONPATH``) and replicates the agent's native pro
   ``min_reward_risk`` (``pre_trade`` in ``config/stop_conditions.yaml``);
 * risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position;
 * the agent's decision exits: stop at *break-even* after ``break_even_r`` and the maximum
-  holding time.
+  holding time;
+* with ``universe_min_volume`` (``--alts``), entries only while the pair's 24h quote volume
+  reaches the universe's minimum, as the agent only sees a pair inside its universe.
 
 The default parameters are only a starting point: ``lab/walk_forward.py`` generates the
 ``trade_agent_strategy.json`` file with the values of the profile chosen in
@@ -29,6 +31,7 @@ from freqtrade.strategy import (
     DecimalParameter,
     IStrategy,
     stoploss_from_open,
+    timeframe_to_minutes,
     timeframe_to_prev_date,
 )
 from pandas import DataFrame
@@ -81,6 +84,13 @@ class TradeAgentStrategy(IStrategy):
     )
     cost_adjusted = DecimalParameter(0, 1, default=0, decimals=0, space="buy", optimize=False)
     trailing_floor = DecimalParameter(0, 1, default=0, decimals=0, space="buy", optimize=False)
+    # ``signals.min_stop_atr`` of the profile (``SignalParams``); 0 = off.
+    min_stop_atr = DecimalParameter(0, 10, default=0, decimals=2, space="buy", optimize=False)
+    # Universe emulation: the agent only sees a pair while its 24h quote volume reaches
+    # ``UniverseConfig.min_quote_volume_24h`` (``--alts``); 0 = off (static basket).
+    universe_min_volume = DecimalParameter(
+        0, 1e10, default=0, decimals=0, space="buy", optimize=False
+    )
 
     # ------------------------------------------------------------------ exit (space=sell)
     # Parameters with optimize=False define the profile's risk and are never optimized.
@@ -114,6 +124,7 @@ class TradeAgentStrategy(IStrategy):
             vol_rel_min=float(self.vol_rel_min.value),
             atr_stop_mult=float(self.atr_stop_mult.value),
             max_stop_pct=float(self.stop_max_pct.value),
+            min_stop_atr=float(self.min_stop_atr.value) or None,
         )
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict[str, Any]) -> DataFrame:
@@ -144,6 +155,11 @@ class TradeAgentStrategy(IStrategy):
             # tolerance: the Risk Guard compares Decimals, where 10.8 / 7.2 is exactly 1.5
             & (reward_risk >= float(self.min_reward_risk.value) - RATIO_TOLERANCE)
         )
+        min_volume = float(self.universe_min_volume.value)
+        if min_volume > 0:
+            per_day = 1440 // timeframe_to_minutes(self.timeframe)
+            quote_24h = (dataframe["close"] * dataframe["volume"]).rolling(per_day).sum()
+            entry &= quote_24h >= min_volume
         dataframe.loc[entry, "enter_long"] = 1
         dataframe.loc[entry, "enter_tag"] = dataframe.loc[entry, "setup"]
         return dataframe

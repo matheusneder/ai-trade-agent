@@ -81,6 +81,34 @@ def test_strategy_params_pre_trade_from_stop_conditions() -> None:
     assert {"min_reward_risk", "round_trip_fee"} <= wf.RISK_PARAMS
 
 
+def test_strategy_params_min_stop_atr_and_universe_volume() -> None:
+    data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
+    data["profiles"]["conservador"]["signals"] = {"min_stop_atr": 1.5}
+    profile = StrategyConfig.model_validate(data).profiles["conservador"]
+    buy = wf.strategy_params(profile, min_volume=5e6)["params"]["buy"]
+    assert buy["min_stop_atr"] == 1.5
+    assert buy["universe_min_volume"] == 5e6
+    off = wf.strategy_params(CONFIG.profiles["conservador"])["params"]["buy"]
+    assert off["min_stop_atr"] == 0.0  # filter off
+    assert off["universe_min_volume"] == 0.0  # static basket
+    assert {"min_stop_atr", "universe_min_volume"} <= wf.RISK_PARAMS
+
+
+def test_universe_pairs_with_alts() -> None:
+    profile = CONFIG.profiles["conservador"]
+    assert wf.universe_pairs(profile) == (None, 0.0)
+    assert wf.universe_pairs(profile, ["SOL/USDT"]) == (["SOL/USDT"], 0.0)
+    pairs, volume = wf.universe_pairs(profile, alts=True)
+    assert pairs is not None
+    assert pairs[: len(wf.profile_pairs(profile))] == wf.profile_pairs(profile)
+    assert set(wf.ALTS) <= set(pairs)
+    assert volume == 5_000_000  # UniverseConfig.min_quote_volume_24h
+    custom, _ = wf.universe_pairs(profile, ["SAND/USDT"], alts=True)
+    assert custom is not None
+    assert custom[0] == "SAND/USDT"
+    assert custom.count("SAND/USDT") == 1
+
+
 def test_detail_args() -> None:
     assert wf.detail_args("5m") == ["--timeframe-detail", "5m"]
     assert wf.detail_args(None) == []
@@ -337,6 +365,26 @@ def test_main_with_custom_pairs_and_candle_detail(lab: FakeLab) -> None:
     assert "Saídas simuladas dentro do candle com candles de 5m. Pares: SOL/USDT, ETH/USDT." in text
 
 
+def test_main_with_alts_emulates_the_universe(lab: FakeLab) -> None:
+    code = wf.main(
+        [
+            "--profile", "conservador", "--start", "2025-01-01", "--end", "2025-04-01",
+            "--alts", "--download", "--profiles-file", str(PROFILES),
+        ]
+    )  # fmt: skip
+    assert code == 0
+    assert "MOVR/USDT" in lab.calls[0]
+    assert lab.calls[0].count("BTC/USDT") == 1
+    assert lab.backtest_params[0]["params"]["buy"]["universe_min_volume"] == 5_000_000
+    config = json.loads((lab.root / "user_data" / "config.conservador.json").read_text())
+    assert set(wf.ALTS) <= set(config["exchange"]["pair_whitelist"])
+    text = lab.reports("walk-forward-conservador-fixo-detalhe5m-alts-*.md")[0].read_text(
+        encoding="utf-8"
+    )
+    assert f"Com {len(wf.ALTS)} alts voláteis" in text
+    assert "≥ 5 mi USDT" in text
+
+
 def test_no_detail_requires_explicit_exploratory_mode(lab: FakeLab) -> None:
     wf.main(
         [
@@ -373,12 +421,16 @@ def test_optimize_writes_merged_params(tmp_path: Path, monkeypatch: pytest.Monke
         min_trades=3,
         detail=None,
         stop_conditions=wf.ROOT / "config" / "stop_conditions.yaml",
+        pairs=None,
+        alts=True,
     )
     chosen = wf.optimize(
         CONFIG.profiles["moderado"], "cfg", (date(2024, 1, 1), date(2025, 1, 1)), args
     )
     assert chosen["min_score"] == 0.45
-    assert json.loads(params_file.read_text())["params"]["buy"]["risk_per_trade"] == 0.01
+    merged = json.loads(params_file.read_text())["params"]["buy"]
+    assert merged["risk_per_trade"] == 0.01
+    assert merged["universe_min_volume"] == 5_000_000  # --alts also during the training
 
 
 def test_freqtrade_invokes_docker_compose_with_retries(monkeypatch: pytest.MonkeyPatch) -> None:

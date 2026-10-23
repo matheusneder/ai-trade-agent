@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from trade_agent.execution.orders import StopMode
-from trade_agent.market.universe import Tier
+from trade_agent.market.universe import Tier, UniverseConfig
 from trade_agent.risk.conditions import PreTradeConfig, load_stop_conditions
 from trade_agent.strategy.profiles import ProfileConfig, StrategyConfig, load_strategy_config
 
@@ -64,6 +64,8 @@ RISK_PARAMS = frozenset(
         "execution_slippage",
         "cost_adjusted",
         "trailing_floor",
+        "min_stop_atr",
+        "universe_min_volume",
     }
 )
 
@@ -77,6 +79,14 @@ PAIRS_BY_TIER: dict[Tier, tuple[str, ...]] = {
     Tier.MID: ("ATOM/USDT", "NEAR/USDT", "UNI/USDT", "FIL/USDT", "APT/USDT", "OP/USDT"),
     Tier.SMALL: ("GALA/USDT", "SAND/USDT", "MANA/USDT", "CHZ/USDT"),
 }  # fmt: skip
+# Volatile alts with history since 2022-10 (``--alts``). Most of them trade below the universe's
+# minimum 24h volume and join it, often in the *large* tier, only during a pump: the static tier
+# lists never had them, while they made most of the Demo positions in 2026-10 (D-039).
+ALTS: tuple[str, ...] = (
+    "ALGO/USDT", "API3/USDT", "AXS/USDT", "BAT/USDT", "CFX/USDT", "CKB/USDT", "GTC/USDT",
+    "HBAR/USDT", "INJ/USDT", "MAGIC/USDT", "MOVR/USDT", "NMR/USDT", "OGN/USDT", "RAY/USDT",
+    "RLC/USDT", "SAND/USDT", "SKL/USDT", "SUPER/USDT",
+)  # fmt: skip
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +156,19 @@ def profile_pairs(profile: ProfileConfig) -> list[str]:
     return pairs
 
 
+def universe_pairs(
+    profile: ProfileConfig, pairs: Sequence[str] | None = None, alts: bool = False
+) -> tuple[list[str] | None, float]:
+    """Pairs of the test and the minimum 24h quote volume to emulate (0: static basket).
+
+    With ``alts``, ``ALTS`` join the basket and each pair only trades while its 24h quote
+    volume reaches ``UniverseConfig.min_quote_volume_24h``, as in the agent's universe."""
+    if not alts:
+        return (list(pairs) if pairs else None), 0.0
+    basket = list(dict.fromkeys([*(pairs or profile_pairs(profile)), *ALTS]))
+    return basket, float(UniverseConfig().min_quote_volume_24h)
+
+
 def lab_config(
     base: dict[str, Any],
     profile: ProfileConfig,
@@ -166,10 +189,11 @@ def lab_config(
 
 
 def strategy_params(
-    profile: ProfileConfig, pre_trade: PreTradeConfig | None = None
+    profile: ProfileConfig, pre_trade: PreTradeConfig | None = None, min_volume: float = 0.0
 ) -> dict[str, Any]:
     """Content of ``trade_agent_strategy.json`` (Freqtrade's parameter format). ``pre_trade``
-    (``config/stop_conditions.yaml``) gives the Risk Guard's minimum R:R."""
+    (``config/stop_conditions.yaml``) gives the Risk Guard's minimum R:R; ``min_volume`` > 0
+    emulates the universe's minimum 24h quote volume (see ``universe_pairs``)."""
     pre_trade = pre_trade or PreTradeConfig()
     signals = profile.signal_params()
     protection = profile.protection
@@ -194,6 +218,8 @@ def strategy_params(
                 "execution_slippage": pre_trade.slippage_pct / 100,
                 "cost_adjusted": int(pre_trade.risk_model == "cost_adjusted"),
                 "trailing_floor": int(pre_trade.reward_model == "trailing_floor"),
+                "min_stop_atr": signals.min_stop_atr or 0.0,
+                "universe_min_volume": min_volume,
             },
             "sell": {
                 "atr_stop_mult": atr_mult,
@@ -379,6 +405,7 @@ def prepare(
     profile_name: str,
     pairs: Sequence[str] | None = None,
     pre_trade: PreTradeConfig | None = None,
+    min_volume: float = 0.0,
 ) -> str:
     """Writes ``config.<profile>.json`` and ``trade_agent_strategy.json``; returns its path."""
     profile = config.profiles[profile_name]
@@ -386,7 +413,7 @@ def prepare(
     generated = lab_config(base, profile, config.profile_capital(profile_name), pairs)
     config_file = USER_DATA / f"config.{profile_name}.json"
     config_file.write_text(json.dumps(generated, indent=2), encoding="utf-8")
-    _write_params(strategy_params(profile, pre_trade))
+    _write_params(strategy_params(profile, pre_trade, min_volume))
     return f"user_data/{config_file.name}"
 
 
@@ -394,7 +421,8 @@ def optimize(
     profile: ProfileConfig, config_path: str, train: tuple[date, date], args: argparse.Namespace
 ) -> dict[str, float]:
     """*Hyperopt* on the training window; records the chosen parameters (over the profile's)."""
-    base = strategy_params(profile, load_stop_conditions(args.stop_conditions).pre_trade)
+    pre_trade = load_stop_conditions(args.stop_conditions).pre_trade
+    base = strategy_params(profile, pre_trade, universe_pairs(profile, args.pairs, args.alts)[1])
     _write_params(base)
     _freqtrade(
         "hyperopt", "--config", config_path, "--strategy", STRATEGY,
@@ -432,6 +460,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--pairs", nargs="+", help="pares do teste (ex.: SOL/USDT), no lugar das listas por tier"
     )
     parser.add_argument(
+        "--alts",
+        action="store_true",
+        help="soma as alts voláteis (ALTS) e o volume mínimo de 24h do universo do agente",
+    )
+    parser.add_argument(
         "--detail",
         default="5m",
         choices=["1m", "3m", "5m"],
@@ -458,7 +491,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError(
             "portfolio limits require the portfolio replay, not independent Freqtrade windows"
         )
-    config_path = prepare(strategy_config, args.profile, args.pairs, pre_trade)
+    pairs, min_volume = universe_pairs(profile, args.pairs, args.alts)
+    config_path = prepare(strategy_config, args.profile, pairs, pre_trade, min_volume)
     periods = windows(args.start, args.end, args.window_months)
     if args.download:
         history = 3 + (args.train_months if args.optimize else 0)
@@ -467,12 +501,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             "download-data", "--config", config_path, "--timerange",
             f"{warmup_start:%Y%m%d}-{args.end:%Y%m%d}", "-t", profile.timeframe,
             *([args.detail] if args.detail else []),
-            "--pairs", *dict.fromkeys([*(args.pairs or profile_pairs(profile)), BENCHMARK]),
+            "--pairs", *dict.fromkeys([*(pairs or profile_pairs(profile)), BENCHMARK]),
         )  # fmt: skip
     mode = (
         ("otimizado" if args.optimize else "fixo")
         + (f"-detalhe{args.detail}" if args.detail else "")
         + ("-pares" if args.pairs else "")
+        + ("-alts" if args.alts else "")
     )
     btc_file = DATA / f"{BENCHMARK.replace('/', '_')}-{profile.timeframe}.json.gz"
     results: list[WindowResult] = []
@@ -503,6 +538,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         subtitle += " EXPLORATÓRIO: sem detalhe intrabar; não usar para aprovação da estratégia."
     if args.pairs:
         subtitle += f" Pares: {', '.join(args.pairs)}."
+    if args.alts:
+        subtitle += (
+            f" Com {len(ALTS)} alts voláteis, cada par só opera com volume de 24h ≥ "
+            f"{min_volume / 1e6:g} mi USDT (universo do agente)."
+        )
     report = summarize(args.profile, results, subtitle)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     name = f"walk-forward-{args.profile}-{mode}-{stamp}.md"

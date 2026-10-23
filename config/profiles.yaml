@@ -1,6 +1,7 @@
 # Allocation profiles optimized for return maximization and drawdown control.
 # Structure based on the trend regime (4h) and expansion of liquid momentum.
-# Recalibrate with: uv run python -m lab.walk_forward --profile <profile> --detail 5m (D-034)
+# Recalibrate with: uv run python -m lab.walk_forward --profile <profile> --detail 5m (D-034),
+# also with --alts, the volatile alts the universe takes in during a pump (D-039)
 
 account:
   quote_asset: USDT
@@ -39,6 +40,9 @@ profiles:
       adx_min: 24.0            # walk-forward (was 26)
       rsi_pullback_max: 41.0   # walk-forward: median equal to the previous one
       vol_rel_min: 2.3         # walk-forward (was 1.6)
+      # D-039: no setup when the stop capped at 4.5% is narrower than 1.5 ATR (ATR above 3%):
+      # the pumped alts the universe picks up stopped out inside their noise (doc/lab-results.md, 2.4)
+      min_stop_atr: 1.5
     llm:
       weight: 0.25
       min_confidence: 0.65
@@ -76,6 +80,7 @@ profiles:
       adx_min: 29.0            # walk-forward (was 25)
       rsi_pullback_max: 35.0   # walk-forward: median equal to the previous one
       vol_rel_min: 2.6         # walk-forward (was 2.2)
+      min_stop_atr: 2.0        # D-039: no setup with the 6.5% stop below 2 ATR (ATR above 3.25%)
     llm: 
       weight: 0.30
       min_confidence: 0.60
