@@ -4,14 +4,20 @@ from decimal import Decimal
 
 import pytest
 
-from tests.support.candles import raw_klines, uptrend_with_pullback
+from tests.support.candles import ohlcv, raw_klines, uptrend_with_pullback
 from tests.support.clients import fake_api
 from tests.support.exchange_info import rules_for, symbol_data
 from tests.support.fake_binance import FakeBinance, Fault
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.models import BookTicker, Ticker24h
 from trade_agent.exchange.rules import SymbolRules
-from trade_agent.market.candles import ClosedCandleCache, closed_only, fetch_candles, to_frame
+from trade_agent.market.candles import (
+    MAX_KLINES,
+    ClosedCandleCache,
+    closed_only,
+    fetch_candles,
+    to_frame,
+)
 from trade_agent.market.universe import (
     Tier,
     UniverseConfig,
@@ -19,6 +25,7 @@ from trade_agent.market.universe import (
     prefilter,
     select_universe,
 )
+from trade_agent.signals import FeatureParams
 
 D = Decimal
 
@@ -72,6 +79,23 @@ async def test_fetch_candles_drops_open_candle() -> None:
         assert candles.index[-1] == frame.index[-2]
         with pytest.raises(ValueError, match="intervalo"):
             await fetch_candles(api, "BTCUSDT", "2h", limit=10, now_ms=0)
+
+
+async def test_indicator_history_is_one_klines_request() -> None:
+    """``FeatureParams.history`` closed candles plus the open one fit in one request."""
+    history = FeatureParams().history
+    assert history < MAX_KLINES
+    fake = FakeBinance()
+    frame = ohlcv([100.0 + i % 7 for i in range(1500)])
+    fake.candles[("BTCUSDT", "1h")] = raw_klines(frame)
+    async with fake_api(fake) as api:
+        candles = await fetch_candles(
+            api, "BTCUSDT", "1h", limit=history, now_ms=int(frame["close_time"].iloc[-1])
+        )
+        (call,) = fake.calls("GET", "/api/v3/klines")
+        assert call.url.params["limit"] == str(MAX_KLINES)
+        assert len(candles) == history
+        assert candles.index[-1] == frame.index[-2]  # the open candle is dropped
 
 
 # ============================================================================ universe

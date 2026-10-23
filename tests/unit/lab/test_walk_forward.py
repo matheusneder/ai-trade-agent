@@ -39,6 +39,11 @@ def test_windows_and_timerange() -> None:
         wf.train_range(date(2025, 4, 1), 0)
 
 
+def test_warmup_months_hold_the_startup_candles() -> None:
+    """999 candles: 166.5 days on 4h, 41.6 on 1h, 999 on 1d (months of at least 28 days)."""
+    assert (wf.warmup_months("4h"), wf.warmup_months("1h"), wf.warmup_months("1d")) == (6, 2, 36)
+
+
 def test_profile_pairs_follow_tiers() -> None:
     conservative = wf.profile_pairs(CONFIG.profiles["conservador"])
     assert conservative[:2] == ["BTC/USDT", "ETH/USDT"]
@@ -275,7 +280,7 @@ def test_main_with_fixed_profile_params(lab: FakeLab) -> None:
     assert lab.calls[0][0] == "download-data"
     assert "5m" in lab.calls[0]
     assert all("--timeframe-detail" in call for call in lab.calls[1:])
-    assert "20241001-20250701" in lab.calls[0]
+    assert "20240701-20250701" in lab.calls[0]  # 6 months for the 999 startup candles
     assert lab.calls[0].count("BTC/USDT") == 1  # reference pair without duplication
     assert [c[0] for c in lab.calls[1:]] == ["backtesting", "backtesting"]
     config = json.loads((lab.root / "user_data" / "config.conservador.json").read_text())
@@ -299,7 +304,7 @@ def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
         ]
     )  # fmt: skip
     assert code == 0
-    assert "20240401-20250401" in lab.calls[0]  # training + warm-up
+    assert "20240101-20250401" in lab.calls[0]  # training + warm-up
     hyperopt = lab.calls[1]
     assert hyperopt[0] == "hyperopt"
     assert "20240701-20250101" in hyperopt
