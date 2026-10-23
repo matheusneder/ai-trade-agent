@@ -3,6 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -10,7 +11,8 @@ from pydantic import ValidationError
 from trade_agent.execution.orders import StopMode, TakeProfitMode
 from trade_agent.market.universe import Tier
 from trade_agent.risk.conditions import load_stop_conditions
-from trade_agent.signals import SignalParams
+from trade_agent.signals import SignalParams, setup_frame
+from trade_agent.signals.setups import BREAKOUT
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
 D = Decimal
@@ -71,6 +73,32 @@ def test_alt_atr_skips_entries_with_the_stop_at_its_cap() -> None:
     pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
     reward_risk, capped = _reward_risk("alt_atr", D("3"))
     assert capped and reward_risk < D(str(pre_trade.min_reward_risk))
+
+
+def _breakout_features(atr_pct: float) -> pd.DataFrame:
+    """One candle with a breakout in an uptrend, with ``atr_pct`` (fraction) of volatility."""
+    close = 100.0
+    return pd.DataFrame(
+        {
+            "close": [close], "ema_fast": [90.0], "ema_slow": [80.0], "regime_up": [True],
+            "adx": [30.0], "rsi": [70.0], "bullish": [True], "breakout_high": [99.0],
+            "vol_rel": [5.0], "atr": [close * atr_pct], "atr_pct": [atr_pct],
+        }
+    )  # fmt: skip
+
+
+def test_repository_profiles_skip_setups_with_the_stop_inside_the_noise() -> None:
+    """D-039: ``swing_trend`` (4.5% cap, 1.5 ATR) and ``momentum_alpha`` (6.5% cap, 2 ATR) skip
+    the setups whose capped stop is narrower than ``min_stop_atr`` ATRs; ``alt_atr`` keeps the
+    R:R check of D-036 instead."""
+    profiles = load_strategy_config(REPOSITORY_FILE).profiles
+    for name, max_atr_pct in (("swing_trend", 3.0), ("momentum_alpha", 3.25)):
+        params = profiles[name].signal_params()
+        assert params.min_stop_atr is not None
+        assert params.max_stop_pct / params.min_stop_atr == pytest.approx(max_atr_pct / 100)
+        for atr_pct, setup in ((max_atr_pct - 0.1, BREAKOUT), (max_atr_pct + 0.1, "")):
+            assert setup_frame(_breakout_features(atr_pct / 100), params).iloc[-1] == setup
+    assert profiles["alt_atr"].signal_params().min_stop_atr is None
 
 
 def test_fixture_profiles_are_valid() -> None:
