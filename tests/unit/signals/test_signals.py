@@ -139,6 +139,18 @@ def test_regime_filter_blocks_setups_when_benchmark_is_falling() -> None:
     assert evaluate(rising).setup == TREND_PULLBACK
 
 
+def test_min_stop_atr_skips_setups_with_the_stop_inside_the_noise() -> None:
+    features = compute_features(breakout())
+    atr_pct = float(features["atr_pct"].iloc[-1])
+    stop_atr = float(stop_pct_frame(features).iloc[-1]) / atr_pct  # 2 x ATR, below the cap
+    assert evaluate(features, SignalParams(min_stop_atr=stop_atr)).setup == BREAKOUT
+    assert evaluate(features, SignalParams(min_stop_atr=stop_atr + 0.1)).setup is None
+    capped = SignalParams(max_stop_pct=atr_pct, min_stop_pct=0.0, min_stop_atr=1.5)
+    assert evaluate(features, capped).setup is None  # the cap leaves a 1-ATR stop
+    pullback = compute_features(uptrend_with_pullback())
+    assert evaluate(pullback, SignalParams(min_stop_atr=1.5)).setup == TREND_PULLBACK
+
+
 def test_breakout_requires_uptrend() -> None:
     closes = [100 * math.exp(-0.003 * i) for i in range(300)]
     closes.append(closes[-1] * 1.5)  # strong breakout, but against the trend

@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; re-run on 999 candles on 2026-10-22, section 2.6). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -10,6 +10,7 @@
 | Backtester | Freqtrade (`freqtradeorg/freqtrade:stable`) through Docker (D-014). The "shell" strategy imports `trade_agent.signals`, the same code as production |
 | Intra-candle exits | Since 2026-10-16, `--detail 5m`: the stop and the trailing take-profit follow 5m candles. Without it, Freqtrade only sees the 4h high and low and assumes the high came first |
 | Data | Public Binance Spot 4h candles, since 2021-07 (core, large and mid; 4h and 5m prepended on 2026-10-22), for static pairs per *tier* (`lab/walk_forward.py`, `PAIRS_BY_TIER`): BTC and ETH; 10 *large*; 6 *mid*; 4 *small* |
+| Universe (`--alts`) | Since 2026-10-22, the tier lists plus 18 volatile alts (`ALTS`), each one tradable only while its 24h quote volume reaches the universe's minimum (5 M USDT), as in the agent (section 2.4) |
 | Windows | 15 quarterly validation windows, from 2023-01-01 to 2026-09-01 |
 | Indicator history | Since 2026-10-22, Freqtrade loads 999 candles before each window (`startup_candle_count` = `FeatureParams.history`), the same history as the agent (D-040, section 2.5). The earlier runs loaded 201, so the EMA 200 started each window at its SMA seed |
 | Optimization (D-017) | For each window, *hyperopt* (`SharpeHyperOptLossDaily`, 150 epochs, seed 42) on the **previous 12 months**. The chosen parameters are applied **unchanged** to the window |
@@ -24,6 +25,7 @@
 uv run python -m lab.walk_forward --profile swing_trend --optimize --download
 uv run python -m lab.walk_forward --profile momentum_alpha --optimize --download
 uv run python -m lab.walk_forward --profile swing_trend          # the profile's current parameters, no optimization
+uv run python -m lab.walk_forward --profile swing_trend --alts   # with the alts the universe takes in during a pump
 ```
 
 `--download` fetches the candles from 18 months before the first window on 4h: 6 months of warm-up for the 999 startup candles and 12 of training. When the data starts later, Freqtrade moves the start of the window forward (with the data since 2021-10, as before 2026-10-22, the first training started in 2022-03 instead of 2022-01). Freqtrade's `download-data` does not extend a pair that already has data backwards. For that, run it once with `--prepend` (the `momentum_alpha` configuration has the core, large and mid pairs):
@@ -122,6 +124,54 @@ Goal: a profile with a small share (5%, 50 USDT) and some profit, or the smalles
 
 **Adopted: fixed 10.9% activation**, the smallest loss in 2025–2026. The gain does not come from the activation level itself but from the R:R check: with the stop at its 7% cap (ATR above about 2.3%), (10.9 − 0.2) ÷ (7 + 0.2) = 1.49 is below 1.5 and the Risk Guard refuses the entry. The profile only trades the less volatile setups, about 190 trades instead of 460, with a third of the drawdown. At 11% the ratio at the cap is exactly 1.5: the agent (Decimals) accepts those entries, while the first lab run (floats, 1.4999…) refused them. With the agent's arithmetic, 11% gives −5.17% in 2025–2026; the lab now uses the same tolerance, and a test pins the 10.9% behavior. With 5% of the capital, the worst window (−3.93%) is about 2 USDT, and the portfolio of the three profiles goes from +67.28% to +65.75% over the 15 windows (holdout +19.62% → +19.72%; worst window −3.71% → −3.62%). The Demo decides whether the share grows.
 
+### 2.4 Real Demo trades and the stop inside the noise (2026-10-22)
+
+**Real sample** (Demo, 2026-10-01 → 2026-10-22, 45 positions read from PostgreSQL; setups rebuilt with the agent's code and its 251-candle window, excursions measured on public 5m candles). The agent made 12 gains and 32 losses, for −70.62 USDT. There were 33 stops (−121.54, three of them at *break-even*) and 11 trailing take-profits (+50.92). With an average gain of +7.1% and an average loss of −4.5%, the profile needs a 39% hit rate; the agent had 27%. 43 entries were breakouts; the 2 pullbacks were in BTC. Three weeks and a single regime make this a small sample.
+
+The entries bought pumps. At the signal candle (medians), the close was 29% above the EMA 50 (4.3 ATR), with RSI 79.5, +26% in 24h, a candle body of 1.8 ATR and 24h volume at 10× its 30-day median. Most of these assets (MOVR, GTC, RLC, MAGIC, OGN, ...) normally trade below the universe's 5 M USDT a day. They join it only during the pump, often in the *large* tier (D-027), and the lab's static lists never had them. With a median ATR of 5.3%, the 4.5–5% stop caps left a median stop of **0.9 ATR**. The median time to the stop was 2 h, and 18 of the 30 stops below −2% traded back above the entry within 72 h. Winners were as stretched as losers (RSI 82 vs 79), so the entry stretch alone does not separate them.
+
+**Method:** the same as section 2 (fixed parameters, `--detail 5m`, *break-even*, maximum holding and the R:R check), with one change at a time, chosen on the design windows and only then run on the holdout. Each variant ran on the tier lists and with `--alts`.
+
+| Design (2023–2024), compounded | `swing_trend` tier / alts | `momentum_alpha` tier / alts | `alt_atr` tier / alts |
+|---|--:|--:|--:|
+| Baseline | +33.25% / **−21.20%** (DD 21.3%) | +49.29% / **−23.11%** (DD 26.4%) | +20.26% / +20.15% |
+| Close ≤ 3 ATR above the EMA 50 | +11.13% / −11.30% | +11.14% / −30.39% | +4.02% / +2.61% |
+| Pullback only (RSI ≤ 50, no breakout) | −10.50% / −21.26% | −5.27% / −12.08% | +2.36% / +1.29% |
+| Limit entry 0.5 ATR below the close, for one candle | +31.60% / +15.59% (DD 16.4%) | +24.11% / +18.31% | +17.96% / +22.42% |
+| Exit at RSI ≥ 80 in profit | +26.64% / −31.46% | +31.20% / −19.97% | +8.96% / +9.34% |
+| Universe by the 30-day median volume | — / +6.55% (DD 18.6%) | — / +16.98% (DD 22.1%) | — / +21.32% |
+| **Stop ≥ 1.5 ATR after the cap** | +29.87% / **+39.54%** (DD 9.8%) | +49.69% / −6.53% (DD 16.3%) | same as the baseline |
+
+With `--alts`, the baseline reproduces the Demo. In `swing_trend`, the 266 alt trades lost 357 USDT (26% hit rate), while the core and *large* trades made 221. Only the stop filter kept every window's drawdown under 13% with the alts. In `alt_atr` the filter changes nothing, because its R:R check (D-036) already refuses the entries whose stop is at its cap.
+
+Sensitivity to the multiple k (design, tier / alts):
+
+- `swing_trend`: k = 1.25 → +40.95% / +27.25% (DD 14.3%); 1.5 → +29.87% / +39.54%; 2 → +30.21% / +26.58%. The gain holds from 1.25 to 2, so the value fixed before the run, 1.5, stays.
+- `momentum_alpha`: k = 1.5 → +49.69% / −6.53%; 2 → +32.34% / +28.26% (DD 9.8%); 3 → +18.58% / +20.34%. k = 2 is the smallest value within the drawdown cap.
+
+| Holdout (2025-01 → 2026-09) | Tier | Alts | Alts + 11 newer ones (ENA, STRK, PYTH, W, ...) | 15 windows, tier / alts |
+|---|--:|--:|--:|--:|
+| `swing_trend` baseline | +26.88% | +46.07% | +40.52% | +69.07% / +15.11% (DD 21.3%) |
+| `swing_trend`, k = 1.5 | **+32.29%** | +29.90% | +27.29% | **+71.81% / +81.27%** (DD 9.8%) |
+| `momentum_alpha` baseline | +7.02% | −1.61% | +2.14% | +59.77% / −24.34% (DD 26.4%) |
+| `momentum_alpha`, k = 2 | **+11.69%** | **+11.03%** | **+6.53%** | +47.82% / **+42.41%** (DD 9.8%) |
+| `alt_atr` (unchanged) | — | +5.59% | +5.60% | — / +26.87% |
+
+**Adopted (D-039):** `signals.min_stop_atr` 1.5 in `swing_trend`, which skips setups with an ATR above 3%, and 2.0 in `momentum_alpha` (ATR above 3.25%). Weighted by the capital shares (65/30/5%), the 15 windows go from +65.2% to +62.2% with the tier lists (worst window −3.6% → −6.4%). With the alts, they go from **+3.2% to +66.4%** (worst window **−14.9% → −4.2%**).
+
+The cost is the alt seasons: in `swing_trend` the alts made +31% in 2025-Q3, and the holdout with alts falls from +46.07% to +29.90%. On the 44 real trades, the filter would have skipped 38 (−57.50 USDT) and kept 6 (−13.12 USDT). The holdout had already been used (D-034 to D-036), so this is **not** a clean out-of-sample result; the Demo is the next validation.
+
+**Rejected:**
+
+- The stretch filter and the pullback-only setup lose on both baskets: the breakouts that work are as stretched as the ones that fail.
+- The limit entry below the close and the RSI exit lose on the tier lists. With the alts in `swing_trend`, the limit entry also goes over the drawdown cap.
+- The 30-day median volume removes the illiquid alts, but not the pumps of the liquid ones (drawdown 18–22%).
+
+**Also found:**
+
+1. With its 251-candle EMA 200 (section 5), the agent bought COMPUSDT on 2026-10-20 on a breakout that the full history does not show.
+2. The trailing `TAKE_PROFIT` fills at market. 3 of the 11 take-profits triggered on spikes seen only on the Demo (the public high stayed below the activation) and filled 4–12% below the trigger.
+
 ### 2.5 Indicator history: the agent and the lab on 999 candles (2026-10-22)
 
 TA-Lib starts the EMA 200 from the SMA of its first 200 candles, and the seed fades by a factor of 1 − 2/201 per candle. The agent computed the features on the last 251 closed candles (`warmup + 50`), where the seed still weighs ≈ 60% of the EMA 200. The lab was not on the full history either: Freqtrade loads only `startup_candle_count` candles (201) before each window, so every quarterly window started with the EMA 200 at its seed, and it converged only weeks later. The trend check (EMA 50 above EMA 200, close above EMA 200) and BTC's regime depended on how many candles each side had. On 2026-10-20 the agent bought COMPUSDT (`momentum_alpha`) on a breakout with score 0.85. With the full history the EMA 200 was 22.676 instead of 22.506, the score was 0.35 and there was no setup.
@@ -209,12 +259,14 @@ With the startup trimmed by date, `momentum_alpha` against its 2026-10-01 parame
 | `max_pct` (stop) | 4.5 | **6.5** (D-034; was 5.0) |
 | `activation_pct` (TP) | 9.7 | **13.0** (D-034; was 9.5) |
 | `trailing_delta_bps` (TP) | 100 | 130 |
+| `min_stop_atr` (signals) | **1.5** (D-039) | **2.0** (D-039) |
 
 The median uses trainings later than the first windows, so this set was **not** validated out of sample as a whole. The Demo (doc 04) is the validation that counts.
 
 ## 5. Limitations
 
-- **Survivorship bias:** the pair list is static, made of assets that exist since 2021. The real universe changes every cycle (D-027), and most of the recent setups showed up in assets outside that list.
+- **Survivorship bias:** the pair list is static, made of assets that exist since 2021. The real universe changes every cycle (D-027), and most of the recent setups showed up in assets outside that list. `--alts` (section 2.4) emulates the minimum 24h volume of the universe, not its *tier* ranking, and its 18 alts were picked among the ones the agent traded or saw in 2026-10.
+- **Indicator history:** the agent computes the features on the last 251 candles (`warmup + 50`), so its EMA 200 is still close to the TA-Lib seed (an SMA); the lab uses the whole history. In 2025–2026, on the `swing_trend` pairs, about 9% of the entry signals differ each way (section 2.4).
 - **Idealized execution:** fills at the stop price and at the candle open, with no *slippage* beyond the fee. With `--detail 5m` the order of events within the 4h candle follows 5m candles; within each 5m candle it is still approximated.
 - **No LLM layer** and no Risk Guard limits.
 - **Short sample:** 15 windows and about 300 trades per profile.
