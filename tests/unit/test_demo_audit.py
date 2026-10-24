@@ -66,19 +66,37 @@ async def test_trailing_take_profit_skips_quiet_minutes_and_fills_at_the_bid() -
         tape, "XUSDT", oco(ExitLeg(TP, D(110), 100), ExitLeg(SL, D(95))), until_ms=at(10)
     )
     assert found == Exit("TAKE_PROFIT", at(3, 1), D("112.86"), D("112.7"), D("112.5"))
-    assert [start for start, _ in tape.trade_calls] == [at(1), at(3)]
+    # minutes 1 and 3 locate the trades; the execution window is fetched from the trigger on
+    assert [start for start, _ in tape.trade_calls] == [at(1), at(3), at(3, 1)]
 
 
-async def test_fixed_stop_fills_at_the_trigger_print_or_falls_back_to_it() -> None:
+async def test_fixed_stop_fills_at_a_bid_print_or_is_marked_unconfirmed() -> None:
     legs = oco(ExitLeg(TP, D(110), 100), ExitLeg(SL, D(95)))
     sold = FakeTape([(at(0), "96", False), (at(1), "94.9", True)])
     assert await replay(sold, "XUSDT", legs, until_ms=at(5)) == Exit(
         "STOP_LOSS", at(1), D(95), D("94.9"), D("94.9")
     )
-    bought = FakeTape([(at(0), "96", False), (at(1), "94.8", False)])
-    found = await replay(bought, "XUSDT", legs, until_ms=at(5))
-    assert found is not None
-    assert found.price == D("94.8")
+    # only a buy print: no observed sell, so the fill is the 250 ms low, flagged as an estimate
+    bought = FakeTape([(at(0), "96", False), (at(1), "94.8", False), (at(1, 0.2), "94.5", False)])
+    assert await replay(bought, "XUSDT", legs, until_ms=at(5)) == Exit(
+        "STOP_LOSS", at(1), D(95), D("94.5"), D("94.5"), fill_confirmed=False
+    )
+
+
+@pytest.mark.parametrize("shift", [0, -1])
+async def test_the_fill_is_read_across_the_trigger_minute(shift: float) -> None:
+    """The review's case: the trigger at 59.95 s, the bid print and the low after 60 s. The
+    result must not depend on where the minute boundary falls (``shift`` moves it all 1 s)."""
+    tape = FakeTape(
+        [
+            (at(0, 10 + shift), "96", False),
+            (at(0, 59.95 + shift), "94", False),  # triggers the stop at 95 (a buy print)
+            (at(0, 60.05 + shift), "90", True),  # the first print at the bid: the fill
+            (at(0, 60.08 + shift), "89", False),  # within 250 ms: the low
+        ]
+    )
+    found = await replay(tape, "XUSDT", oco(ExitLeg(SL, D(95))), until_ms=at(5))
+    assert found == Exit("STOP_LOSS", at(0, 59.95 + shift), D(95), D(90), D(89))
 
 
 async def test_limit_maker_fills_at_its_price_after_a_print_above() -> None:
@@ -108,6 +126,15 @@ async def test_a_later_list_replaces_the_legs_and_later_lists_are_ignored() -> N
     assert found == Exit("STOP_LOSS", at(4), D(90), D("89.9"), D("89.9"))
     assert await replay(tape, "XUSDT", segments, until_ms=at(3, 30)) is None
     assert await replay(tape, "XUSDT", segments[:1], until_ms=at(2)) is None
+
+
+async def test_a_replacement_is_in_force_at_its_own_millisecond() -> None:
+    """The review's case: the stop moves from 95 to 90 at 60.000 s, and 94 prints at that
+    very millisecond. Segments are half-open, so the new stop applies and fires on 89."""
+    tape = FakeTape([(at(0, 30), "96", False), (at(1), "94", True), (at(1, 0.1), "89", True)])
+    segments = [Segment(at(0), (ExitLeg(SL, D(95)),)), Segment(at(1), (ExitLeg(SL, D(90)),))]
+    found = await replay(tape, "XUSDT", segments, until_ms=at(5))
+    assert found == Exit("STOP_LOSS", at(1, 0.1), D(90), D(89), D(89))
 
 
 async def test_market_exit_unless_a_leg_fires_first() -> None:
@@ -279,6 +306,20 @@ def test_summary_and_markdown_report() -> None:
     assert (
         "PnL of the repriced positions: Demo -12.00, production -4.54 (difference +7.46)" in report
     )
+
+
+def test_report_flags_fills_estimated_without_a_bid_print() -> None:
+    estimated = audit(
+        7,
+        DemoExit("STOP_LOSS", at(5), D(94), D(1)),
+        Exit("STOP_LOSS", at(5), D(95), D("94.5"), D("94.5"), fill_confirmed=False),
+    )
+    assert summary([estimated])["unconfirmed_fills"] == [7]
+    assert summary(sample())["unconfirmed_fills"] == []
+    report = render([estimated])
+    assert "STOP_LOSS 10-10 00:05:00 (no bid print: fill estimated at the 250 ms low)" in report
+    assert "Production fills estimated without a bid print within 60 s: [7]" in report
+    assert "estimated without a bid print within 60 s: none" in render(sample())
 
 
 # ---------------------------------------------------------------------- Binance tape
