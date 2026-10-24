@@ -57,7 +57,9 @@ RATIO_TOLERANCE = 1e-9
 # history before a window would lose the window's first candles, while the agent evaluates any
 # asset with ``FeatureParams.warmup`` candles. Both backtesting call sites pass the window's
 # timerange, so trimming with ``startup_candles=0`` cuts by its start date instead: identical
-# for pairs with the full history, and recent listings trade from the window's start.
+# for pairs with the full history, and recent listings trade from the window's start. The
+# callbacks' cursor still assumes the count trim, so they read candles through
+# ``_closed_candles`` (cut by time), never the cursor's last row.
 def _trim_dataframe_by_date(
     df: DataFrame, timerange: Any, *, df_date_col: str = "date", startup_candles: int = 0
 ) -> DataFrame:
@@ -232,7 +234,7 @@ class TradeAgentStrategy(IStrategy):
         if max_rate >= trade.open_rate * (1 + self._tp_activation(pair, trade)):
             return -float(self.tp_trailing.value)  # trailing TP activated: follows the top
         stop_pct = self._entry_stop_pct(pair, trade)
-        if self._break_even_reached(pair, trade, stop_pct):
+        if self._break_even_reached(pair, trade, stop_pct, current_time):
             return stoploss_from_open(
                 BREAK_EVEN_FEE_BUFFER, current_profit, is_short=False, leverage=trade.leverage
             )
@@ -240,13 +242,30 @@ class TradeAgentStrategy(IStrategy):
             -stop_pct, current_profit, is_short=False, leverage=trade.leverage
         )
 
-    def _break_even_reached(self, pair: str, trade: Trade, stop_pct: float) -> bool:
+    def _closed_candles(self, pair: str, current_time: datetime) -> DataFrame:
+        """The analyzed candles already closed at ``current_time``, never later ones.
+
+        Freqtrade caches the analyzed dataframe before the startup trim and points the
+        callbacks' cursor at ``startup_candle_count + row``. With the trim by date, a pair with
+        less history before the window loses fewer rows, so that cursor runs ahead of time.
+        Cutting by the candle's close time keeps every callback causal whatever the cursor;
+        for a pair with the full history it is the same last candle as before.
+        """
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if dataframe.empty:
+            return dataframe
+        span = timedelta(minutes=timeframe_to_minutes(self.timeframe))
+        return dataframe.loc[dataframe["date"] <= current_time - span]
+
+    def _break_even_reached(
+        self, pair: str, trade: Trade, stop_pct: float, current_time: datetime
+    ) -> bool:
         """The agent checks *break-even* once per cycle (candle close), not on the intra-candle
         high: the last closed candle's close at ``break_even_r`` × the stop distance."""
         trigger_r = float(self.break_even_r.value)
         if trigger_r <= 0:
             return False
-        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        dataframe = self._closed_candles(pair, current_time)
         if dataframe.empty:
             return False
         last = dataframe.iloc[-1]
@@ -281,7 +300,7 @@ class TradeAgentStrategy(IStrategy):
         side: str,
         **kwargs: Any,
     ) -> float:
-        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        dataframe = self._closed_candles(pair, current_time)  # the entry's signal candle
         stop_pct = (
             float(dataframe["stop_pct"].iloc[-1])
             if not dataframe.empty
