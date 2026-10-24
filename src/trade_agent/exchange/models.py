@@ -165,6 +165,17 @@ class Ticker24h(_Model):
     count: int = 0
 
 
+class AggTrade(_Model):
+    """Public compressed trade (``GET /api/v3/aggTrades``)."""
+
+    id: int = Field(alias="a")
+    price: Decimal = Field(alias="p")
+    qty: Decimal = Field(alias="q")
+    time: int = Field(alias="T")
+    buyer_is_maker: bool = Field(alias="m")
+    """The taker sold: the trade printed at the best bid."""
+
+
 class Trade(_Model):
     """Account trade (``GET /api/v3/myTrades``)."""
 

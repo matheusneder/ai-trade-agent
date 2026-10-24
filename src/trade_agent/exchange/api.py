@@ -8,6 +8,7 @@ from typing import Any, Literal
 from trade_agent.exchange.errors import NO_SUCH_ORDER_CODE, BinanceRejectedError
 from trade_agent.exchange.models import (
     Account,
+    AggTrade,
     BookTicker,
     CommissionRates,
     Order,
@@ -81,6 +82,29 @@ class BinanceSpotApi:
             },
         )
         return data
+
+    async def agg_trades(
+        self,
+        symbol: str,
+        *,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        from_id: int | None = None,
+        limit: int = 1000,
+    ) -> list[AggTrade]:
+        """Public compressed trades, oldest first (``startTime``/``endTime`` < 1 h apart)."""
+        data = await self.rest.public(
+            "GET",
+            "/api/v3/aggTrades",
+            {
+                "symbol": symbol,
+                "fromId": from_id,
+                "startTime": start_time,
+                "endTime": end_time,
+                "limit": limit,
+            },
+        )
+        return [AggTrade.model_validate(item) for item in data]
 
     async def delist_schedule(self) -> set[str]:
         """Symbols with a scheduled delisting (``GET /sapi/v1/spot/delist-schedule``)."""
