@@ -11,12 +11,17 @@ the second):
 
 * the entry is the Demo's (same price, quantity and time);
 * each confirmed protection list (the entry OPOCO, then each OCO) works from its intent until
-  the next one. The legs follow Binance's trailing stop FAQ: tracking starts at
+  the next one, as half-open intervals ``[start, next start)``: a trade at the very millisecond
+  of a replacement meets the new list. The stored timestamps cannot order an exchange event
+  inside one millisecond; that is the convention. The legs follow Binance's trailing stop FAQ:
+  tracking starts at
   ``stopPrice`` (at the first trade without one), and the trigger is a ``trailingDelta``
   drop from the highest trade since then;
 * a market leg fills at the trigger trade when that trade printed at the bid, else at the
   next trade that did (the best bid, as far as the tape shows it). ``worst`` is the lowest
-  trade in the 250 ms after the trigger;
+  trade in the 250 ms after the trigger. Both are read on trades fetched from the trigger on
+  (``EXECUTION_WINDOW_MS``), across the minute that located the trigger. Without any print at
+  the bid in that window, the fill falls back to ``worst`` and is marked unconfirmed;
 * a ``LIMIT_MAKER`` leg fills at its price once a trade prints above it;
 * a Demo exit that was not a leg (decision, fail-safe, manual) is a market sell at the same
   moment, unless a leg fires first;
@@ -42,6 +47,9 @@ BIPS = Decimal(10_000)
 MINUTE_MS = 60_000
 WORST_WINDOW_MS = 250
 """Window of the pessimistic price after a market leg triggers."""
+EXECUTION_WINDOW_MS = MINUTE_MS
+"""Trades fetched from a market leg's trigger on to find its fill (the first print at the bid),
+whatever minute the trigger fell in."""
 AGG_TRADES_LIMIT = 1000
 KLINES_LIMIT = 1000
 CONFIRM_TOLERANCE_MS = MINUTE_MS
@@ -99,6 +107,9 @@ class Exit:
     """Trigger price of a stop leg (``None`` for a limit or market exit)."""
     price: Decimal
     worst: Decimal
+    fill_confirmed: bool = True
+    """``False`` when no trade printed at the bid within ``EXECUTION_WINDOW_MS`` of the
+    trigger: ``price`` is then ``worst``, an estimate rather than an observed sell."""
 
 
 class Tape(Protocol):
@@ -189,13 +200,19 @@ class _LegState:
             self.peak = max(self.peak, candle.high)
 
 
-def _market_fill(trades: Sequence[AggTrade], index: int) -> tuple[Decimal, Decimal]:
-    """(price, worst) of a market sell sent at ``trades[index]``."""
-    first = trades[index]
-    later = trades[index:]
-    price = next((t.price for t in later if t.buyer_is_maker), first.price)
-    worst = min(t.price for t in later if t.time <= first.time + WORST_WINDOW_MS)
-    return price, worst
+async def _market_fill(tape: Tape, symbol: str, trigger: AggTrade) -> tuple[Decimal, Decimal, bool]:
+    """(price, worst, confirmed) of a market sell sent at ``trigger``.
+
+    The trades come from ``trigger`` on, not from the minute that located it, so a fill or a
+    low printed just after the minute's end still counts.
+    """
+    fetched = await tape.trades(symbol, trigger.time, trigger.time + EXECUTION_WINDOW_MS)
+    later = [trigger, *(t for t in fetched if t.id > trigger.id)]
+    worst = min(t.price for t in later if t.time <= trigger.time + WORST_WINDOW_MS)
+    bid = next((t.price for t in later if t.buyer_is_maker), None)
+    if bid is None:
+        return worst, worst, False
+    return bid, worst, True
 
 
 async def _replay_segment(tape: Tape, symbol: str, segment: Segment, end_ms: int) -> Exit | None:
@@ -207,15 +224,15 @@ async def _replay_segment(tape: Tape, symbol: str, segment: Segment, end_ms: int
             continue
         start = max(segment.start_ms, candle.open_ms)
         trades = await tape.trades(symbol, start, min(candle.open_ms + MINUTE_MS - 1, end_ms))
-        for index, trade in enumerate(trades):
+        for trade in trades:
             for s in states:
                 level = s.on_trade(trade.price)
                 if level is None:
                     continue
                 if s.leg.kind is LegKind.LIMIT_MAKER:
                     return Exit(s.leg.kind.value, trade.time, None, level, level)
-                price, worst = _market_fill(trades, index)
-                return Exit(s.leg.kind.value, trade.time, level, price, worst)
+                price, worst, confirmed = await _market_fill(tape, symbol, trade)
+                return Exit(s.leg.kind.value, trade.time, level, price, worst, confirmed)
     return None
 
 
@@ -235,8 +252,9 @@ async def replay(
     for index, segment in enumerate(segments):
         if segment.start_ms > end:
             break
-        following = segments[index + 1].start_ms if index + 1 < len(segments) else end
-        found = await _replay_segment(tape, symbol, segment, min(following, end))
+        # half-open [start, next start): at a shared millisecond the newer list is in force
+        last_ms = segments[index + 1].start_ms - 1 if index + 1 < len(segments) else end
+        found = await _replay_segment(tape, symbol, segment, min(last_ms, end))
         if found is not None:
             return found
     if market_exit_ms is None:
@@ -244,8 +262,8 @@ async def replay(
     trades = await tape.trades(symbol, market_exit_ms, market_exit_ms + MINUTE_MS)
     if not trades:
         return None
-    price, worst = _market_fill(trades, 0)
-    return Exit(MARKET, trades[0].time, None, price, worst)
+    price, worst, confirmed = await _market_fill(tape, symbol, trades[0])
+    return Exit(MARKET, trades[0].time, None, price, worst, confirmed)
 
 
 # ---------------------------------------------------------------------- positions
@@ -416,6 +434,9 @@ def summary(audits: Sequence[PositionAudit]) -> dict[str, Any]:
         "confirmed": sum(a.confirmed for a in audits),
         "diverged": [a.position_id for a in audits if not a.confirmed],
         "open_at_horizon": [a.position_id for a in audits if a.real is None],
+        "unconfirmed_fills": [
+            a.position_id for a in audits if a.real is not None and not a.real.fill_confirmed
+        ],
         "demo_pnl": demo_total,
         "real_pnl": real_total,
         "difference": real_total - demo_total,
@@ -440,6 +461,8 @@ def render(audits: Sequence[PositionAudit]) -> str:
         else:
             real = f"{a.real.reason} {_time(a.real.time_ms)}"
         mark = "" if a.confirmed else " **(diverged)**"
+        if a.real is not None and not a.real.fill_confirmed:
+            mark += " (no bid print: fill estimated at the 250 ms low)"
         real_pnl = "n/a" if a.real_pnl is None else f"{a.real_pnl:+.2f}"
         demo = f"{a.demo.reason} {_time(a.demo.time_ms)}"
         lines.append(
@@ -455,6 +478,8 @@ def render(audits: Sequence[PositionAudit]) -> str:
         f"- PnL of the repriced positions: Demo {totals['demo_pnl']:+.2f}"
         f", production {totals['real_pnl']:+.2f} (difference {totals['difference']:+.2f})",
         f"- Demo fill vs trigger: {totals['demo_slip']}",
+        f"- Production fills estimated without a bid print within"
+        f" {EXECUTION_WINDOW_MS // 1000} s: {totals['unconfirmed_fills'] or 'none'}",
         f"- Production fill vs trigger: {totals['real_slip']}"
         f"; lowest trade in {WORST_WINDOW_MS} ms: {totals['real_worst']}",
     ]
