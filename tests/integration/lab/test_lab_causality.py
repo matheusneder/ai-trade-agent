@@ -7,8 +7,13 @@ pairs; the strategy must never read it. The second run rewrites the alts' 4h can
 ``CUT`` on, and every entry before ``CUT`` (time, price, size) and every exit before ``CUT``
 (time, price, reason) must be identical.
 
-Needs Docker, the pinned image and the lab's candles (``LAB_DATA_DIR``, default
-``lab/freqtrade/user_data/data/binance``); it is skipped without them (as on CI).
+The second test reproduces the review's callback case directly: the real ``DataProvider`` of
+the pinned image with its cursor ahead (552 candles of history), and an entry whose own 4h
+candle has not closed yet. Changing that candle's future high and low must not change the stop
+nor the size, which come from the signal candle closed at the entry, as in the agent.
+
+Needs Docker, the pinned image and, for the first test, the lab's candles (``LAB_DATA_DIR``,
+default ``lab/freqtrade/user_data/data/binance``); they are skipped without them (as on CI).
 """
 
 import gzip
@@ -60,12 +65,16 @@ def _docker() -> str:
     return docker
 
 
-def _require_environment() -> None:
+def _require_image() -> None:
     image = subprocess.run(  # noqa: S603 - fixed arguments, the image comes from the repository
         [_docker(), "image", "inspect", _image()], capture_output=True, check=False
     )
     if image.returncode != 0:
         pytest.skip("the pinned Freqtrade image is not pulled")
+
+
+def _require_environment() -> None:
+    _require_image()
     missing = [f for p in PAIRS for f in _files(p) if not (_data_dir() / f).exists()]
     if missing:
         pytest.skip(f"lab candles missing in {_data_dir()}: {missing[:3]}")
@@ -167,3 +176,107 @@ def test_changing_future_candles_does_not_change_earlier_sizing_or_exits(tmp_pat
     assert any(pair in SHORT_HISTORY for pair, *_ in entries)
     assert any(pair in SHORT_HISTORY for pair, *_ in exits)
     assert _before_cut(rewritten) == (entries, exits)
+
+
+# The review's case, run inside the pinned image: synthetic 4h candles around 100 with an ATR%
+# of about 0.8% (a 2.48% stop at 3.1 ATR, below the 4.5% cap), 552 of them before the window,
+# and the DataProvider cursor where Freqtrade puts it (startup + row), i.e. ahead of time.
+CALLBACK_SCRIPT = r"""
+import json
+import sys
+from datetime import UTC, datetime, timedelta
+
+import numpy as np
+import pandas as pd
+from freqtrade.data.dataprovider import DataProvider
+from freqtrade.enums import CandleType, RunMode
+from freqtrade.persistence import Trade
+
+sys.path.insert(0, "/freqtrade/user_data/strategies")
+import trade_agent_strategy as module
+
+PAIR = "ALT/USDT"
+WINDOW = datetime(2023, 1, 1, tzinfo=UTC)
+ENTRY = WINDOW + timedelta(hours=4)  # its candle closes at 08:00
+HISTORY = 552
+
+
+def candles(entry_high, entry_low):
+    dates = pd.date_range(WINDOW - timedelta(hours=4 * HISTORY), periods=HISTORY + 12, freq="4h")
+    close = 100 * np.exp(np.cumsum(np.random.default_rng(7).normal(0, 0.001, len(dates))))
+    close = close / close[HISTORY] * 100  # the signal candle (00:00) closes at 100
+    frame = pd.DataFrame({"date": dates, "open": np.roll(close, 1), "close": close})
+    frame.loc[0, "open"] = close[0]
+    frame["high"] = frame[["open", "close"]].max(axis=1) * 1.004
+    frame["low"] = frame[["open", "close"]].min(axis=1) * 0.996
+    frame["volume"] = 1000.0
+    entry = frame["date"] == ENTRY
+    frame.loc[entry, ["open", "close"]] = 100.0
+    frame.loc[entry, "high"], frame.loc[entry, "low"] = entry_high, entry_low
+    return frame
+
+
+class Wallets:
+    def get_total_stake_amount(self):
+        return 1000.0
+
+
+def run(entry_high, entry_low):
+    config = {
+        "timeframe": "4h", "stake_currency": "USDT", "dry_run": True,
+        "runmode": RunMode.BACKTEST, "candle_type_def": CandleType.SPOT,
+        "exchange": {"name": "binance", "pair_whitelist": [PAIR]},
+    }
+    strategy = module.TradeAgentStrategy(config)
+    for name, value in {
+        "atr_stop_mult": 3.1, "stop_max_pct": 0.045, "risk_per_trade": 0.012,
+        "max_position_pct": 0.42, "tp_activation": 0.097, "break_even_r": 1.2,
+    }.items():
+        getattr(strategy, name).value = value
+    strategy.dp = None  # no benchmark: the regime uses the pair's own close
+    frame = strategy.populate_indicators(candles(entry_high, entry_low), {"pair": PAIR})
+    frame = strategy.populate_entry_trend(frame, {"pair": PAIR})
+    provider = DataProvider(config, None)
+    provider._set_cached_df(PAIR, "4h", frame, CandleType.SPOT)
+    provider._set_dataframe_max_index(PAIR, strategy.startup_candle_count + 2)
+    strategy.dp, strategy.wallets = provider, Wallets()
+    trade = Trade(
+        pair=PAIR, open_rate=100.0, open_date=ENTRY, amount=4.2, stake_amount=420.0,
+        fee_open=0.001, fee_close=0.001, exchange="binance", is_short=False, leverage=1.0,
+        max_rate=100.0,
+    )
+    stop = strategy.custom_stoploss(
+        PAIR, trade, ENTRY + timedelta(minutes=5), 100.0, 0.0, after_fill=False
+    )
+    stake = strategy.custom_stake_amount(PAIR, ENTRY, 100.0, 0.0, None, 10_000.0, 1.0, "b", "long")
+    signal = float(frame.loc[frame["date"] == WINDOW, "stop_pct"].iloc[0])
+    return {"stop": stop, "stake": stake, "signal_stop": signal}
+
+
+print(json.dumps([run(100.4, 99.6), run(110.0, 90.0)]))
+"""
+
+
+def test_the_entry_stop_comes_from_the_closed_signal_candle(tmp_path: Path) -> None:
+    _require_image()
+    strategies = tmp_path / "strategies"
+    strategies.mkdir()
+    shutil.copy2(LAB / "user_data" / "strategies" / "trade_agent_strategy.py", strategies)
+    result = subprocess.run(  # noqa: S603 - fixed arguments, the paths are the test's own
+        [
+            _docker(), "run", "--rm", "--entrypoint", "python",
+            "-v", f"{strategies.as_posix()}:/freqtrade/user_data/strategies:ro",
+            "-v", f"{(ROOT / 'src').as_posix()}:/opt/trade_agent_src:ro",
+            "-e", "PYTHONPATH=/opt/trade_agent_src", _image(), "-c", CALLBACK_SCRIPT,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )  # fmt: skip
+    calm, wide = json.loads(result.stdout.strip().splitlines()[-1])
+    # the unfinished entry candle (high/low 100.4/99.6 vs 110/90) changes nothing at 04:05
+    assert wide == calm
+    # the stop is the signal candle's (below the cap), and the size is risk / that stop
+    assert calm["stop"] == pytest.approx(calm["signal_stop"])
+    assert calm["signal_stop"] < 0.045
+    assert calm["stake"] == pytest.approx(min(1000 * 0.012 / calm["signal_stop"], 420.0))
