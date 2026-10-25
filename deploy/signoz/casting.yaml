@@ -12,11 +12,18 @@ spec:
     mode: docker
     flavor: compose
   # Foundry 0.3.0 writes `version` but does not apply it to the image (it stays :latest): pin both.
+  # The metastore keeps Foundry's major (PostgreSQL 16) at its latest minor: a new major needs
+  # a migration of the volume. ClickHouse stays on Foundry's 25.12.5, which it checks against
+  # the ingester ("ingester v0.144.15 is incompatible with telemetrystore 25.12.11").
   signoz:
     spec:
-      version: v0.146.0
-      image: signoz/signoz:v0.146.0
+      version: v0.147.0
+      image: signoz/signoz:v0.147.0
   ingester:
     spec:
-      version: v0.144.14
-      image: signoz/signoz-otel-collector:v0.144.14
+      version: v0.144.15
+      image: signoz/signoz-otel-collector:v0.144.15
+  metastore:
+    spec:
+      version: "16.15"
+      image: postgres:16.15
