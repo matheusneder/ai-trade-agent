@@ -10,7 +10,7 @@ Autonomous cryptocurrency trading agent for **Binance Spot**. It decides based o
 
 ## Requirements
 
-- Python 3.12+ (developed on 3.14)
+- Python 3.12+ (developed on 3.15)
 - [uv](https://docs.astral.sh/uv/) (`pip install --user uv`; this README's commands use `uv`, and `python -m uv` works too)
 - Docker (integration tests with PostgreSQL and deployment)
 
