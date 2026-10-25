@@ -197,10 +197,15 @@ class TradeAgentStrategy(IStrategy):
         return dataframe
 
     def _entry_value(self, pair: str, trade: Trade, column: str, default: float) -> float:
-        """``column`` on the signal candle of the entry (``default`` if missing)."""
-        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        candle = timeframe_to_prev_date(self.timeframe, trade.open_date_utc)
-        rows = dataframe.loc[dataframe["date"] == candle]
+        """``column`` on the entry's signal candle (``default`` if missing).
+
+        That is the last candle closed when the entry was sent, as in the agent, which sizes
+        the position and places the OCO with that signal's stop, fixed from then on. It is
+        the same candle ``custom_stake_amount`` sizes with. The entry's own candle is still
+        open at the entry: reading it (``timeframe_to_prev_date(open_date)``) would either
+        miss it (with the cursor aligned) or see its final high and low (cursor ahead).
+        """
+        rows = self._closed_candles(pair, trade.open_date_utc)
         if rows.empty:
             return default
         value = float(rows[column].iloc[-1])
