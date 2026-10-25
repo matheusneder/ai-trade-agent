@@ -232,3 +232,11 @@ Scope: `global` (default) or the profile name. Only the configured `TA_TELEGRAM_
 
   For each position it shows the Demo exit, the exit the same legs would have had on `api.binance.com` (positions marked **(diverged)** left differently), each fill against its trigger, and the Demo PnL repriced at the production fill. A fill with no print at the bid within 60 s of its trigger is estimated at the 250 ms low and listed apart. The repriced PnL keeps the Demo's entry, quantity, fees and later adjustments: it diagnoses the exits, and it is neither an independently executed production portfolio nor proof that those fills were achievable. `--json` gives the same data as JSON. `--horizon-hours` (72) is how long the legs keep working after a Demo exit that production does not confirm. The model and its limits are in `src/trade_agent/demo_audit.py`. A `TAKE_PROFIT_LIMIT` is not a fix: its limit price does not trail, and when it triggers the OCO cancels the stop, so an unfilled limit leaves the position without a stop.
 - **Backup:** `docker compose ... exec postgres pg_dump -U trade_agent trade_agent | gzip > backup.sql.gz`, kept off the VPS.
+- **Deprecated APIs:** the suite's `filterwarnings = ["error"]` already fails on any warning a test triggers. After upgrading a dependency or Python, also list what the type stubs mark as deprecated and the warnings shown without failing:
+
+  ```
+  uv run mypy --enable-error-code deprecated
+  uv run pytest tests/unit tests/integration -o filterwarnings= -W always::DeprecationWarning -W always::PendingDeprecationWarning -W always::FutureWarning
+  ```
+
+  Code the tests do not run needs its own pass with `python -W always::DeprecationWarning`: the `alembic` CLI (`alembic.ini`) and `scripts/`, plus the lab's backtest with `-e PYTHONWARNINGS=always::DeprecationWarning` on the Freqtrade container. `re.match` and `peer.service` stay on purpose (D-042).

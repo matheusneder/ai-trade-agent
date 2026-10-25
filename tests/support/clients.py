@@ -1,6 +1,6 @@
 """Factories of clients connected to the simulated Binance."""
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 
 import httpx
@@ -19,7 +19,7 @@ async def fake_api(
     *,
     trading_enabled: bool = True,
     clock: Callable[[], int] | None = None,
-) -> AsyncIterator[BinanceSpotApi]:
+) -> AsyncGenerator[BinanceSpotApi]:
     """``clock``: the agent's local clock (by default, the same as the simulated Binance's)."""
     async with httpx.AsyncClient(base_url=BASE_URL, transport=fake.transport) as http:
         rest = BinanceRestClient(

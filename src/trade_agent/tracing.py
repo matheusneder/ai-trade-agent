@@ -14,7 +14,7 @@ identifiers. Neither does the content of LLM and Telegram messages.
 """
 
 import functools
-from collections.abc import Awaitable, Callable, Iterator, Mapping, MutableMapping, Sequence
+from collections.abc import Awaitable, Callable, Generator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from decimal import Decimal
 from enum import Enum
@@ -166,7 +166,7 @@ def span(
     *,
     kind: SpanKind = SpanKind.INTERNAL,
     attributes: Mapping[str, AttributeValue] | None = None,
-) -> Iterator[Span]:
+) -> Generator[Span]:
     with tracer(component).start_as_current_span(name, kind=kind, attributes=attributes) as s:
         yield s
 

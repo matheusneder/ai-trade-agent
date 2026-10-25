@@ -64,6 +64,13 @@ def test_invalid_trading_windows(window: str) -> None:
         StopConditions.model_validate({"global": {"trading_window_utc": [window]}})
 
 
+def test_stop_conditions_accept_the_field_name_besides_the_alias() -> None:
+    windows = {"trading_window_utc": ["11:00-13:00"]}
+    by_alias = StopConditions.model_validate({"global": windows})
+    assert StopConditions.model_validate({"global_": windows}) == by_alias
+    assert by_alias.global_.trading_window_utc == ["11:00-13:00"]
+
+
 def test_trading_windows() -> None:
     assert in_trading_window(None, NOW)
     assert in_trading_window(["11:00-13:00"], NOW)

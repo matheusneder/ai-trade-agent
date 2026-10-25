@@ -1,6 +1,6 @@
 """In-memory metrics: the same production ``AgentMetrics``, read on demand."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -37,7 +37,7 @@ class Measured:
 
 
 @contextmanager
-def measuring() -> Iterator[Measured]:
+def measuring() -> Generator[Measured]:
     reader = InMemoryMetricReader()
     agent_metrics = metrics.AgentMetrics(reader, environment="test")
     metrics.install(agent_metrics)

@@ -4,7 +4,7 @@ import io
 import json
 import runpy
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -31,7 +31,7 @@ def env_file(tmp_path: Path) -> Path:
 
 def _run(fake: FakeBinance, env_file: Path, *argv: str) -> tuple[int, Any, str]:
     @asynccontextmanager
-    async def factory(_: Settings) -> AsyncIterator[BinanceSpotApi]:
+    async def factory(_: Settings) -> AsyncGenerator[BinanceSpotApi]:
         async with fake_api(fake) as api:
             yield api
 

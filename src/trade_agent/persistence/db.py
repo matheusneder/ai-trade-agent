@@ -5,7 +5,7 @@ Every SQL statement becomes a span of the ``db`` component (statement text with 
 """
 
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -102,7 +102,7 @@ class Database:
         await self.engine.dispose()
 
     @asynccontextmanager
-    async def session(self) -> AsyncIterator[AsyncSession]:
+    async def session(self) -> AsyncGenerator[AsyncSession]:
         """Transactional session: *commit* on a clean exit, *rollback* on an exception."""
         async with self.sessions() as session, session.begin():
             yield session
@@ -112,7 +112,7 @@ class Database:
             return bool(await conn.scalar(text("SELECT 1")))
 
     @asynccontextmanager
-    async def exclusive_lock(self, key: int = AGENT_LOCK_KEY) -> AsyncIterator[None]:
+    async def exclusive_lock(self, key: int = AGENT_LOCK_KEY) -> AsyncGenerator[None]:
         """Ensures a single active instance (``pg_try_advisory_lock``).
 
         The *lock* belongs to the connection: if the process dies, PostgreSQL releases it on

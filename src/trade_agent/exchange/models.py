@@ -73,7 +73,7 @@ class ListOrderStatus(StrEnum):
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True, populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", frozen=True, validate_by_name=True)
 
 
 class Order(_Model):
