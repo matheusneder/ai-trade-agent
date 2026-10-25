@@ -168,7 +168,7 @@ services:
     logging: *logging
 
   alloy:
-    image: grafana/alloy:v1.20.1
+    image: grafana/alloy:v1.21.2
     restart: unless-stopped
     command:
       - run
