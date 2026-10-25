@@ -7,7 +7,7 @@ upgrade renames them, this is the only file to adjust.
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -172,7 +172,7 @@ class Dashboard:
         return rows.count()
 
     @contextmanager
-    def queries(self) -> Iterator[list[dict[str, Any]]]:
+    def queries(self) -> Generator[list[dict[str, Any]]]:
         """Bodies of the ``/api/v5/query_range`` requests sent inside the block."""
         sent: list[dict[str, Any]] = []
 

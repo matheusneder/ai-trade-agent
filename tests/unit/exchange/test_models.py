@@ -108,6 +108,13 @@ def test_order_defaults_and_expiry() -> None:
     assert order.time_in_force is None
 
 
+def test_models_accept_the_field_names_besides_the_aliases() -> None:
+    common = {"symbol": "BTCUSDT", "status": "NEW", "type": "LIMIT", "side": "BUY"}
+    by_alias = Order.model_validate({**common, "orderId": 1, "clientOrderId": "x"})
+    by_name = Order.model_validate({**common, "order_id": 1, "client_order_id": "x"})
+    assert by_name == by_alias
+
+
 def test_account_balance_lookup() -> None:
     account = Account.model_validate(
         {"canTrade": True, "balances": [{"asset": "BTC", "free": "0.5", "locked": "0.25"}]}

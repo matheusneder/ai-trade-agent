@@ -43,7 +43,7 @@ def parse_window(window: str) -> tuple[time, time]:
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, validate_by_name=True)
 
 
 class Trigger(_Strict):

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -35,7 +35,7 @@ def _verify(request: dict[str, Any]) -> bool:
 
 
 @asynccontextmanager
-async def ws_server(script: Script) -> AsyncIterator[str]:
+async def ws_server(script: Script) -> AsyncGenerator[str]:
     connections = 0
 
     async def handler(ws: ServerConnection) -> None:
