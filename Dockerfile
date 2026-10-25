@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.28.0
 FROM python:3.14-slim AS runtime
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
