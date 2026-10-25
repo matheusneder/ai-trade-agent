@@ -567,7 +567,7 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 | `docker-proxy` | `tecnativa/docker-socket-proxy:v0.5.0` | read-only Docker API, for Alloy and `container-metrics` | — |
 | `jaeger` | `jaegertracing/jaeger:2.20.0` | traces for 7 days (pinned: 2.21 removed the API Grafana uses) | — |
 | `jaeger-ui` | `alpine/socat:1.8.1.3` | development only (Windows): relays the Jaeger UI; off by default, `DEV_JAEGER_UI=1` turns it on | 16686 |
-| `container-metrics` | `otel/opentelemetry-collector-contrib` | CPU, memory, network and disk of each container, for SigNoz | — |
+| `container-metrics` | `otel/opentelemetry-collector-contrib:0.163.2` | CPU, memory, network and disk of each container, for SigNoz | — |
 | SigNoz (`signoz-*`, `ingester`) | Foundry manifests in `deploy/signoz/` | traces, logs and metrics in parallel | 8080, 14318 (OTLP) |
 
 - **Environments:** `testnet` (order validation), `demo` (*paper trading*, where the agent runs today) and `prod`. It is the same image; only `TA_BINANCE_ENV` and the keys change.
