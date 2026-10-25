@@ -562,7 +562,7 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 | `agent` | built from the repository | the agent (`trade-agent run`); reads the `.env` and mounts `config/` read-only | — |
 | `postgres` | `postgres:18.6` | the agent's database; creates the `grafana_ro` user on the first initialization | 5432 |
 | `grafana` | `grafana/grafana:13.2.4` | dashboards, datasources and alerts provisioned as code | 3000 |
-| `loki` | `grafana/loki:3.7.8` | logs for 30 days | — |
+| `loki` | `grafana/loki:3.7.9` | logs for 30 days | — |
 | `alloy` | `grafana/alloy:v1.20.1` | collects the container logs for Loki and SigNoz | 12345 |
 | `docker-proxy` | `tecnativa/docker-socket-proxy:v0.5.0` | read-only Docker API, for Alloy and `container-metrics` | — |
 | `jaeger` | `jaegertracing/jaeger:2.20.0` | traces for 7 days (pinned: 2.21 removed the API Grafana uses) | — |
