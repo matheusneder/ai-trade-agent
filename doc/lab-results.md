@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -279,6 +279,34 @@ The decisions of sections 2 to 2.6 were re-run on the lab of section 2.7: 999 ca
 
 **Not re-run:** the five D-039 hypotheses rejected in section 2.4 (stretch filter, pullback only, limit entry, exit at RSI ≥ 80, universe by the 30-day median volume). They ran on experimental code that was never versioned. Their margins were large, and section 2.7's corrections moved the results by up to ~4 p.p. The optimized walk-forward (section 3) is superseded.
 
+### 2.9 More risk per trade and the 13% activation in `swing_trend` (2026-10-25, D-041)
+
+Section 2.8 found two former rejections that won on both periods: more risk per trade and the 13% activation alone in `swing_trend`. Both are adopted for review: `swing_trend` risk 1.2% → **1.5%** and activation 9.7% → **13%**, and `momentum_alpha` risk 1.5% → **2.0%**. The `swing_trend` combination was run here for the first time, and every component was run on `--alts` too. Same lab as section 2.7, 15 windows.
+
+| Per profile (tier / `--alts`) | Design 2023–2024 | Holdout 2025–2026 | 15 windows | Worst window DD |
+|---|--:|--:|--:|--:|
+| `swing_trend` current | +35.25% / +42.13% | +27.37% / +19.07% | +72.27% / +69.24% | 9.78% / 9.72% |
+| `swing_trend` activation 13% | +45.16% / +47.83% | +28.15% / **+17.03%** | +86.02% / +73.01% | 9.72% / 9.66% |
+| `swing_trend` risk 1.5% | +43.74% / +52.32% | +32.35% / +22.52% | +90.23% / +86.63% | 12.10% / 12.03% |
+| **`swing_trend` risk 1.5% + activation 13%** | **+55.26% / +58.33%** | **+32.93% / +19.37%** | **+106.39% / +89.00%** | 12.03% / 11.95% |
+| `momentum_alpha` current | +29.95% / +31.10% | +18.37% / +7.73% | +53.83% / +41.23% | 7.46% / 9.79% |
+| **`momentum_alpha` risk 2.0%** | **+34.13% / +35.62%** | **+20.66% / +7.16%** | **+61.84% / +45.34%** | 9.86% / **12.89%** |
+
+| Portfolio 65 / 30 / 5% | Tier: design / holdout / 15 windows (worst window) | `--alts`: design / holdout / 15 windows (worst window) |
+|---|--:|--:|
+| Current | +33.24% / +23.45% / +64.49% (−6.22%) | +37.93% / +14.69% / +58.19% (−5.79%) |
+| **Adopted (risk + activation 13%)** | **+47.44% / +27.80% / +88.44%** (−8.35%) | **+49.66% / +14.79% / +71.79%** (−4.44%) |
+| Risk only | +40.09% / +27.38% / +78.44% (−7.73%) | +45.87% / **+16.72%** / +70.26% (−6.81%) |
+| Activation 13% only | +39.59% / +23.96% / +73.04% (−6.73%) | +41.54% / +13.43% / +60.54% (−3.58%) |
+
+**Reading:**
+
+- **Results:** the adopted set improves the 15 windows on both baskets, and every profile's worst window stays under 13%.
+- **Where the gain comes from:** the higher risk. On `--alts`, the basket that reproduces the Demo, the 13% activation lowers the holdout, both alone (+17.03% vs +19.07% in `swing_trend`) and in the portfolio (risk only +16.72% vs adopted +14.79%). On the tier lists it helps on both periods.
+- **Drawdown:** more risk is leverage, so the drawdown grows with the return. `momentum_alpha` on `--alts` reaches 12.89%, at the cap.
+- **What the lab does not simulate:** the global circuit breakers (`config/stop_conditions.yaml`). Four stops in one day (two per profile at their caps) cost about 2.5% of the managed capital before and **about 3.2% now**, above the 3% daily-loss pause. The 15% maximum drawdown halt is further away, since the worst window of the portfolio is 8.35%.
+- **Holdout:** the 2025–2026 holdout has been used for every decision since D-034, so none of this is out of sample. The Demo is the validation.
+
 ## 3. Out-of-sample results (2026-10-01)
 
 > **Superseded by section 2:** these numbers come from 4h backtests without intra-candle exits and are inflated by the tight trailings that *hyperopt* chose.
@@ -314,7 +342,8 @@ The decisions of sections 2 to 2.6 were re-run on the lab of section 2.7: 999 ca
 | `exit_score` | −0.46 | −0.46 |
 | `atr_mult` (stop) | 3.1 | 3.0 |
 | `max_pct` (stop) | 4.5 | **6.5** (D-034; was 5.0) |
-| `activation_pct` (TP) | 9.7 | **13.0** (D-034; was 9.5) |
+| `activation_pct` (TP) | **13.0** (D-041; was 9.7) | **13.0** (D-034; was 9.5) |
+| `risk_per_trade_pct` | **1.5** (D-041; was 1.2) | **2.0** (D-041; was 1.5) |
 | `trailing_delta_bps` (TP) | 100 | 130 |
 | `min_stop_atr` (signals) | **1.5** (D-039) | **2.0** (D-039) |
 
