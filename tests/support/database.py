@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.support.logs import image
 from trade_agent.persistence.db import Database
 from trade_agent.persistence.migrate import upgrade_to_head
 
@@ -28,7 +29,7 @@ def postgres_container_url() -> Iterator[str]:
         pytest.skip("Docker indisponível: testes com PostgreSQL ignorados")
     from testcontainers.community.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:18", driver="asyncpg") as container:
+    with PostgresContainer(image("postgres"), driver="asyncpg") as container:
         url = container.get_connection_url()
         asyncio.run(_migrate(url))
         yield url

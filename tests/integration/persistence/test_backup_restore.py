@@ -5,12 +5,14 @@ from cryptography.fernet import Fernet
 from scripts.backup import backup, docker_pg, restore_drill
 from testcontainers.community.postgres import PostgresContainer
 
+from tests.support.logs import image
+
 
 def test_encrypted_postgres_restore_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TA_BACKUP_KEY", Fernet.generate_key().decode())
-    with PostgresContainer("postgres:18", driver="asyncpg") as pg:
+    with PostgresContainer(image("postgres"), driver="asyncpg") as pg:
         container = pg.get_wrapped_container().id
         assert container is not None
         docker_pg(
