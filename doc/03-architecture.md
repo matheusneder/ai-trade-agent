@@ -27,7 +27,7 @@ flowchart TB
   end
 
   subgraph HOST["Docker Compose (deploy/docker-compose.yml)"]
-    AG["agent<br/>(Python 3.14)"]
+    AG["agent<br/>(Python 3.15)"]
     PG[(postgres)]
     GF[grafana]
     LK[loki]
@@ -67,7 +67,7 @@ flowchart TB
 
 | Concern | Component | Why |
 |---------|-----------|-----|
-| Language | **Python 3.14** (compatible with ≥ 3.12), `uv`, `ruff`, `mypy`, `pytest` | Quant ecosystem and official SDKs (D-002) |
+| Language | **Python 3.15** (compatible with ≥ 3.12), `uv`, `ruff`, `mypy`, `pytest` | Quant ecosystem and official SDKs (D-002) |
 | Core | **`asyncio`**, with periodic tasks, candle-close *jobs* and supervised services in `runtime.py` | WebSocket, Telegram, HTTP and scheduling in a single process, without a scheduling library (D-003) |
 | Binance API | **Thin in-house client** over `httpx` (REST) and `websockets` (WebSocket API), with Ed25519/HMAC signing through `cryptography` | `Decimal` end to end (no `float`), errors mapped by semantics (rejected × unknown status), weight headers, an order-sending lock, 100% testable with `respx` (D-001) |
 | Indicators | **TA-Lib** + pandas | Market standard and mature (D-015) |
@@ -560,14 +560,14 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 | Service | Image | Role | Port (only `127.0.0.1`) |
 |---------|-------|------|-------------------------|
 | `agent` | built from the repository | the agent (`trade-agent run`); reads the `.env` and mounts `config/` read-only | — |
-| `postgres` | `postgres:18` | the agent's database; creates the `grafana_ro` user on the first initialization | 5432 |
+| `postgres` | `postgres:18.6` | the agent's database; creates the `grafana_ro` user on the first initialization | 5432 |
 | `grafana` | `grafana/grafana:13.2.4` | dashboards, datasources and alerts provisioned as code | 3000 |
-| `loki` | `grafana/loki:3.7.8` | logs for 30 days | — |
-| `alloy` | `grafana/alloy:v1.20.1` | collects the container logs for Loki and SigNoz | 12345 |
+| `loki` | `grafana/loki:3.7.9` | logs for 30 days | — |
+| `alloy` | `grafana/alloy:v1.21.2` | collects the container logs for Loki and SigNoz | 12345 |
 | `docker-proxy` | `tecnativa/docker-socket-proxy:v0.5.0` | read-only Docker API, for Alloy and `container-metrics` | — |
 | `jaeger` | `jaegertracing/jaeger:2.20.0` | traces for 7 days (pinned: 2.21 removed the API Grafana uses) | — |
 | `jaeger-ui` | `alpine/socat:1.8.1.3` | development only (Windows): relays the Jaeger UI; off by default, `DEV_JAEGER_UI=1` turns it on | 16686 |
-| `container-metrics` | `otel/opentelemetry-collector-contrib` | CPU, memory, network and disk of each container, for SigNoz | — |
+| `container-metrics` | `otel/opentelemetry-collector-contrib:0.163.2` | CPU, memory, network and disk of each container, for SigNoz | — |
 | SigNoz (`signoz-*`, `ingester`) | Foundry manifests in `deploy/signoz/` | traces, logs and metrics in parallel | 8080, 14318 (OTLP) |
 
 - **Environments:** `testnet` (order validation), `demo` (*paper trading*, where the agent runs today) and `prod`. It is the same image; only `TA_BINANCE_ENV` and the keys change.
@@ -579,7 +579,7 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 | ID | Date | Decision | Reason | Discarded alternative |
 |----|------|----------|--------|-----------------------|
 | D-001 | 2026-09-26 | **Thin in-house client for the Binance API** (`httpx` + `websockets` + `cryptography`), instead of the official `binance-sdk-spot` SDK | The official SDK types price and quantity as `float` and serializes them with `str(float)`: `0.00001` becomes `1e-05`, which Binance rejects (`-1100`). The SDK also brings many dependencies (aiohttp, requests, websockets, websocket-client, pycryptodome) and generated code that is hard to simulate in tests. The surface needed is small: about 15 REST endpoints and the *user data stream* subscription | `binance-sdk-spot` (supports OPOCO, but with the problems above); CCXT (order lists only through the implicit API) |
-| D-002 | 2026-09-26 | Python 3.14 in development and in the Docker image (project compatible with ≥ 3.12); `uv` with a lockfile | Every dependency has *wheels* for 3.14; `uv.lock` guarantees reproducible builds | pip + venv without a lockfile |
+| D-002 | 2026-09-26 | Python 3.14 in development and in the Docker image (project compatible with ≥ 3.12); `uv` with a lockfile. Since 2026-10-25, Python 3.15 | Every dependency has *wheels* for 3.14; `uv.lock` guarantees reproducible builds. On 3.15 only PyYAML lacks a wheel: it builds from the sdist without libyaml (pure-Python loader, used only to read `config/`) | pip + venv without a lockfile |
 | D-003 | 2026-09-26 | **Asynchronous** core (`asyncio`) | The agent combines a WebSocket (*user data stream*), a scheduler, Telegram and concurrent HTTP in a single process | Threads |
 | D-004 | 2026-09-26 | **100% test coverage (lines and branches)** required in CI for `src/`; `live` tests (Testnet/Demo) separated by a marker | Full coverage requirement. What depends on the real exchange is validated separately, without making the default suite depend on the network | Partial coverage |
 | D-005 | 2026-09-26 | **In-memory simulated Binance** (`tests/support/fake_binance.py`) for the integration tests: HMAC signing, OPOCO/OCO, triggers with trailing, locked balances and fault injection | Test the critical flows (protection, idempotency, recovery) end to end, deterministically and without a network | Only per-endpoint mocks (they do not exercise the chaining of states) |
