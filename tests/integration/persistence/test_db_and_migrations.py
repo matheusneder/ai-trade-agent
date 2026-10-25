@@ -1,10 +1,12 @@
 import asyncio
 import io
 from contextlib import redirect_stdout
+from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
@@ -133,3 +135,12 @@ def test_env_uses_database_url_without_injected_connection(
 def test_env_requires_url() -> None:
     with pytest.raises(RuntimeError, match="TA_DATABASE_URL"):
         command.upgrade(alembic_config(), "head")
+
+
+def test_alembic_ini_of_the_cli() -> None:
+    """``alembic.ini`` (the ``uv run alembic`` CLI) sets ``path_separator``: without it, Alembic
+    1.16+ warns on every command that it falls back to the legacy split of ``prepend_sys_path``."""
+    config = Config(str(Path(__file__).parents[3] / "alembic.ini"))
+    assert config.get_prepend_sys_paths_list() == ["src"]
+    head = ScriptDirectory.from_config(alembic_config()).get_current_head()
+    assert ScriptDirectory.from_config(config).get_current_head() == head
