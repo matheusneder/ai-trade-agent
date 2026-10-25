@@ -1,6 +1,6 @@
 """In-memory tracing: the same per-component providers, exporting nothing."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from opentelemetry.sdk.trace import ReadableSpan
@@ -58,7 +58,7 @@ class Recorded:
 
 
 @contextmanager
-def recording() -> Iterator[Recorded]:
+def recording() -> Generator[Recorded]:
     exporter = InMemorySpanExporter()
     traces = tracing.Tracing(SimpleSpanProcessor(exporter), environment="test")
     tracing.install(traces)

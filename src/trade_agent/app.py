@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import signal
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -256,7 +256,7 @@ async def build_runtime(
     aux_http: httpx.AsyncClient | None = None,
     llm: anthropic.AsyncAnthropic | None = None,
     user_stream: bool = True,
-) -> AsyncIterator[AgentRuntime]:
+) -> AsyncGenerator[AgentRuntime]:
     """Builds the complete runtime; releases connections (HTTP and database) on exit."""
     if settings.database_url is None:
         raise BinanceConfigurationError("defina TA_DATABASE_URL para executar o agente")

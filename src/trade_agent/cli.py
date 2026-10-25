@@ -19,7 +19,7 @@ import asyncio
 import dataclasses
 import json
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from decimal import Decimal
 from typing import Any, TextIO
@@ -62,7 +62,7 @@ type ApiFactory = Callable[[Settings], AbstractAsyncContextManager[BinanceSpotAp
 
 
 @asynccontextmanager
-async def _default_api(settings: Settings) -> AsyncIterator[BinanceSpotApi]:
+async def _default_api(settings: Settings) -> AsyncGenerator[BinanceSpotApi]:
     async with build_rest_client(settings) as rest:
         await rest.sync_time()
         yield BinanceSpotApi(rest)

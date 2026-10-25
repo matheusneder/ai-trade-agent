@@ -7,7 +7,7 @@ once per occurrence of each trigger.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -258,7 +258,7 @@ class RiskGuard:
         return combined(await self.state(GLOBAL), await self.state(profile))
 
     @asynccontextmanager
-    async def entry_authorization(self, profile: str) -> AsyncIterator[OpState]:
+    async def entry_authorization(self, profile: str) -> AsyncGenerator[OpState]:
         """Serialize an entry with state transitions, including an already in-flight send.
 
         A pause/halt acknowledges only after an authorized send finishes. Once its state
