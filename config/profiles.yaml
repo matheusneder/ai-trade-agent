@@ -13,7 +13,8 @@ profiles:
     # Recalibrated on 2026-10-01: median of the 15 trainings of the optimized walk-forward
     # (var/lab/walk-forward-swing_trend-otimizado-20261001-190610.md, 4h candles
     # since 2021-10). Risk, break-even and maximum holding are not optimized by the
-    # lab and stay as they were.
+    # lab and stay as they were. Risk 1.5% and activation 13% since 2026-10-25 (D-041,
+    # doc/lab-results.md section 2.9).
     code: swg
     enabled: true
     capital_share: 0.65        # Main allocation: 650 USDT
@@ -23,14 +24,14 @@ profiles:
       max_open_positions: 2    # Solid lots of ~275 USDT per trade (avoids fractional fees)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15   # 15% liquidity for rebalancing
-      risk_per_trade_pct: 1.2  # Controlled mathematical risk per trade
+      risk_per_trade_pct: 1.5  # D-041 (was 1.2)
     entry:
       min_score: 0.67          # walk-forward (was 0.65)
       order: limit_fok
       max_slippage_bps: 18
     protection:
       stop: {mode: fixed, atr_mult: 3.1, max_pct: 4.5}   # walk-forward: atr_mult 3.1 (was 2.9)
-      take_profit: {mode: trailing, activation_pct: 9.7, trailing_delta_bps: 100}   # was 9.9 / 80
+      take_profit: {mode: trailing, activation_pct: 13.0, trailing_delta_bps: 100}   # D-041: activation 13 (was 9.7)
       break_even_after_r: 1.2  # Moves the stop to 0 after 1.2R of profit (removes reversal risk)
       max_holding: 18d
     exits:
@@ -63,7 +64,7 @@ profiles:
       max_open_positions: 2    # Lots of ~145 USDT
       max_position_pct: 0.42
       cash_reserve_pct: 0.15
-      risk_per_trade_pct: 1.5
+      risk_per_trade_pct: 2.0  # D-041 (was 1.5)
     entry:
       min_score: 0.67          # walk-forward (was 0.62)
       order: limit_fok
