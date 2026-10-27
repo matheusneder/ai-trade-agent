@@ -37,7 +37,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
+          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, CASE WHEN jsonb_typeof(payload->'regime') = 'object' THEN CASE WHEN (payload->'regime'->>'up')::bool THEN 'alta' ELSE 'baixa' END END AS regime, (payload->>'setups')::int AS setups, payload->>'stop_noise' AS ruido_d039, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
         }
       ],
       "fieldConfig": {
@@ -46,6 +46,110 @@
       },
       "options": {},
       "id": 1
+    },
+    {
+      "type": "timeseries",
+      "title": "BTC vs EMA200 (%)",
+      "description": "Fechamento do BTC no candle de cada ciclo de decisão, acima (+) ou abaixo (−) da EMA200. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, max((payload->'regime'->>'distance_pct')::float) AS distancia FROM events WHERE kind = 'decision.cycle' AND jsonb_typeof(payload->'regime') = 'object' AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 2
+    },
+    {
+      "type": "table",
+      "title": "Setups e filtros por perfil",
+      "description": "Por perfil, no período: ciclos de decisão, setups encontrados, setups que só o filtro de stop no ruído (D-039) removeu, entradas abertas e ciclos com o regime em baixa (sem setup possível).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "table",
+      "title": "Viradas de regime",
+      "description": "Cada mudança do regime de mercado (BTC acima ou abaixo da EMA200), também enviada ao Telegram. A primeira leitura de cada timeframe só é registrada.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 7,
+        "x": 0,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, payload->>'timeframe' AS timeframe, CASE WHEN (payload->>'up')::bool THEN 'alta' ELSE 'baixa' END AS regime, CASE WHEN jsonb_typeof(payload->'previous') <> 'boolean' THEN 'primeira leitura' WHEN (payload->>'previous')::bool THEN 'alta' ELSE 'baixa' END AS anterior, (payload->>'close')::float AS btc, (payload->>'ema_slow')::float AS ema200, (payload->>'distance_pct')::float AS distancia FROM events WHERE kind = 'market.regime_changed' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
     },
     {
       "type": "table",
@@ -58,7 +162,7 @@
         "w": 16,
         "h": 9,
         "x": 0,
-        "y": 9
+        "y": 24
       },
       "targets": [
         {
@@ -78,11 +182,11 @@
         "overrides": []
       },
       "options": {},
-      "id": 2
+      "id": 5
     },
     {
       "type": "stat",
-      "title": "Regime e exposição",
+      "title": "Regime do analista e exposição",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "trade-agent-pg"
@@ -91,7 +195,7 @@
         "w": 8,
         "h": 4,
         "x": 16,
-        "y": 9
+        "y": 24
       },
       "targets": [
         {
@@ -119,7 +223,7 @@
           "fields": "/.*/"
         }
       },
-      "id": 3
+      "id": 6
     },
     {
       "type": "barchart",
@@ -133,7 +237,7 @@
         "w": 12,
         "h": 8,
         "x": 0,
-        "y": 18
+        "y": 33
       },
       "targets": [
         {
@@ -155,7 +259,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 4
+      "id": 7
     },
     {
       "type": "barchart",
@@ -168,7 +272,7 @@
         "w": 12,
         "h": 8,
         "x": 12,
-        "y": 18
+        "y": 33
       },
       "targets": [
         {
@@ -188,7 +292,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 5
+      "id": 8
     },
     {
       "type": "table",
@@ -201,7 +305,7 @@
         "w": 24,
         "h": 7,
         "x": 0,
-        "y": 26
+        "y": 41
       },
       "targets": [
         {
@@ -221,7 +325,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 6
+      "id": 9
     }
   ]
 }

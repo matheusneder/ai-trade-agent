@@ -315,6 +315,13 @@ def dashboard(
     }
 
 
+REGIME_HELP = (
+    "Fechamento do BTC no candle do último ciclo de decisão acima (+) ou abaixo (−) da EMA200, "
+    "em %. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra: "
+    "nenhum perfil abre posição até o BTC fechar acima da EMA200."
+)
+
+
 def _operation() -> Json:
     profile, scope = key("profile", "attribute"), key("scope", "attribute")
     return dashboard(
@@ -477,6 +484,65 @@ def _operation() -> Json:
                             4,
                         ),
                     ],
+                ],
+            ),
+            (
+                "Regime e setups",
+                [
+                    [
+                        cell(
+                            "regime-now",
+                            number(
+                                "BTC vs EMA200 agora",
+                                metric("trade_agent.market.regime", reduce="last"),
+                                unit="percent",
+                                description=REGIME_HELP,
+                            ),
+                            2,
+                        ),
+                        cell(
+                            "regime",
+                            series(
+                                "BTC vs EMA200 (%)",
+                                metric(
+                                    "trade_agent.market.regime",
+                                    by=[key("timeframe", "attribute")],
+                                    legend="{{timeframe}}",
+                                ),
+                                unit="percent",
+                                steps=True,
+                                description=REGIME_HELP,
+                            ),
+                            4,
+                        ),
+                        cell(
+                            "setups",
+                            bars(
+                                "Setups e filtro de ruído (D-039) por perfil",
+                                metric(
+                                    "trade_agent.decision.setups",
+                                    time_agg="increase",
+                                    space="sum",
+                                    by=[profile],
+                                    legend="setups {{profile}}",
+                                ),
+                                metric(
+                                    "trade_agent.decision.stop_noise",
+                                    time_agg="increase",
+                                    space="sum",
+                                    by=[profile],
+                                    legend="ruído D-039 {{profile}}",
+                                    query="B",
+                                ),
+                                description=(
+                                    "Setups encontrados nos ciclos de decisão e os que só o filtro "
+                                    "de stop no ruído (D-039) removeu. Com o regime em baixa não "
+                                    "há setup nenhum."
+                                ),
+                            ),
+                            6,
+                        ),
+                    ]
                 ],
             ),
             (

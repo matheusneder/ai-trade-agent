@@ -48,6 +48,19 @@ SELECT at AS time, escopo AS metric,
     (pnl - first_value(pnl) OVER (PARTITION BY escopo ORDER BY at))::float AS value
 FROM today ORDER BY 1, 2
 """
+# The market regime that gates every setup (D-016), as each decision cycle recorded it (D-043)
+WITH_REGIME = "kind = 'decision.cycle' AND jsonb_typeof(payload->'regime') = 'object'"
+REGIME_SIDE = "CASE WHEN (payload->'regime'->>'up')::bool THEN 'alta' ELSE 'baixa' END"
+REGIME_HELP = (
+    "Fechamento do BTC no candle de 4h do último ciclo de decisão, acima (alta) ou abaixo "
+    "(baixa) da EMA200, e a distância em %. Em baixa, o filtro de regime (D-016) bloqueia "
+    "todos os setups de compra: nenhum perfil abre posição até o BTC fechar acima da EMA200."
+)
+SETUPS_HELP = (
+    "Por perfil, no período: ciclos de decisão, setups encontrados, setups que só o filtro de "
+    "stop no ruído (D-039) removeu, entradas abertas e ciclos com o regime em baixa (sem setup "
+    "possível)."
+)
 DAILY_SCOPE_PNL_HELP = (
     "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do PnL do dia e do "
     "Risk Guard): os ganhos e perdas por escopo de cada foto menos os da primeira foto do dia. "
@@ -93,10 +106,18 @@ def panel(
 
 
 def stat(
-    title: str, sql: str, unit: str | None = None, w: int = 6, *, text: bool = False
+    title: str,
+    sql: str,
+    unit: str | None = None,
+    w: int = 6,
+    *,
+    text: bool = False,
+    description: str | None = None,
 ) -> dict[str, Any]:
     """Single-value panel; ``text`` also shows the text columns (the default reduction drops them)."""
-    result = panel(title, sql, kind="stat", fmt="table", unit=unit, w=w, h=4)
+    result = panel(
+        title, sql, kind="stat", fmt="table", unit=unit, w=w, h=4, description=description
+    )
     if text:
         result["options"]["reduceOptions"] = {
             "values": False,
@@ -106,8 +127,10 @@ def stat(
     return result
 
 
-def table(title: str, sql: str, w: int = 24, h: int = 9) -> dict[str, Any]:
-    return panel(title, sql, kind="table", fmt="table", w=w, h=h)
+def table(
+    title: str, sql: str, w: int = 24, h: int = 9, *, description: str | None = None
+) -> dict[str, Any]:
+    return panel(title, sql, kind="table", fmt="table", w=w, h=h, description=description)
 
 
 def today(chart: dict[str, Any]) -> dict[str, Any]:
@@ -207,10 +230,11 @@ def dashboard(
 
 def build() -> dict[str, dict[str, Any]]:
     overview = dashboard("ta-overview", "Visão geral", [
-        stat("Patrimônio", f"SELECT equity::float AS patrimonio FROM telemetry_snapshots WHERE {LATEST}", "currencyUSD"),
-        stat("PnL do dia", f"SELECT (equity - day_start_equity)::float AS pnl_dia FROM telemetry_snapshots WHERE {LATEST}", "currencyUSD"),
-        stat("Drawdown", f"SELECT drawdown_pct AS drawdown FROM telemetry_snapshots WHERE {LATEST}", "percent"),
-        stat("Posições ativas", f"SELECT active_positions AS posicoes, exposure::float AS exposicao FROM telemetry_snapshots WHERE {LATEST}"),
+        stat("Patrimônio", f"SELECT equity::float AS patrimonio FROM telemetry_snapshots WHERE {LATEST}", "currencyUSD", w=5),
+        stat("PnL do dia", f"SELECT (equity - day_start_equity)::float AS pnl_dia FROM telemetry_snapshots WHERE {LATEST}", "currencyUSD", w=5),
+        stat("Drawdown", f"SELECT drawdown_pct AS drawdown FROM telemetry_snapshots WHERE {LATEST}", "percent", w=5),
+        stat("Posições ativas", f"SELECT active_positions AS posicoes, exposure::float AS exposicao FROM telemetry_snapshots WHERE {LATEST}", w=5),
+        stat("Filtro de regime (BTC vs EMA200)", f"SELECT {REGIME_SIDE} AS regime, (payload->'regime'->>'distance_pct')::float AS distancia FROM events WHERE {WITH_REGIME} ORDER BY id DESC LIMIT 1", "percent", w=4, text=True, description=REGIME_HELP),
         panel("Patrimônio e pico", "SELECT at AS time, equity::float AS patrimonio, peak_equity::float AS pico FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="currencyUSD"),
         panel("Drawdown (%)", "SELECT at AS time, drawdown_pct AS drawdown FROM telemetry_snapshots WHERE $__timeFilter(at) ORDER BY 1", unit="percent"),
         # the result since the start (realized + open) of the whole agent and of each profile
@@ -236,9 +260,12 @@ def build() -> dict[str, dict[str, Any]]:
         table("Motivos de saída", f"SELECT exit_reason AS motivo, count(*) AS trades, sum(realized_pnl)::float AS pnl FROM positions WHERE {CLOSED} AND $__timeFilter(closed_at) GROUP BY 1 ORDER BY 2 DESC", w=8),
     ])  # fmt: skip
     research = dashboard("ta-research", "Decisões e pesquisa", [
-        table("Ciclos de decisão", "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"),
+        table("Ciclos de decisão", f"SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, CASE WHEN jsonb_typeof(payload->'regime') = 'object' THEN {REGIME_SIDE} END AS regime, (payload->>'setups')::int AS setups, payload->>'stop_noise' AS ruido_d039, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"),
+        panel("BTC vs EMA200 (%)", f"SELECT date_trunc('hour', created_at) AS time, max((payload->'regime'->>'distance_pct')::float) AS distancia FROM events WHERE {WITH_REGIME} AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", unit="percent", description="Fechamento do BTC no candle de cada ciclo de decisão, acima (+) ou abaixo (−) da EMA200. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra."),
+        table("Setups e filtros por perfil", "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", w=12, h=8, description=SETUPS_HELP),
+        table("Viradas de regime", "SELECT created_at AS time, payload->>'timeframe' AS timeframe, CASE WHEN (payload->>'up')::bool THEN 'alta' ELSE 'baixa' END AS regime, CASE WHEN jsonb_typeof(payload->'previous') <> 'boolean' THEN 'primeira leitura' WHEN (payload->>'previous')::bool THEN 'alta' ELSE 'baixa' END AS anterior, (payload->>'close')::float AS btc, (payload->>'ema_slow')::float AS ema200, (payload->>'distance_pct')::float AS distancia FROM events WHERE kind = 'market.regime_changed' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50", h=7, description="Cada mudança do regime de mercado (BTC acima ou abaixo da EMA200), também enviada ao Telegram. A primeira leitura de cada timeframe só é registrada."),
         table("Última leitura do analista", "SELECT a->>'asset' AS ativo, (a->>'sentiment')::float AS sentimento, (a->>'confidence')::float AS confianca, (a->>'veto')::bool AS veto, a->>'rationale' AS justificativa FROM research_reports r, jsonb_array_elements(r.view->'assets') a WHERE r.id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=16),
-        stat("Regime e exposição", "SELECT view->>'market_regime' AS regime, (view->>'exposure_multiplier')::float AS exposicao FROM research_reports WHERE id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=8, text=True),
+        stat("Regime do analista e exposição", "SELECT view->>'market_regime' AS regime, (view->>'exposure_multiplier')::float AS exposicao FROM research_reports WHERE id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=8, text=True),
         panel("Custo diário do LLM", "SELECT date_trunc('day', at) AS time, sum(cost_usd)::float AS custo FROM llm_usage WHERE $__timeFilter(at) GROUP BY 1 ORDER BY 1", kind="barchart", unit="currencyUSD", description="Contabilidade em llm_usage: inclui estimativas de reservas expiradas e ajustes no dia UTC de origem. O custo no SigNoz usa apenas telemetria de respostas observadas e não inclui esses lançamentos; os totais podem divergir."),
         panel("Ciclos do analista por status", "SELECT date_trunc('day', created_at) AS time, count(*) FILTER (WHERE status = 'ok') AS ok, count(*) FILTER (WHERE status = 'failed') AS falhas FROM research_reports WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", kind="barchart"),
         table("Notícias coletadas por fonte", "SELECT source AS fonte, count(*) AS noticias, count(*) FILTER (WHERE severity = 'critical') AS criticas FROM news_items WHERE $__timeFilter(published_at) GROUP BY 1 ORDER BY 2 DESC", h=7),

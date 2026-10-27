@@ -188,6 +188,10 @@ The agent measures the offset between the local clock and Binance's at startup a
 
 A large, persistent *offset* in the "Offset de relógio (ms)" panel (the `trade_agent.clock.offset` metric) means the host clock is not synchronized. Turn on NTP (Windows: *Set time automatically*, with the *Windows Time* service running; Linux: `timedatectl set-ntp true`). On Windows with Rancher Desktop, the VM follows the Windows clock.
 
+### 2.7 No orders for days
+
+Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EMA200)", or *Decisões e pesquisa* → "BTC vs EMA200 (%)" and "Viradas de regime" (SigNoz: *Operação* → *Regime e setups*). While BTC closes its candle below its EMA 200, the regime filter (D-016) leaves every profile without a setup and the cycles end with `sem candidatos (leitura anterior)`: that is the strategy, not a fault. The agent says on Telegram when the regime flips (D-043). With the regime up, "Setups e filtros por perfil" shows where the setups went: removed by the stop-noise filter (`ruido_d039`, D-039) or found and refused (the `recusas` of "Ciclos de decisão": score, slots, asset already held, R:R). Only after that look for a fault: risk states (§2.3), failed tasks in *Saúde técnica* and an empty universe (`decision.empty_universe` in the logs).
+
 ## 3. Telegram commands
 
 | Command | Effect |

@@ -22,7 +22,7 @@
         "uid": "trade-agent-pg"
       },
       "gridPos": {
-        "w": 6,
+        "w": 5,
         "h": 4,
         "x": 0,
         "y": 0
@@ -57,9 +57,9 @@
         "uid": "trade-agent-pg"
       },
       "gridPos": {
-        "w": 6,
+        "w": 5,
         "h": 4,
-        "x": 6,
+        "x": 5,
         "y": 0
       },
       "targets": [
@@ -92,9 +92,9 @@
         "uid": "trade-agent-pg"
       },
       "gridPos": {
-        "w": 6,
+        "w": 5,
         "h": 4,
-        "x": 12,
+        "x": 10,
         "y": 0
       },
       "targets": [
@@ -127,9 +127,9 @@
         "uid": "trade-agent-pg"
       },
       "gridPos": {
-        "w": 6,
+        "w": 5,
         "h": 4,
-        "x": 18,
+        "x": 15,
         "y": 0
       },
       "targets": [
@@ -151,6 +151,50 @@
       },
       "options": {},
       "id": 4
+    },
+    {
+      "type": "stat",
+      "title": "Filtro de regime (BTC vs EMA200)",
+      "description": "Fechamento do BTC no candle de 4h do último ciclo de decisão, acima (alta) ou abaixo (baixa) da EMA200, e a distância em %. Em baixa, o filtro de regime (D-016) bloqueia todos os setups de compra: nenhum perfil abre posição até o BTC fechar acima da EMA200.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 4,
+        "h": 4,
+        "x": 20,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN (payload->'regime'->>'up')::bool THEN 'alta' ELSE 'baixa' END AS regime, (payload->'regime'->>'distance_pct')::float AS distancia FROM events WHERE kind = 'decision.cycle' AND jsonb_typeof(payload->'regime') = 'object' ORDER BY id DESC LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        }
+      },
+      "id": 5
     },
     {
       "type": "timeseries",
@@ -185,7 +229,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 5
+      "id": 6
     },
     {
       "type": "timeseries",
@@ -220,7 +264,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 6
+      "id": 7
     },
     {
       "type": "timeseries",
@@ -255,7 +299,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 7
+      "id": 8
     },
     {
       "type": "timeseries",
@@ -292,7 +336,7 @@
       },
       "options": {},
       "timeFrom": "now/d",
-      "id": 8
+      "id": 9
     },
     {
       "type": "table",
@@ -325,7 +369,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 9
+      "id": 10
     },
     {
       "type": "table",
@@ -358,7 +402,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 10
+      "id": 11
     },
     {
       "type": "table",
@@ -391,7 +435,7 @@
         "overrides": []
       },
       "options": {},
-      "id": 11
+      "id": 12
     }
   ]
 }

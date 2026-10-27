@@ -2,9 +2,10 @@
 
 On every risk check (1 min), the latest reading feeds the gauges (equity, drawdown, PnL,
 exposure, positions, API errors, used weight, clock, and the result and the state of each
-scope).
+scope); every decision cycle feeds the market regime's gauge (the benchmark against its
+slow EMA, per timeframe).
 Counters record what happens between readings: LLM cost and tokens, decision cycles,
-entries, exits and risk state changes.
+setups, setups removed by the stop-noise filter, entries, exits and risk state changes.
 
 Latency, throughput and errors per operation are not here: SigNoz derives them from the
 traces. Without ``TA_OTLP_METRICS_ENDPOINT``, nothing is installed and the calls do nothing.
@@ -68,6 +69,7 @@ class AgentMetrics:
             resource=resource, metric_readers=[reader], shutdown_on_exit=False
         )
         self._latest: Reading | None = None
+        self._regimes: dict[str, float] = {}
         meter = self._provider.get_meter("trade_agent")
         gauges: dict[str, tuple[str, str]] = {
             "trade_agent.equity": ("USD", "patrimônio do agente (capital + realizado + aberto)"),
@@ -94,6 +96,12 @@ class AgentMetrics:
             description="resultado acumulado por escopo (realizado + aberto)",
         )
         meter.create_observable_gauge(
+            "trade_agent.market.regime",
+            callbacks=[self._regime],
+            unit="%",
+            description="fechamento do BTC acima (+) ou abaixo (−) da EMA200, por timeframe",
+        )
+        meter.create_observable_gauge(
             "trade_agent.risk.state",
             callbacks=[self._states],
             unit="1",
@@ -107,6 +115,14 @@ class AgentMetrics:
         )
         self.cycles = meter.create_counter(
             "trade_agent.decision.cycles", unit="{cycle}", description="ciclos de decisão"
+        )
+        self.setups = meter.create_counter(
+            "trade_agent.decision.setups", unit="{setup}", description="setups encontrados"
+        )
+        self.stop_noise = meter.create_counter(
+            "trade_agent.decision.stop_noise",
+            unit="{setup}",
+            description="setups removidos pelo filtro de stop no ruído (D-039)",
         )
         self.entries = meter.create_counter(
             "trade_agent.decision.entries", unit="{position}", description="entradas abertas"
@@ -162,8 +178,14 @@ class AgentMetrics:
             for scope, value in reading.scope_pnl.items()
         ]
 
+    def _regime(self, _options: CallbackOptions) -> Iterable[Observation]:
+        return [Observation(v, {"timeframe": tf}) for tf, v in self._regimes.items()]
+
     def observe(self, reading: Reading) -> None:
         self._latest = reading
+
+    def observe_regime(self, timeframe: str, distance_pct: float) -> None:
+        self._regimes[timeframe] = distance_pct
 
     def shutdown(self) -> None:
         self._provider.shutdown()
@@ -215,6 +237,8 @@ def prime(*, llm: Iterable[tuple[str, str]], profiles: Iterable[str], dry_run: b
         _active.llm_tokens.add(0, {**attributes, "direction": "output"})
     for profile in profiles:
         _active.cycles.add(0, {"profile": profile, "state": "running", "dry_run": dry_run})
+        _active.setups.add(0, {"profile": profile})
+        _active.stop_noise.add(0, {"profile": profile})
         _active.entries.add(0, {"profile": profile, "dry_run": dry_run})
         _active.exits.add(0, {"profile": profile, "dry_run": dry_run})
 
@@ -230,14 +254,33 @@ def record_llm(
     _active.llm_tokens.add(output_tokens, {**attributes, "direction": "output"})
 
 
-def record_cycle(*, profile: str, state: str, dry_run: bool, opened: int, exits: int) -> None:
+def record_cycle(
+    *,
+    profile: str,
+    state: str,
+    dry_run: bool,
+    opened: int,
+    exits: int,
+    setups: int = 0,
+    stop_noise: int = 0,
+) -> None:
     if _active is None:
         return
     _active.cycles.add(1, {"profile": profile, "state": state, "dry_run": dry_run})
+    if setups:
+        _active.setups.add(setups, {"profile": profile})
+    if stop_noise:
+        _active.stop_noise.add(stop_noise, {"profile": profile})
     if opened:
         _active.entries.add(opened, {"profile": profile, "dry_run": dry_run})
     if exits:
         _active.exits.add(exits, {"profile": profile, "dry_run": dry_run})
+
+
+def observe_regime(*, timeframe: str, distance_pct: float) -> None:
+    """The benchmark's distance to its slow EMA on the cycle's candle (> 0: regime up)."""
+    if _active is not None:
+        _active.observe_regime(timeframe, distance_pct)
 
 
 def record_state_change(*, scope: str, state: str, source: str) -> None:

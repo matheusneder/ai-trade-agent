@@ -21,9 +21,12 @@ up (benchmark above the slow EMA; can be turned off with ``use_regime_filter``):
 
 With ``min_stop_atr``, neither setup fires when the capped stop is narrower than that many
 ATRs: on volatile assets the profile's ``max_stop_pct`` would put the stop inside the noise.
+:func:`evaluate` still reports the setup that filter removed (``stop_noise_setup``), and
+:func:`market_regime` the benchmark's side of its slow EMA, so a cycle can tell why it
+found nothing.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -59,9 +62,25 @@ class Signal:
     """Suggested stop distance (fraction of the price), from the ATR."""
     atr_pct: float
     close: float
+    stop_noise_setup: str | None = None
+    """Setup that only ``min_stop_atr`` removed (D-039): what the stop-noise filter cost."""
 
     def is_entry(self, min_score: float) -> bool:
         return self.setup is not None and self.score >= min_score
+
+
+@dataclass(frozen=True, slots=True)
+class Regime:
+    """Market regime of the setups (D-016): the benchmark's close against its slow EMA."""
+
+    up: bool
+    close: float
+    ema_slow: float
+
+    @property
+    def distance_pct(self) -> float:
+        """How far the close is above (+) or below (−) the slow EMA, in % of the EMA."""
+        return (self.close / self.ema_slow - 1) * 100
 
 
 def _col(features: pd.DataFrame, name: str) -> pd.Series:
@@ -147,15 +166,32 @@ def evaluate(features: pd.DataFrame, params: SignalParams | None = None) -> Sign
     """Signal of the last closed candle (NaN → neutral)."""
     if features.empty:
         raise ValueError("sem candles para avaliar")
+    p = params or SignalParams()
     last = features.index[-1]
-    score = float(score_frame(features, params).loc[last])
-    setup = str(setup_frame(features, params).loc[last]) or None
-    stop = float(stop_pct_frame(features, params).loc[last])
+    score = float(score_frame(features, p).loc[last])
+    setup = str(setup_frame(features, p).loc[last]) or None
+    noise = None
+    if setup is None and p.min_stop_atr is not None:
+        noise = str(setup_frame(features, replace(p, min_stop_atr=None)).loc[last]) or None
+    stop = float(stop_pct_frame(features, p).loc[last])
     atr_pct = float(features["atr_pct"].loc[last])
     return Signal(
         score=score,
         setup=setup,
-        stop_pct=(params or SignalParams()).max_stop_pct if np.isnan(stop) else stop,
+        stop_pct=p.max_stop_pct if np.isnan(stop) else stop,
         atr_pct=0.0 if np.isnan(atr_pct) else atr_pct,
         close=float(features["close"].loc[last]),
+        stop_noise_setup=noise,
     )
+
+
+def market_regime(features: pd.DataFrame) -> Regime | None:
+    """Regime on the last closed candle, from the benchmark's own features (no
+    ``benchmark_close``); ``None`` while the slow EMA is still undefined."""
+    if features.empty:
+        return None
+    last = features.iloc[-1]
+    close, ema = float(last["close"]), float(last["ema_slow"])
+    if np.isnan(ema) or ema <= 0:
+        return None
+    return Regime(up=bool(last["regime_up"]), close=close, ema_slow=ema)

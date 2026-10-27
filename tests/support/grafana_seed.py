@@ -9,6 +9,9 @@ A small simulation of a normal day of the agent, written straight into the ORM m
   an entry, a take-profit and a stop order, fills and fees), exits by the decision and by
   the stop or the trailing take-profit, FOK entries that were not filled (``rejected``), a
   manual close by a Telegram command;
+* the market regime of every cycle (BTC against its EMA 200): the first reading, a cycle
+  in the regime down (no setup, no entry) and back up, each flip a ``market.regime_changed``
+  event; setups that the stop-noise filter removed (D-039) in the profiles that use it;
 * the risk check: a burst of API errors pauses the global scope for 30 minutes
   (``risk.state_changed`` events and the ``states`` of the telemetry);
 * a telemetry snapshot every 5 minutes, with equity, PnL and exposure computed from the
@@ -160,6 +163,11 @@ class Expected:
     exit_reasons: dict[str, int] = field(default_factory=dict)
     by_profile_symbol: dict[tuple[str, str], int] = field(default_factory=dict)
     decision_cycles: int = 0
+    regime_now: str = ""
+    regime_distance: float = 0.0
+    regime_changes: int = 0
+    setups_by_profile: dict[str, tuple[int, int, int, int, int]] = field(default_factory=dict)
+    """profile → (cycles, setups, removed by D-039, entries, cycles in the regime down)."""
     risk_state_changes: int = 0
     states: dict[str, str] = field(default_factory=dict)
     news_by_source: dict[str, int] = field(default_factory=dict)
@@ -248,6 +256,7 @@ class _Simulation:
         ]
         self.global_state = OpState.RUNNING
         self.global_reason: str | None = None
+        self.regime_up: bool | None = None
         self.open: list[_Open] = []
         self.order_id = rng.randrange(10**9, 2 * 10**9)
         self.list_id = rng.randrange(10**6, 2 * 10**6)
@@ -603,7 +612,24 @@ class _Simulation:
                 self.close(item, when, fill, ExitReason.TAKE_PROFIT)
 
     # ------------------------------------------------------------------ cycles
-    def cycle(self, index: int, boundary: datetime, report: str) -> None:
+    def regime(self, index: int, boundary: datetime, number: int, up: bool) -> dict[str, Any]:
+        """BTC against its EMA 200 on the cycle's candle; a flip (or the first reading) is an
+        event, as in ``RegimeWatch``."""
+        close = float(self.price(ASSETS[0], index))
+        distance = round(0.4 + 0.15 * number, 4) if up else -0.7
+        regime = {
+            "timeframe": "4h", "benchmark": ASSETS[0].symbol, "up": up, "close": close,
+            "ema_slow": round(close / (1 + distance / 100), 8), "distance_pct": distance,
+        }  # fmt: skip
+        if self.regime_up is not up:
+            candle = (boundary - CYCLE).isoformat()
+            payload = {**regime, "previous": self.regime_up, "candle": candle}
+            self.event(boundary + timedelta(seconds=90), "market.regime_changed", "info", payload)
+            self.regime_up = up
+        return regime
+
+    def cycle(self, index: int, boundary: datetime, report: str, number: int, up: bool) -> None:
+        regime = self.regime(index, boundary, number, up)
         for order, profile in enumerate(self.profiles):
             at = boundary + timedelta(seconds=95 + 40 * order + self.rng.randint(0, 30))
             exits: list[tuple[str, str]] = []
@@ -617,7 +643,7 @@ class _Simulation:
             opened: list[str] = []
             rejected: list[tuple[str, str]] = []
             evaluated = self.rng.randint(9, 16)
-            if effective is OpState.RUNNING:
+            if effective is OpState.RUNNING and up:  # the regime down leaves no setup
                 busy = {o.asset.base for o in self.open}  # one position per asset
                 slots = profile.config.allocation.max_open_positions - sum(
                     o.profile is profile for o in self.open
@@ -639,6 +665,11 @@ class _Simulation:
                     else:
                         opened.append(asset.symbol)
                         slots -= 1
+            considered = set(opened) | {s for s, _ in rejected}
+            noise: list[str] = []
+            if up and profile.config.signals.get("min_stop_atr") and (number + order) % 2 == 0:
+                rotated = ASSETS[index % len(ASSETS) :] + ASSETS[: index % len(ASSETS)]
+                noise = [next(a.symbol for a in rotated if a.symbol not in considered)]
             payload = {
                 "profile": profile.name,
                 "state": effective.value,
@@ -648,6 +679,9 @@ class _Simulation:
                 "opened": opened,
                 "exits": [list(e) for e in exits],
                 "rejected": [list(r) for r in rejected],
+                "setups": len(considered),
+                "stop_noise": noise,
+                "regime": regime,
             }
             self.event(at + timedelta(seconds=2), "decision.cycle", "info", payload)
 
@@ -832,6 +866,7 @@ class _Simulation:
             failed_round=cycles[len(cycles) // 2] if len(cycles) > 2 else None,
             burst=burst,
             manual=self.start + (self.end - self.start) * self.rng.uniform(0.65, 0.8),
+            regime_down=cycles[1] if len(cycles) > 2 else None,
         )
 
     def _agent_started(self) -> None:
@@ -883,10 +918,10 @@ class _Simulation:
             previous = steps[index - 1] if index else at
             if index:
                 self.watch(index, at)
-            for boundary in plan.cycles:
+            for number, boundary in enumerate(plan.cycles):
                 if previous < boundary + CYCLE_WORK <= at:
                     report = self.research(boundary, failed=boundary == plan.failed_round)
-                    self.cycle(index, boundary, report)
+                    self.cycle(index, boundary, report, number, boundary != plan.regime_down)
             error_rate = self._risk(at, plan)
             if self.open and previous < plan.manual <= at - timedelta(seconds=2):
                 self._manual_close(index, plan.manual)
@@ -948,6 +983,8 @@ class _Plan:
     failed_round: datetime | None
     burst: datetime
     manual: datetime
+    regime_down: datetime | None
+    """The cycle with the BTC below its EMA 200 (the regime flips down, then back up)."""
 
 
 # ============================================================================ expected values
@@ -968,6 +1005,19 @@ def _expected(data: Dataset) -> Expected:
         news[item.source] = news.get(item.source, 0) + 1
     latest_ok = max((r for r in data.reports if r.status == "ok"), key=lambda r: r.created_at)
     view = latest_ok.view or {}
+    cycles = [e.payload for e in sorted(events, key=lambda e: e.created_at)]
+    cycles = [c for c in cycles if "setups" in c]
+    regime = cycles[-1]["regime"]
+    by_profile: dict[str, tuple[int, int, int, int, int]] = {}
+    for c in cycles:
+        n, setups, noise, entries, down = by_profile.get(c["profile"], (0, 0, 0, 0, 0))
+        by_profile[c["profile"]] = (
+            n + 1,
+            setups + c["setups"],
+            noise + len(c["stop_noise"]),
+            entries + len(c["opened"]),
+            down + (not c["regime"]["up"]),
+        )
     return Expected(
         equity=float(last.equity),
         day_pnl=float(last.equity - last.day_start_equity),
@@ -982,6 +1032,10 @@ def _expected(data: Dataset) -> Expected:
         exit_reasons=reasons,
         by_profile_symbol=by_key,
         decision_cycles=sum(e.kind == "decision.cycle" for e in events),
+        regime_now="alta" if regime["up"] else "baixa",
+        regime_distance=regime["distance_pct"],
+        regime_changes=sum(e.kind == "market.regime_changed" for e in events),
+        setups_by_profile=by_profile,
         risk_state_changes=sum(e.kind == "risk.state_changed" for e in events),
         states=dict(last.states),
         news_by_source=news,
