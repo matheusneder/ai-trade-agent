@@ -90,6 +90,11 @@ def test_every_panel_has_something_to_show(day: seed.Telemetry) -> None:
     assert summary.job_failures >= 1
     assert summary.exchange_http_errors
     assert summary.entries and summary.exits
+    assert all(summary.setups.values()) and all(summary.stop_noise.values())
+    regime = [
+        p.value for m in day.metrics if m.name == "trade_agent.market.regime" for p in m.points
+    ]
+    assert min(regime) < 0 < regime[-1]  # a cycle with the regime down, then back up
     assert len(summary.state_changes) >= 2
     assert summary.error_logs >= 1
     emitted = {m.name for m in day.metrics}

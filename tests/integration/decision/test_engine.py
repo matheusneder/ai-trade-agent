@@ -314,6 +314,100 @@ async def test_dry_run_simulates_entries_without_orders(
     assert alerts == ["[simulação] conservador: entradas ['SOLUSDT']; saídas —"]
 
 
+async def test_cycle_reports_the_regime_and_the_setups(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """Why a cycle found nothing must be on record: the regime that gates every setup
+    and the setups the stop-noise filter removed (D-043)."""
+    _setup_market(fake)
+    alerts: list[str] = []
+    engine, _ = _engine(api, service, store, dry_run=True, alerts=alerts)
+    report = await engine.run_profile("conservador")
+    assert (report.setups, report.stop_noise) == (1, ())
+    regime = report.regime
+    assert regime is not None and (regime["timeframe"], regime["benchmark"]) == ("4h", "BTCUSDT")
+    btc = compute_features(to_frame(fake.candles[("BTCUSDT", "4h")])).iloc[-1]
+    assert regime["up"] is True and regime["close"] == btc["close"]
+    distance = (btc["close"] / btc["ema_slow"] - 1) * 100
+    assert regime["distance_pct"] == pytest.approx(distance, abs=1e-4)  # rounded to 4 places
+    events = await store.recent_events(limit=100)
+    (cycle,) = [e.payload for e in events if e.kind == "decision.cycle"]
+    assert (cycle["setups"], cycle["stop_noise"], cycle["regime"]) == (1, [], regime)
+    (flip,) = [e.payload for e in events if e.kind == "market.regime_changed"]
+    assert (flip["up"], flip["previous"], flip["distance_pct"]) == (
+        True,
+        None,
+        regime["distance_pct"],
+    )
+    assert not any("Regime de mercado" in a for a in alerts)  # a first reading is no flip
+    again = await engine.run_profile("conservador")  # the same candle: nothing new
+    assert again.regime == regime
+    flips = [e for e in await store.recent_events(limit=100) if e.kind == "market.regime_changed"]
+    assert len(flips) == 1
+
+
+async def test_cycle_counts_the_setups_the_stop_noise_filter_removed(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    strategy = _strategy(signals={"min_stop_atr": 50.0})  # no stop is 50 ATRs wide
+    engine, _ = _engine(api, service, store, strategy=strategy, dry_run=True)
+    with capture_logs() as logs:
+        report = await engine.run_profile("conservador")
+    assert (report.setups, report.stop_noise, report.opened) == (0, ("SOLUSDT",), ())
+    sol = next(e for e in logs if e["event"] == "decision.signal" and e["symbol"] == "SOLUSDT")
+    assert (sol["setup"], sol["stop_noise"]) == (None, "trend_pullback")
+
+
+async def test_a_falling_benchmark_reports_the_regime_down(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    fake.candles[("BTCUSDT", "4h")] = _candles([100 * math.exp(-0.004 * i) for i in range(320)])
+    engine, _ = _engine(api, service, store, dry_run=True)
+    report = await engine.run_profile("conservador")
+    assert report.regime is not None and report.regime["up"] is False
+    assert float(str(report.regime["distance_pct"])) < 0
+    assert (report.setups, report.stop_noise, report.opened) == (0, (), ())
+
+
+@pytest.mark.parametrize("candles", [150, 0], ids=["before-the-ema-200", "no-candles"])
+async def test_without_the_benchmark_ema_the_cycle_has_no_regime(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    measured: Measured,
+    candles: int,
+) -> None:
+    _setup_market(fake)
+    closes = [100 * math.exp(0.004 * i) for i in range(candles)]
+    fake.candles[("BTCUSDT", "4h")] = _candles(closes) if closes else []
+    engine, _ = _engine(api, service, store, dry_run=True)
+    report = await engine.run_profile("conservador")
+    assert report.regime is None and report.summary()["regime"] is None
+    kinds = {e.kind for e in await store.recent_events(limit=100)}
+    assert "decision.cycle" in kinds and "market.regime_changed" not in kinds
+    assert "trade_agent.market.regime" not in measured.points()
+
+
+async def test_a_failing_regime_record_does_not_cost_the_cycle(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_market(fake)
+    engine, _ = _engine(api, service, store, dry_run=True)
+    monkeypatch.setattr(engine._regimes, "observe", AsyncMock(side_effect=OSError("db down")))
+    with capture_logs() as logs:
+        report = await engine.run_profile("conservador")
+    assert report.opened == ("SOLUSDT",) and report.regime is not None
+    (failure,) = [e for e in logs if e["event"] == "decision.regime_failed"]
+    assert failure["profile"] == "conservador" and "db down" in failure["error"]
+
+
 async def test_signals_read_the_history_where_the_slow_ema_has_converged(
     api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
 ) -> None:
@@ -370,9 +464,13 @@ async def test_live_cycle_traces_decision_through_execution(
     assert measured.value("trade_agent.decision.cycles", **live, state="running") == 1
     assert measured.value("trade_agent.decision.entries", **live) == 1
     assert "trade_agent.decision.exits" not in measured.points()  # no exit in the cycle
+    assert measured.value("trade_agent.decision.setups", profile="conservador") == 1
+    assert "trade_agent.decision.stop_noise" not in measured.points()
+    assert measured.value("trade_agent.market.regime", timeframe="4h") > 0
     cycle = spans.one("decision.cycle")
     attributes = cycle.attributes or {}
     assert attributes["trade_agent.profile"] == "conservador"
+    assert (attributes["trade_agent.setups"], attributes["trade_agent.regime_up"]) == (1, True)
     assert attributes["trade_agent.opened"] == ("SOLUSDT",)
     assert attributes["trade_agent.dry_run"] is False
     opened = spans.one("position.open")

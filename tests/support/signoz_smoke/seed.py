@@ -153,6 +153,8 @@ class Summary:
     llm_cost: float
     llm_tokens: int
     decision_cycles: Mapping[str, int]
+    setups: Mapping[str, int]  # per profile
+    stop_noise: Mapping[str, int]  # per profile: setups removed by the stop-noise filter
     entries: Mapping[str, int]  # per profile
     exits: Mapping[str, int]
     state_changes: list[str]  # "scope → state" series
@@ -321,6 +323,9 @@ class _Generator:
         self.llm_tokens = 0
         self.llm_calls = 0
         self.cycles: Counter[str] = Counter()
+        self.setups: Counter[str] = Counter()
+        self.stop_noise: Counter[str] = Counter()
+        self.regime: float | None = None  # BTC vs its EMA 200 (%), from the first cycle on
         self.entries: Counter[str] = Counter()
         self.exits: Counter[str] = Counter()
         self.state_changes: set[str] = set()
@@ -683,6 +688,9 @@ class _Generator:
         cycle = job.open("decision", "decision.cycle")
         state = "paused" if self.states["global"] != "running" else self.states[profile]
         cycle.log("decision.cycle_start", profile=profile, state=state, universe=95, dry_run=False)
+        # the regime: one cycle below the EMA 200, the others above (deterministic: no rng)
+        number = self.cycles[profile]
+        self.regime = -0.7 if number == 1 else round(0.4 + 0.15 * number, 4)
         universe = cycle.open("decision", "universe.get")
         self.exchange(universe, "/api/v3/exchangeInfo", weight=20, median_ms=2300)
         self.exchange(universe, "/api/v3/ticker/24hr", weight=40, median_ms=380)
@@ -704,12 +712,17 @@ class _Generator:
                     exits += 1
                     break
             wanted = self.rng.choice((0, 1, 1, 2)) if self.entries.total() else 1
+            if self.regime < 0:
+                wanted = 0  # the regime down leaves no setup
             for _ in range(min(wanted, 3 - len(mine) + exits)):
                 self.open_position(profile, cycle)
                 opened += 1
+        setups = opened + number % 2 if self.regime > 0 else 0
+        noise = int(self.regime > 0 and (number + PROFILES.index(profile)) % 3 == 0)
         cycle.log(
             "decision.cycle", "info", profile=profile, state=state, evaluated=evaluated,
             dry_run=False, research="ok" if research else "sem candidatos (leitura anterior)",
+            setups=setups,
         )  # fmt: skip
         cycle.close()
         self.finish_job(job, f"decide_{profile}")
@@ -717,6 +730,10 @@ class _Generator:
         self.count(
             "trade_agent.decision.cycles", at, 1, profile=profile, state=state, dry_run=False
         )
+        self.setups[profile] += setups
+        self.count("trade_agent.decision.setups", at, setups, profile=profile)
+        self.stop_noise[profile] += noise
+        self.count("trade_agent.decision.stop_noise", at, noise, profile=profile)
         if opened:
             self.entries[profile] += opened
             self.count("trade_agent.decision.entries", at, opened, profile=profile, dry_run=False)
@@ -836,6 +853,9 @@ class _Generator:
         for name, (unit, value) in values.items():
             self.gauge(name, unit, at, value)
             self.last[name] = value
+        if self.regime is not None:  # the agent sets it on every decision cycle
+            self.gauge("trade_agent.market.regime", "%", at, self.regime, {"timeframe": "4h"})
+            self.last["trade_agent.market.regime"] = self.regime
         scope_pnl = {"global": sum(self.realized.values()) + self.unrealized()}
         scope_pnl |= {p: self.realized[p] + self.unrealized(p) for p in PROFILES}
         for scope in SCOPES:
@@ -900,6 +920,8 @@ class _Generator:
             "trade_agent.llm.cost": "USD",
             "trade_agent.llm.tokens": "{token}",
             "trade_agent.decision.cycles": "{cycle}",
+            "trade_agent.decision.setups": "{setup}",
+            "trade_agent.decision.stop_noise": "{setup}",
             "trade_agent.decision.entries": "{position}",
             "trade_agent.decision.exits": "{position}",
             "trade_agent.risk.state_changes": "{change}",
@@ -953,6 +975,8 @@ class _Generator:
             llm_cost=round(self.llm_cost, 6),
             llm_tokens=self.llm_tokens,
             decision_cycles=dict(self.cycles),
+            setups=dict(self.setups),
+            stop_noise=dict(self.stop_noise),
             entries=dict(self.entries),
             exits=dict(self.exits),
             state_changes=sorted(self.state_changes),

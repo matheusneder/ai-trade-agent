@@ -29,6 +29,7 @@ from tests.support.grafana_ui import (
 
 GrafanaPage = tuple[Page, Watch]
 DAILY = "Ganhos e perdas por escopo do dia (USDT)"
+REGIME = "Filtro de regime (BTC vs EMA200)"
 
 
 def _result(watch: Watch, uid: str, title: str) -> Result:
@@ -73,6 +74,10 @@ def test_overview_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
     assert value("Posições ativas", "posicoes") == expected.active_positions
     assert value("Posições ativas", "exposicao") == pytest.approx(expected.exposure, abs=1e-6)
     assert stat_text(page, "Posições ativas").split()[1] == str(expected.active_positions)
+    regime = _result(watch, "ta-overview", REGIME)
+    assert regime.value("regime") == expected.regime_now
+    assert regime.value("distancia") == pytest.approx(expected.regime_distance)
+    expect(panel(page, REGIME)).to_contain_text(expected.regime_now)  # the text column, drawn
     states = _result(watch, "ta-overview", "Estado operacional")
     assert (
         dict(zip(states.column("escopo"), states.column("estado"), strict=True)) == expected.states
@@ -187,13 +192,26 @@ def test_research_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
     open_dashboard(page, watch, "ta-research")
     cycles = _result(watch, "ta-research", "Ciclos de decisão")
     assert cycles.rows == expected.decision_cycles
+    assert set(cycles.column("regime")) == {"alta", "baixa"}
+    totals = expected.setups_by_profile
+    assert sum(cycles.column("setups")) == sum(t[1] for t in totals.values())
+    distance = _result(watch, "ta-research", "BTC vs EMA200 (%)").column("distancia")
+    assert len(distance) == expected.decision_cycles // len(totals)  # one point per close
+    assert min(distance) < 0 < distance[-1] == pytest.approx(expected.regime_distance)
+    setups = _result(watch, "ta-research", "Setups e filtros por perfil")
+    columns = ("ciclos", "setups", "ruido_d039", "entradas", "ciclos_regime_baixa")
+    found = zip(setups.column("perfil"), *(setups.column(c) for c in columns), strict=True)
+    assert {profile: tuple(values) for profile, *values in found} == totals
+    flips = _result(watch, "ta-research", "Viradas de regime")
+    assert flips.rows == expected.regime_changes
+    assert flips.column("anterior") == ["baixa", "alta", "primeira leitura"]  # newest first
     analyst = _result(watch, "ta-research", "Última leitura do analista")
     assert analyst.column("ativo") == expected.analyst_assets
-    regime = _result(watch, "ta-research", "Regime e exposição")
+    regime = _result(watch, "ta-research", "Regime do analista e exposição")
     assert regime.value("regime") == expected.regime
     assert regime.value("exposicao") == pytest.approx(expected.exposure_multiplier)
     # the text column survives the stat's reduction and is drawn next to the number
-    expect(panel(page, "Regime e exposição")).to_contain_text(expected.regime)
+    expect(panel(page, "Regime do analista e exposição")).to_contain_text(expected.regime)
     status = _result(watch, "ta-research", "Ciclos do analista por status")
     assert (sum(status.column("ok")), sum(status.column("falhas"))) == (
         expected.reports_ok,
