@@ -371,6 +371,26 @@ async def test_a_falling_benchmark_reports_the_regime_down(
     assert (report.setups, report.stop_noise, report.opened) == (0, (), ())
 
 
+@pytest.mark.parametrize("candles", [150, 0], ids=["before-the-ema-200", "no-candles"])
+async def test_without_the_benchmark_ema_the_cycle_has_no_regime(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    measured: Measured,
+    candles: int,
+) -> None:
+    _setup_market(fake)
+    closes = [100 * math.exp(0.004 * i) for i in range(candles)]
+    fake.candles[("BTCUSDT", "4h")] = _candles(closes) if closes else []
+    engine, _ = _engine(api, service, store, dry_run=True)
+    report = await engine.run_profile("conservador")
+    assert report.regime is None and report.summary()["regime"] is None
+    kinds = {e.kind for e in await store.recent_events(limit=100)}
+    assert "decision.cycle" in kinds and "market.regime_changed" not in kinds
+    assert "trade_agent.market.regime" not in measured.points()
+
+
 async def test_a_failing_regime_record_does_not_cost_the_cycle(
     api: BinanceSpotApi,
     service: PositionService,

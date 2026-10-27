@@ -230,3 +230,4 @@ def test_market_regime_reads_the_benchmark_against_its_slow_ema() -> None:
     last = compute_features(falling).iloc[-1]
     assert regime.distance_pct == pytest.approx((last["close"] / last["ema_slow"] - 1) * 100)
     assert market_regime(compute_features(ohlcv(np.linspace(100, 101, 5)))) is None
+    assert market_regime(pd.DataFrame(columns=["close", "ema_slow", "regime_up"])) is None
