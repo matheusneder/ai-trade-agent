@@ -925,6 +925,235 @@
           "links": []
         }
       },
+      "regime-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "BTC vs EMA200 agora",
+            "description": "Fechamento do BTC no candle do último ciclo de decisão acima (+) ou abaixo (−) da EMA200, em %. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra: nenhum perfil abre posição até o BTC fechar acima da EMA200."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "percent",
+                "decimalPrecision": "2"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.market.regime",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "regime": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "BTC vs EMA200 (%)",
+            "description": "Fechamento do BTC no candle do último ciclo de decisão acima (+) ou abaixo (−) da EMA200, em %. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra: nenhum perfil abre posição até o BTC fechar acima da EMA200."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "percent",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "step_after"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "timeframe",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{timeframe}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.market.regime",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "avg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "setups": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Setups e filtro de ruído (D-039) por perfil",
+            "description": "Setups encontrados nos ciclos de decisão e os que só o filtro de stop no ruído (D-039) removeu. Com o regime em baixa não há setup nenhum."
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [
+                            {
+                              "name": "profile",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "setups {{profile}}",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.decision.setups",
+                              "temporality": "",
+                              "timeAggregation": "increase",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [
+                            {
+                              "name": "profile",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "ruído D-039 {{profile}}",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.decision.stop_noise",
+                              "temporality": "",
+                              "timeAggregation": "increase",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
       "risk-state": {
         "kind": "Panel",
         "spec": {
@@ -1437,6 +1666,46 @@
               "height": 6,
               "content": {
                 "$ref": "#/spec/panels/positions"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Regime e setups",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 2,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/regime-now"
+              }
+            },
+            {
+              "x": 2,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/regime"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/setups"
               }
             }
           ]

@@ -37,6 +37,7 @@ def test_without_configuration_nothing_is_recorded() -> None:
     metrics.record_llm(model="m", purpose="p", cost_usd=D(1), input_tokens=1, output_tokens=1)
     metrics.record_cycle(profile="c", state="running", dry_run=True, opened=1, exits=1)
     metrics.record_state_change(scope="global", state="halted", source="gatilho")
+    metrics.observe_regime(timeframe="4h", distance_pct=-1.1)
 
 
 def test_gauges_follow_the_latest_reading(measured: Measured) -> None:
@@ -88,6 +89,10 @@ def test_counters(measured: Measured) -> None:
     )  # fmt: skip
     metrics.record_cycle(profile="conservador", state="running", dry_run=False, opened=1, exits=2)
     metrics.record_cycle(profile="conservador", state="paused", dry_run=False, opened=0, exits=0)
+    metrics.record_cycle(
+        profile="moderado", state="running", dry_run=False, opened=0, exits=0, setups=3,
+        stop_noise=2,
+    )  # fmt: skip
     metrics.record_state_change(scope="global", state="halted", source="gatilho")
     llm = {"model": "claude-sonnet-5", "purpose": "triage"}
     assert measured.value("trade_agent.llm.cost", **llm) == 0.25
@@ -97,12 +102,25 @@ def test_counters(measured: Measured) -> None:
     assert measured.value("trade_agent.decision.cycles", **running) == 1
     assert measured.value("trade_agent.decision.entries", profile="conservador", dry_run=False) == 1
     assert measured.value("trade_agent.decision.exits", profile="conservador", dry_run=False) == 2
+    assert measured.value("trade_agent.decision.setups", profile="moderado") == 3
+    assert measured.value("trade_agent.decision.stop_noise", profile="moderado") == 2
+    setups = measured.points()["trade_agent.decision.setups"]
+    assert [attributes for attributes, _ in setups] == [{"profile": "moderado"}]  # no 0 adds
     assert (
         measured.value(
             "trade_agent.risk.state_changes", scope="global", state="halted", source="gatilho"
         )
         == 1
     )
+
+
+def test_regime_gauge_keeps_the_latest_distance_per_timeframe(measured: Measured) -> None:
+    assert "trade_agent.market.regime" not in measured.points()  # no cycle yet
+    metrics.observe_regime(timeframe="4h", distance_pct=0.4)
+    metrics.observe_regime(timeframe="4h", distance_pct=-1.11)
+    metrics.observe_regime(timeframe="1h", distance_pct=0.2)
+    assert measured.value("trade_agent.market.regime", timeframe="4h") == -1.11
+    assert measured.value("trade_agent.market.regime", timeframe="1h") == 0.2
 
 
 def test_prime_exports_the_counters_at_zero_before_the_first_event(measured: Measured) -> None:
@@ -117,6 +135,8 @@ def test_prime_exports_the_counters_at_zero_before_the_first_event(measured: Mea
     cycle = {"profile": "swing_trend", "state": "running", "dry_run": False}
     assert measured.value("trade_agent.decision.cycles", **cycle) == 0
     assert measured.value("trade_agent.decision.entries", profile="swing_trend", dry_run=False) == 0
+    assert measured.value("trade_agent.decision.setups", profile="swing_trend") == 0
+    assert measured.value("trade_agent.decision.stop_noise", profile="swing_trend") == 0
     # the first event lands on top of the 0 point, so increase/rate see it
     metrics.record_llm(
         model="claude-opus-5", purpose="analyst", cost_usd=D("0.04"), input_tokens=2477,

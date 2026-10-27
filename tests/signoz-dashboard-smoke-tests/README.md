@@ -145,8 +145,10 @@ names, span names, attributes, metric names and log fields the agent, Alloy and 
   (HTTP 429/5xx);
 - **metrics** `trade_agent.*`: the gauges every minute from one portfolio simulation (equity,
   peak, day start, drawdown, PnL per scope, exposure, positions, risk state per scope, error
-  rate, weight, clock offset), and cumulative counters fed by the same events as the spans
-  (LLM cost and tokens, cycles, entries, exits, risk state changes);
+  rate, weight, clock offset, and the market regime from the first decision cycle on, with one
+  cycle below the EMA 200 and no entry in it), and cumulative counters fed by the same events
+  as the spans (LLM cost and tokens, cycles, setups and stop-noise removals, entries, exits,
+  risk state changes);
 - **logs** as Alloy forwards them: structlog JSON bodies flattened into attributes, linked to
   their span by `trace_id`/`span_id`, plus the lines of Grafana, PostgreSQL, Loki, Alloy...;
 - **container metrics** of the 14 compose services (CPU, memory, memory %, network, disk).

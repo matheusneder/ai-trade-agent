@@ -42,6 +42,7 @@ EXPECTED_NUMBERS: dict[str, Callable[[Summary], float]] = {
     "exposure-now": lambda s: s.last["trade_agent.exposure"],
     "positions-now": lambda s: s.last["trade_agent.positions.active"],
     "risk-now": lambda s: s.last["trade_agent.risk.state"],
+    "regime-now": lambda s: s.last["trade_agent.market.regime"],
     # Saúde técnica (counts over the period are exact)
     "weight-now": lambda s: s.last["trade_agent.binance.weight_used_1m"],
     "clock-now": lambda s: s.last["trade_agent.clock.offset"],
@@ -66,6 +67,10 @@ EXPECTED_LEGENDS: dict[str, Expect] = {
     "risk-state": lambda s: {"global", "swing_trend", "momentum_alpha"},
     "state-changes": lambda s: set(s.state_changes),
     "cycles": lambda s: set(s.decision_cycles),
+    "regime": lambda s: {"4h"},
+    "setups": lambda s: (
+        {f"setups {p}" for p in s.setups} | {f"ruído D-039 {p}" for p in s.stop_noise}
+    ),
     "entries-exits": lambda s: (
         {f"entradas {p}" for p in s.entries} | {f"saídas {p}" for p in s.exits}
     ),

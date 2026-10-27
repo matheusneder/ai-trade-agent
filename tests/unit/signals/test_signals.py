@@ -18,6 +18,7 @@ from trade_agent.signals import (
     entry_mask,
     evaluate,
     exit_mask,
+    market_regime,
     score_frame,
     setup_frame,
     stop_pct_frame,
@@ -199,3 +200,33 @@ def test_evaluate_with_insufficient_history_is_neutral() -> None:
     assert signal.atr_pct == 0.0
     with pytest.raises(ValueError, match="sem candles"):
         evaluate(features.iloc[0:0])
+
+
+def test_evaluate_reports_the_setup_only_the_stop_noise_filter_removed() -> None:
+    features = compute_features(breakout())
+    stop_atr = float(stop_pct_frame(features).iloc[-1]) / float(features["atr_pct"].iloc[-1])
+    removed = evaluate(features, SignalParams(min_stop_atr=stop_atr + 0.1))
+    assert (removed.setup, removed.stop_noise_setup) == (None, BREAKOUT)
+    kept = evaluate(features, SignalParams(min_stop_atr=stop_atr))
+    assert (kept.setup, kept.stop_noise_setup) == (BREAKOUT, None)
+    assert evaluate(features).stop_noise_setup is None  # filter off
+    # with the regime down there is no setup to remove: the regime filter comes first
+    falling = downtrend(len(features))["close"].set_axis(features.index)
+    blocked = compute_features(breakout(), benchmark_close=falling)
+    assert evaluate(blocked, SignalParams(min_stop_atr=stop_atr + 0.1)).stop_noise_setup is None
+
+
+def test_market_regime_reads_the_benchmark_against_its_slow_ema() -> None:
+    up = market_regime(compute_features(uptrend_with_pullback()))
+    assert up is not None and up.up and up.distance_pct > 0
+    down = market_regime(compute_features(downtrend()))
+    assert down is not None and not down.up and down.distance_pct < 0
+    asset = uptrend_with_pullback()
+    falling = downtrend(len(asset))
+    falling.index = asset.index
+    regime = market_regime(compute_features(falling))
+    on_asset = compute_features(asset, benchmark_close=falling["close"])["regime_up"].iloc[-1]
+    assert regime is not None and regime.up == bool(on_asset)  # what the setups see
+    last = compute_features(falling).iloc[-1]
+    assert regime.distance_pct == pytest.approx((last["close"] / last["ema_slow"] - 1) * 100)
+    assert market_regime(compute_features(ohlcv(np.linspace(100, 101, 5)))) is None
