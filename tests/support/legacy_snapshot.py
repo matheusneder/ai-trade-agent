@@ -1,12 +1,13 @@
 """Digest of everything the legacy profiles decide, for the bit-for-bit regression test (D-044).
 
 Uses only the APIs that already existed before the pair-local families, so the same function
-runs on the base commit's code: ``tests/fixtures/legacy_snapshot.json`` was written by it
-there (``PYTHONPATH`` on that commit's ``src``) and the test recomputes it on this code. Each
-entry hashes the raw bytes of a float column, the setup labels or the ``repr`` of a plan.
+runs on the base commit's code (``PYTHONPATH`` on that commit's ``src``, and its profiles in
+``TA_LEGACY_SNAPSHOT_CONFIG``), as the regression test does. Each entry hashes the raw bytes of
+a float column, the setup labels or the ``repr`` of a plan.
 """
 
 import hashlib
+import os
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -38,7 +39,8 @@ from trade_agent.strategy.portfolio import Candidate, Holding, plan_entries
 from trade_agent.strategy.profiles import load_strategy_config
 
 PROFILES = ("swing_trend", "momentum_alpha", "alt_atr")
-CONFIG = Path(__file__).parents[2] / "config" / "profiles.yaml"
+CONFIG_ENV = "TA_LEGACY_SNAPSHOT_CONFIG"
+CONFIG = Path(os.environ.get(CONFIG_ENV, Path(__file__).parents[2] / "config" / "profiles.yaml"))
 
 
 def _walk(seed: int, n: int = 1200) -> pd.DataFrame:
