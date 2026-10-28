@@ -64,7 +64,10 @@ DAY_BLOCK = 10
 TRADE_BLOCK = 5
 TRANSITION_CANDLES = 6
 ATR_WINDOW = 500
-QUARTERS = pd.date_range("2023-01-01", "2026-09-01", freq="QS", tz="UTC")
+QUARTERS = [
+    *pd.date_range("2023-01-01", "2026-07-01", freq="QS", tz="UTC"),
+    pd.Timestamp("2026-09-01", tz="UTC"),  # the last window is two months long
+]
 BENCHMARK = "BTC/USDT"
 THRESHOLDS = (0.52, 0.57, 0.62, 0.67)
 """``lab.experiments.THRESHOLDS``: the ``min_score`` of the ``C`` runs."""

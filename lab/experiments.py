@@ -47,7 +47,8 @@ from trade_agent.strategy.profiles import StrategyConfig, parse_duration
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "config" / "profiles.yaml"
 STRATEGY_FILE = ROOT / "lab" / "freqtrade" / "user_data" / "strategies" / "trade_agent_strategy.py"
-RUNS = ROOT / "var" / "lab" / "runs"
+OUTPUT = ROOT / "var" / "lab"
+RUNS = OUTPUT / "runs"
 DATA = ROOT / "lab" / "freqtrade" / "user_data" / "data"
 LEGACY = ("swing_trend", "momentum_alpha", "alt_atr")
 LOCAL = ("pair_pullback_1h", "pair_breakout_1h", "pair_range_1h")
@@ -194,11 +195,19 @@ def run(experiment: Experiment, config: dict[str, Any], extra: Sequence[str]) ->
     return result.returncode
 
 
+def done(experiment: Experiment) -> bool:
+    """The experiment already has its report in ``var/lab``."""
+    return any(OUTPUT.glob(f"walk-forward-*-{experiment.label}-[0-9]*.md"))
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--only", nargs="+", help="grupos ou nomes de experimento")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--list", action="store_true")
+    parser.add_argument(
+        "--resume", action="store_true", help="pula os experimentos que já têm relatório"
+    )
     parser.add_argument("--profiles-file", type=Path, default=PROFILES)
     parser.add_argument("extra", nargs="*", help="argumentos extras do walk_forward (após --)")
     return parser.parse_args(argv)
@@ -212,6 +221,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for e in matrix(config["profiles"])
         if not args.only or {e.group, e.name, e.label} & set(args.only)
     ]
+    if args.resume:
+        selected = [e for e in selected if not done(e)]
     if args.list:
         for e in selected:
             print(e.group, e.label, " ".join(e.args))

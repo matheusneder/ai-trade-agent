@@ -95,3 +95,12 @@ def test_main_lists_and_runs_the_selection(
     monkeypatch.setattr(ex, "run", fake_run)
     assert ex.main(["--only", "B-alt_atr-alts", "--jobs", "1"]) == 3
     assert ran == ["B-alt_atr-alts"]
+
+
+def test_resume_skips_the_experiments_with_a_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(ex, "OUTPUT", tmp_path)
+    (tmp_path / "walk-forward-x-B-alt_atr-20261028-1.md").write_text("", encoding="utf-8")
+    assert ex.main(["--list", "--only", "B-alt_atr", "B-alt_atr-alts", "--resume"]) == 0
+    assert capsys.readouterr().out.split() == ["B", "B-alt_atr-alts"]
