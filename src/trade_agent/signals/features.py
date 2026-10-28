@@ -99,3 +99,36 @@ def compute_features(
     with np.errstate(invalid="ignore"):
         out["regime_up"] = reference > talib.EMA(reference, timeperiod=p.ema_slow)
     return out
+
+
+@dataclass(frozen=True)
+class LocalFeatureParams:
+    """Extra indicators of the pair-local families (D-044), on top of ``compute_features``."""
+
+    ema_short: int = 20
+    bb_period: int = 20
+    bb_dev: float = 2.0
+
+    @property
+    def warmup(self) -> int:
+        return max(self.ema_short, self.bb_period) + 1
+
+
+def compute_local_features(
+    features: pd.DataFrame, params: LocalFeatureParams | None = None
+) -> pd.DataFrame:
+    """Returns a copy of ``features`` (from :func:`compute_features`) with the local columns.
+
+    New columns only (``ema_short``, the full Bollinger bands and the true range): the ones
+    the legacy family reads keep their values.
+    """
+    p = params or LocalFeatureParams()
+    out = features.copy()
+    high, low, close = _array(features["high"]), _array(features["low"]), _array(features["close"])
+    out["ema_short"] = talib.EMA(close, timeperiod=p.ema_short)
+    upper, middle, lower = talib.BBANDS(
+        close, timeperiod=p.bb_period, nbdevup=p.bb_dev, nbdevdn=p.bb_dev
+    )
+    out["bb_upper"], out["bb_middle"], out["bb_lower"] = upper, middle, lower
+    out["true_range"] = talib.TRANGE(high, low, close)
+    return out

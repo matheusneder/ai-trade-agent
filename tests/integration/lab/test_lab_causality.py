@@ -104,18 +104,29 @@ def _user_data(root: Path, *, rewrite_future: bool) -> Path:
                     candle[1:5] = [last_close * 3] * 4
             path.write_bytes(gzip.compress(json.dumps(candles).encode()))
 
-    strategy = load_strategy_config(ROOT / "config" / "profiles.yaml")
-    profile = strategy.profiles["momentum_alpha"]
-    # without the stop-noise filter (D-039), so the alts trade early in the window
-    signals = {k: v for k, v in profile.signals.items() if k != "min_stop_atr"}
-    profile = profile.model_copy(update={"signals": signals})
+    profile = _profile()
     pre_trade = load_stop_conditions(ROOT / "config" / "stop_conditions.yaml").pre_trade
     base = json.loads((LAB / "user_data" / "config.base.json").read_text(encoding="utf-8"))
     config = wf.lab_config(base, profile, Decimal(1000), PAIRS)
     (user_data / "config.json").write_text(json.dumps(config), encoding="utf-8")
     params = wf.strategy_params(profile, pre_trade)
     (user_data / "strategies" / wf.PARAMS_FILE).write_text(json.dumps(params), encoding="utf-8")
+    _write_manifest(user_data / "strategies")
     return user_data
+
+
+def _profile() -> Any:
+    """``momentum_alpha`` without the stop-noise filter (D-039), so the alts trade early in
+    the window."""
+    profile = load_strategy_config(ROOT / "config" / "profiles.yaml").profiles["momentum_alpha"]
+    signals = {k: v for k, v in profile.signals.items() if k != "min_stop_atr"}
+    return profile.model_copy(update={"signals": signals})
+
+
+def _write_manifest(strategies: Path) -> None:
+    pre_trade = load_stop_conditions(ROOT / "config" / "stop_conditions.yaml").pre_trade
+    manifest = wf.profile_manifest(_profile(), Decimal(1000), "wallet", pre_trade)
+    (strategies / wf.PROFILE_FILE).write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _trades(user_data: Path) -> list[dict[str, Any]]:
@@ -262,6 +273,7 @@ def test_the_entry_stop_comes_from_the_closed_signal_candle(tmp_path: Path) -> N
     strategies = tmp_path / "strategies"
     strategies.mkdir()
     shutil.copy2(LAB / "user_data" / "strategies" / "trade_agent_strategy.py", strategies)
+    _write_manifest(strategies)
     result = subprocess.run(  # noqa: S603 - fixed arguments, the paths are the test's own
         [
             _docker(), "run", "--rm", "--entrypoint", "python",

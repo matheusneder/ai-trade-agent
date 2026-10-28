@@ -2,7 +2,8 @@
 
 1. universe (built every cycle) and **closed** candles of the assets in the profile's tiers;
 2. technical signals (the same code as the lab) and the market regime, whose flips go to
-   Telegram (:class:`RegimeWatch`);
+   Telegram (:class:`RegimeWatch`). The pair-local families (D-044) decide on the pair's own
+   candles: the benchmark only feeds the regime telemetry, and they go on without it;
 3. LLM analyst, only when there are setups or positions (saves cost), with per-profile
    degradation;
 4. rule-based exits for the profile's positions (rotation, time, veto) and break-even;
@@ -14,6 +15,7 @@ and no order is sent.
 
 import asyncio
 import contextlib
+import math
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -22,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import pandas as pd
 import structlog
 
 from trade_agent import metrics, tracing
@@ -47,8 +50,12 @@ from trade_agent.signals import (
     Regime,
     Signal,
     compute_features,
+    compute_local_features,
     evaluate,
+    evaluate_local,
+    local_frame,
     market_regime,
+    position_exit,
 )
 from trade_agent.strategy.exits import break_even_protection, exit_reason, next_weak_cycles
 from trade_agent.strategy.portfolio import Candidate, Holding, plan_entries
@@ -114,13 +121,28 @@ def regime_summary(timeframe: str, regime: Regime) -> dict[str, object]:
     }
 
 
-def regime_text(timeframe: str, regime: Regime, *, ema: int) -> str:
-    """Telegram alert of a regime flip (operator interface: Portuguese)."""
-    if regime.up:
-        side, where, effect = "alta", "acima", "os setups de compra voltam a valer"
+def regime_text(
+    timeframe: str, regime: Regime, *, ema: int, gated: Sequence[str], free: Sequence[str] = ()
+) -> str:
+    """Telegram alert of a regime flip (operator interface: Portuguese). ``gated`` are the
+    timeframe's profiles that use the regime filter, ``free`` the ones that do not (D-044)."""
+    side, where = ("alta", "acima") if regime.up else ("baixa", "abaixo")
+    one = len(gated) == 1
+    if not gated:
+        effect = "nenhum perfil deste timeframe usa o filtro de regime"
+    elif regime.up:
+        owner = "do perfil" if one else "dos perfis"
+        effect = f"os setups de compra {owner} com o filtro ({', '.join(gated)}) voltam a valer"
     else:
-        side, where = "baixa", "abaixo"
-        effect = f"nenhum perfil abre compras até o {BENCHMARK} fechar acima da EMA{ema}"
+        subject = "o perfil" if one else "os perfis"
+        verb = "abre" if one else "abrem"
+        effect = (
+            f"{subject} com o filtro de regime ({', '.join(gated)}) não {verb} compras até o "
+            f"{BENCHMARK} fechar acima da EMA{ema}"
+        )
+    if free:
+        follow = "segue" if len(free) == 1 else "seguem"
+        effect += f"; {', '.join(free)} {follow} os sinais do próprio par"
     return (
         f"Regime de mercado ({timeframe}) virou para {side}: {BENCHMARK} fechou em "
         f"{regime.close:.2f}, {where} da EMA{ema} ({regime.ema_slow:.2f}, "
@@ -129,13 +151,16 @@ def regime_text(timeframe: str, regime: Regime, *, ema: int) -> str:
 
 
 class RegimeWatch:
-    """Records and announces the flips of the market regime that gates every setup (D-016).
+    """Records and announces the flips of the market regime that gates the setups of the
+    profiles with the regime filter (D-016).
 
-    While the benchmark closes below its slow EMA no profile buys: from 2026-10-22 on, five
-    days without orders looked like a fault of the rules deployed meanwhile (D-043). Each
-    timeframe keeps its regime in a checkpoint: the first reading is only recorded
-    (``previous`` null), a flip is recorded and sent to Telegram, and a restart announces
-    nothing new. The profiles that close together read the same candle: the first one compares.
+    While the benchmark closes below its slow EMA those profiles do not buy: from 2026-10-22
+    on, five days without orders looked like a fault of the rules deployed meanwhile (D-043).
+    The alert names the profiles of the timeframe that use the filter and the ones that do not
+    (D-044). Each timeframe keeps its regime in a checkpoint: the first reading is only
+    recorded (``previous`` null), a flip is recorded and sent to Telegram, and a restart
+    announces nothing new. The profiles that close together read the same candle: the first
+    one compares.
     """
 
     def __init__(
@@ -144,12 +169,20 @@ class RegimeWatch:
         notify: Callable[[Severity, str], Awaitable[None]] | None,
         *,
         ema: int,
+        profiles: dict[str, ProfileConfig] | None = None,
     ) -> None:
         self._store = store
         self._notify = notify
         self._ema = ema
+        self._profiles = profiles or {}
         self._seen: dict[str, tuple[int, bool | None]] = {}
         self._lock = asyncio.Lock()
+
+    def text(self, timeframe: str, regime: Regime) -> str:
+        own = {n: p for n, p in self._profiles.items() if p.timeframe == timeframe}
+        gated = [n for n, p in own.items() if p.uses_regime_filter]
+        free = [n for n in own if n not in gated]
+        return regime_text(timeframe, regime, ema=self._ema, gated=gated, free=free)
 
     async def observe(self, timeframe: str, candle_ms: int, regime: Regime) -> None:
         key = REGIME_CHECKPOINT.format(timeframe=timeframe)
@@ -173,7 +206,7 @@ class RegimeWatch:
                 log.info(REGIME_EVENT, **payload)
             self._seen[timeframe] = (candle_ms, regime.up)
         if previous is not None and previous is not regime.up and self._notify is not None:
-            await self._notify(Severity.INFO, regime_text(timeframe, regime, ema=self._ema))
+            await self._notify(Severity.INFO, self.text(timeframe, regime))
 
 
 SHARED_RESEARCH_WAIT = timedelta(minutes=2)
@@ -283,6 +316,11 @@ class CycleReport:
     """Symbols whose setup only the stop-noise filter removed (D-039)."""
     regime: dict[str, object] | None = None
     """:func:`regime_summary` of the cycle's candle; ``None`` without the benchmark's EMA."""
+    family: str = "legacy"
+    regime_filter: bool = True
+    """The profile's setups wait for the benchmark above its slow EMA (D-016, D-044)."""
+    filtered: tuple[tuple[str, str], ...] = ()
+    """Pair-local families: setup patterns a filter discarded, with the reason (D-044)."""
 
     def summary(self) -> dict[str, object]:
         return {
@@ -297,7 +335,17 @@ class CycleReport:
             "setups": self.setups,
             "stop_noise": list(self.stop_noise),
             "regime": self.regime,
+            "family": self.family,
+            "regime_filter": self.regime_filter,
+            "filtered": [list(f) for f in self.filtered],
         }
+
+
+def _initial_risk(position: Position, cost_pct: Decimal) -> Decimal:
+    """What the position loses at its stop, with ``cost_pct`` (%) of round-trip costs."""
+    stop = position.policy.stop_pct or Decimal(position.policy.stop_trailing_bips or 0) / 100
+    cost = position.entry_quote or position.planned_qty * position.planned_price
+    return cost * (stop + cost_pct) / 100
 
 
 class DecisionEngine:
@@ -332,14 +380,20 @@ class DecisionEngine:
         self._features = FeatureParams()
         self._candles = ClosedCandleCache(api)
         self._entry_lock = asyncio.Lock()
+        self._levels: dict[str, dict[str, dict[int, float]]] = {}
+        """Pair-local profiles: each held pair's breakout level per candle (ms) of the cycle."""
         self._shared = SharedResearch(research, wait=research_wait) if research else None
-        self._regimes = RegimeWatch(store, notify, ema=self._features.ema_slow)
+        self._regimes = RegimeWatch(
+            store, notify, ema=self._features.ema_slow, profiles=strategy.enabled_profiles()
+        )
 
     # ------------------------------------------------------------------ signals
     async def _signals(
         self, members: list[UniverseMember], profile: ProfileConfig, now_ms: int
     ) -> tuple[dict[str, Signal], tuple[int, Regime] | None]:
         """Signals per symbol, and the regime with its candle's open time (ms)."""
+        if profile.family.local:
+            return await self._local_signals(members, profile, now_ms)
         # The lab's history: with fewer candles the EMA 200 still leans on its seed (D-040).
         limit = self._features.history
         frames = {
@@ -348,11 +402,7 @@ class DecisionEngine:
             )
         }
         benchmark = frames[BENCHMARK]["close"]
-        regime = None
-        if not frames[BENCHMARK].empty:
-            current = market_regime(compute_features(frames[BENCHMARK], self._features))
-            if current is not None:
-                regime = (int(frames[BENCHMARK]["open_time"].iloc[-1]), current)
+        regime = self._regime(frames[BENCHMARK])
         params = profile.signal_params()
         signals: dict[str, Signal] = {}
         for member in members:
@@ -379,6 +429,67 @@ class DecisionEngine:
                 close=signal.close,
             )
         return signals, regime
+
+    def _regime(self, frame: pd.DataFrame) -> tuple[int, Regime] | None:
+        if frame.empty:
+            return None
+        current = market_regime(compute_features(frame, self._features))
+        return None if current is None else (int(frame["open_time"].iloc[-1]), current)
+
+    async def _local_signals(
+        self, members: list[UniverseMember], profile: ProfileConfig, now_ms: int
+    ) -> tuple[dict[str, Signal], tuple[int, Regime] | None]:
+        """Signals of a pair-local family (D-044): each pair's own candles only. The benchmark
+        is read for the regime telemetry alone, and its failure costs nothing but that."""
+        limit = self._features.history
+        regime = None
+        try:
+            regime = self._regime(
+                await self._candles.fetch(BENCHMARK, profile.timeframe, limit=limit, now_ms=now_ms)
+            )
+        except Exception as exc:
+            log.warning("decision.benchmark_unavailable", profile=profile.code, error=repr(exc))
+        params = profile.local_params()
+        held = {p.symbol for p in await self._store.active_positions() if p.profile == profile.code}
+        symbols = dict.fromkeys([*(m.symbol for m in members), *sorted(held)])
+        signals: dict[str, Signal] = {}
+        self._levels[profile.code] = {}
+        for symbol in symbols:
+            frame = await self._candles.fetch(symbol, profile.timeframe, limit=limit, now_ms=now_ms)
+            if len(frame) < self._features.warmup:
+                continue  # not enough history for the indicators
+            features = compute_local_features(compute_features(frame, self._features))
+            signal = evaluate_local(features, params)
+            signals[symbol] = signal
+            if symbol in held:  # the level each position broke, for its technical exit
+                levels = local_frame(features, params)["level"]
+                self._levels[profile.code][symbol] = {
+                    int(t): float(lvl)
+                    for t, lvl in zip(frame["open_time"], levels, strict=True)
+                    if not math.isnan(lvl)
+                }
+            log.debug(
+                "decision.signal",
+                profile=profile.code,
+                symbol=symbol,
+                family=profile.family.value,
+                score=round(signal.score, 3),
+                setup=signal.setup,
+                filtered=signal.filtered,
+                local_regime=signal.local_regime,
+                stop_pct=round(signal.stop_pct, 4),
+                close=signal.close,
+            )
+        return signals, regime
+
+    def _entry_level(self, profile: ProfileConfig, position: Position) -> float | None:
+        """The level broken by the position's entry signal: the candle that closed when the
+        entry went out, the one before the candle of ``opened_at``."""
+        if position.opened_at is None:
+            return None
+        interval = INTERVAL_MS[profile.timeframe]
+        opened_ms = int(position.opened_at.timestamp() * 1000) // interval * interval
+        return self._levels.get(profile.code, {}).get(position.symbol, {}).get(opened_ms - interval)
 
     # ------------------------------------------------------------------ analyst
     async def _reading(
@@ -509,6 +620,9 @@ class DecisionEngine:
             setups=sum(s.setup is not None for s in signals.values()),
             stop_noise=tuple(sym for sym, s in signals.items() if s.stop_noise_setup),
             regime=None if regime is None else regime_summary(profile.timeframe, regime[1]),
+            family=profile.family.value,
+            regime_filter=profile.uses_regime_filter,
+            filtered=tuple((sym, s.filtered) for sym, s in signals.items() if s.filtered),
         )
         await self._store.record_event("decision.cycle", Severity.INFO, report.summary())
         tracing.annotate(
@@ -523,6 +637,8 @@ class DecisionEngine:
             setups=report.setups,
             stop_noise=len(report.stop_noise),
             regime_up=None if regime is None else regime[1].up,
+            family=report.family,
+            regime_filter=report.regime_filter,
         )
         metrics.record_cycle(
             profile=name,
@@ -552,17 +668,27 @@ class DecisionEngine:
     ) -> list[tuple[str, str]]:
         exits: list[tuple[str, str]] = []
         now = self._clock()
+        params = profile.local_params() if profile.family.local else None
         for position in own:
             if position.state not in _EXIT_STATES:
                 continue
-            key = f"exit.weak.{position.decision_id}"
-            previous = int((await self._store.get_checkpoint(key) or {}).get("cycles", 0))
-            weak = next_weak_cycles(previous, signals.get(position.symbol), profile)
-            await self._store.set_checkpoint(key, {"cycles": weak})
+            signal = signals.get(position.symbol)
+            technical, weak = None, 0
+            if params is None:
+                key = f"exit.weak.{position.decision_id}"
+                previous = int((await self._store.get_checkpoint(key) or {}).get("cycles", 0))
+                weak = next_weak_cycles(previous, signal, profile)
+                await self._store.set_checkpoint(key, {"cycles": weak})
+            elif signal is not None:  # pair-local family: its own technical exit (D-044)
+                technical = position_exit(signal, params, self._entry_level(profile, position))
             opinion = reading.opinions.get(position.base_asset)
             age = now - position.opened_at if position.opened_at else None
             reason = exit_reason(
-                profile=profile, age=age, weak_cycles=weak, veto=bool(opinion and opinion.veto)
+                profile=profile,
+                age=age,
+                weak_cycles=weak,
+                veto=bool(opinion and opinion.veto),
+                technical=technical,
             )
             log.debug(
                 "decision.exit_check",
@@ -580,6 +706,8 @@ class DecisionEngine:
                 if not self._dry_run:
                     await self._positions.close_position(position, ExitReason.DECISION)
                 continue
+            if profile.family.local:
+                continue  # no break-even in the pair-local families (D-044)
             bid = (await self._api.book_ticker(position.symbol)).bid_price
             protection = break_even_protection(position, profile, bid)
             if protection is not None and not self._dry_run:
@@ -610,15 +738,6 @@ class DecisionEngine:
             for symbol, signal in signals.items()
             if symbol in books
         ]
-        holdings = [
-            Holding(
-                profile=self._names.get(p.profile, p.profile),
-                symbol=p.symbol,
-                tier=by_symbol[p.symbol].tier if p.symbol in by_symbol else Tier.SMALL,
-                cost=p.entry_quote or p.planned_qty * p.planned_price,
-            )
-            for p in active
-        ]
         capital = self._strategy.profile_capital(name)
         risk_config = self._guard.conditions.pre_trade
         cost_pct = (
@@ -626,6 +745,16 @@ class DecisionEngine:
             if risk_config.risk_model == "cost_adjusted"
             else Decimal(0)
         )
+        holdings = [
+            Holding(
+                profile=self._names.get(p.profile, p.profile),
+                symbol=p.symbol,
+                tier=by_symbol[p.symbol].tier if p.symbol in by_symbol else Tier.SMALL,
+                cost=p.entry_quote or p.planned_qty * p.planned_price,
+                risk=_initial_risk(p, profile.cost_pct(cost_pct)),
+            )
+            for p in active
+        ]
         plan = plan_entries(
             name=name,
             profile=profile,
@@ -651,18 +780,7 @@ class DecisionEngine:
             vetoed_assets=frozenset(a for a, o in reading.opinions.items() if o.veto),
             account_capital=self._strategy.account.managed_capital,
             exposure=sum((h.cost for h in holdings), Decimal(0)),
-            open_risk=sum(
-                (
-                    (p.entry_quote or p.planned_qty * p.planned_price)
-                    * (
-                        (p.policy.stop_pct or Decimal(p.policy.stop_trailing_bips or 0) / 100)
-                        + cost_pct
-                    )
-                    / 100
-                    for p in active
-                ),
-                Decimal(0),
-            ),
+            open_risk=sum((_initial_risk(p, cost_pct) for p in active), Decimal(0)),
         )
         opened: list[str] = []
         rejected = [r for r in plan.rejections if r[1] != "sem setup"]

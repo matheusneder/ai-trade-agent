@@ -1,4 +1,5 @@
 import argparse
+import dataclasses
 import gzip
 import json
 import zipfile
@@ -12,7 +13,9 @@ import pytest
 import yaml
 from lab import walk_forward as wf
 
-from trade_agent.risk.conditions import load_stop_conditions
+from tests.support.local_profiles import local_profile, raw_config
+from trade_agent.risk.conditions import PreTradeConfig, load_stop_conditions
+from trade_agent.signals import BreakoutParams, PullbackParams, RangeParams, SignalParams
 from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
 
 PROFILES = wf.ROOT / "tests" / "fixtures" / "profiles.yaml"
@@ -91,12 +94,149 @@ def test_strategy_params_min_stop_atr_and_universe_volume() -> None:
     data["profiles"]["conservador"]["signals"] = {"min_stop_atr": 1.5}
     profile = StrategyConfig.model_validate(data).profiles["conservador"]
     buy = wf.strategy_params(profile, min_volume=5e6)["params"]["buy"]
-    assert buy["min_stop_atr"] == 1.5
+    assert "min_stop_atr" not in buy  # in the manifest, with every signal parameter
+    assert wf.profile_manifest(profile, Decimal(500))["signals"]["min_stop_atr"] == 1.5
     assert buy["universe_min_volume"] == 5e6
     off = wf.strategy_params(CONFIG.profiles["conservador"])["params"]["buy"]
-    assert off["min_stop_atr"] == 0.0  # filter off
     assert off["universe_min_volume"] == 0.0  # static basket
-    assert {"min_stop_atr", "universe_min_volume"} <= wf.RISK_PARAMS
+    assert "universe_min_volume" in wf.RISK_PARAMS
+
+
+# Values different from every default, for each field of each family's parameters.
+LEGACY_VALUES: dict[str, float | bool] = {
+    "adx_min": 23.0,
+    "rsi_pullback_max": 37.0,
+    "rsi_overbought": 81.0,
+    "vol_rel_min": 2.1,
+    "min_stop_pct": 0.013,
+    "use_regime_filter": False,
+    "min_stop_atr": 1.7,
+    "local_score": True,
+}
+LOCAL_VALUES: dict[str, dict[str, float | bool]] = {
+    "pair_pullback_rsi": {
+        "adx_min": 18.0, "rsi_dip": 38.0, "rsi_cross": 47.0, "rsi_max": 63.0,
+        "max_extension_atr": 0.8, "max_drift_atr": 0.4, "vol_rel_min": 0.0,
+        "obv_confirm": True, "stop_buffer_atr": 0.3, "exit_rsi": 43.0,
+    },
+    "pair_volatility_breakout": {
+        "squeeze_pctile": 0.15, "rsi_min": 52.0, "rsi_max": 68.0, "vol_rel_min": 1.6,
+        "max_extension_atr": 0.9, "max_range_atr": 2.2, "adx_filter": True, "adx_min": 22.0,
+        "retest": True, "retest_tolerance_atr": 0.3, "stop_buffer_atr": 0.6,
+    },
+    "pair_range_reversion": {
+        "adx_max": 18.0, "max_slope_atr": 0.2, "max_width_pctile": 0.7,
+        "max_trend_gap_atr": 0.9, "rsi_cross": 32.0, "stop_buffer_atr": 0.3,
+    },
+}  # fmt: skip
+
+
+def test_every_legacy_signal_parameter_reaches_the_strategy() -> None:
+    """A profile option the lab dropped would test another strategy (D-044): the manifest
+    carries every field, and the strategy rebuilds the very same parameters from it."""
+    assert set(LEGACY_VALUES) == set(SignalParams.__dataclass_fields__) - {
+        "atr_stop_mult",
+        "max_stop_pct",
+    }
+    data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
+    data["profiles"]["conservador"]["signals"] = LEGACY_VALUES
+    profile = StrategyConfig.model_validate(data).profiles["conservador"]
+    manifest = json.loads(json.dumps(wf.profile_manifest(profile, Decimal(500))))
+    params = wf.strategy_params(profile)
+    rebuilt = SignalParams(**wf.expected_profile(params, manifest)["signals"])
+    assert rebuilt == profile.signal_params()
+    assert rebuilt.use_regime_filter is False and rebuilt.local_score is True
+
+
+@pytest.mark.parametrize("family", sorted(LOCAL_VALUES))
+def test_every_local_signal_parameter_reaches_the_strategy(family: str) -> None:
+    kind: type[PullbackParams | BreakoutParams | RangeParams] = {
+        "pair_pullback_rsi": PullbackParams,
+        "pair_volatility_breakout": BreakoutParams,
+        "pair_range_reversion": RangeParams,
+    }[family]
+    assert {f.name for f in dataclasses.fields(kind)} - {"min_stop_atr", "max_stop_pct"} == set(
+        LOCAL_VALUES[family]
+    )
+    assert set(LOCAL_VALUES[family]) == {f.name for f in dataclasses.fields(kind)} - {
+        "min_stop_atr",
+        "max_stop_pct",
+    }
+    profile = local_profile(family=family, signals=LOCAL_VALUES[family])
+    manifest = json.loads(json.dumps(wf.profile_manifest(profile, Decimal(100), "operational")))
+    assert kind(**manifest["signals"]) == profile.local_params()
+    assert wf.expected_profile(wf.strategy_params(profile), manifest) == manifest
+    assert manifest["family"] == family and manifest["capital_model"] == "operational"
+
+
+def test_profile_manifest_of_a_local_profile() -> None:
+    profile = local_profile()
+    manifest = wf.profile_manifest(profile, Decimal(100), "operational", PreTradeConfig())
+    assert manifest["take_profit"] == {
+        "mode": "limit",
+        "activation_r": 1.5,
+        "trailing_atr_mult": None,
+        "signal_target": False,
+    }
+    assert manifest["risk"] == {
+        "cost_pct": 0.3,
+        "max_open_risk_pct": 1.0,
+        "daily_loss_pct": 1.5,
+        "consecutive_losses": 3,
+        "cooldown_hours": 24.0,
+        "max_drawdown_pct": 8.0,
+        "reentry_candles": 3,
+    }
+    assert (manifest["capital"], manifest["cash_reserve"], manifest["timeframe"]) == (
+        100.0,
+        0.3,
+        "1h",
+    )
+    bare = local_profile(
+        risk={"max_open_risk_pct": None, "daily_loss_pct": None, "max_drawdown_pct": None}
+    )
+    loose = wf.profile_manifest(bare, Decimal(100))["risk"]
+    assert (loose["max_open_risk_pct"], loose["daily_loss_pct"], loose["max_drawdown_pct"]) == (
+        None,
+        None,
+        None,
+    )
+    assert wf.profile_manifest(CONFIG.profiles["conservador"], Decimal(500))["risk"] is None
+    with pytest.raises(ValueError, match="modelo de capital"):
+        wf.profile_manifest(profile, Decimal(100), "compounding")
+    # the legacy parameters of a local profile are defaults, unused, with its stop
+    sell = wf.strategy_params(profile)["params"]["sell"]
+    assert (sell["atr_stop_mult"], sell["stop_max_pct"]) == (1.5, pytest.approx(0.06))
+
+
+def _effective(params: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """What the strategy writes back when it used every value."""
+    return {"params": params["params"], "profile": wf.expected_profile(params, manifest)}
+
+
+def test_check_effective_refuses_any_value_the_strategy_did_not_use() -> None:
+    profile = CONFIG.profiles["conservador"]
+    params, manifest = wf.strategy_params(profile), wf.profile_manifest(profile, Decimal(500))
+    wf.check_effective(params, manifest, _effective(params, manifest))
+    rounded = _effective(params, manifest)
+    rounded["params"] = {
+        **params["params"],
+        "buy": {**params["params"]["buy"], "risk_per_trade": 0.01},
+    }
+    with pytest.raises(ValueError, match=r"buy.risk_per_trade"):
+        wf.check_effective(params, manifest, rounded)
+    dropped = _effective(params, manifest)
+    dropped["profile"] = {
+        **dropped["profile"],
+        "signals": {**manifest["signals"], "local_score": True},
+    }
+    with pytest.raises(ValueError, match="signals"):
+        wf.check_effective(params, manifest, dropped)
+    # hyperopt's choice comes from Freqtrade's parameters, not from the profile
+    tuned = json.loads(json.dumps(params))
+    tuned["params"]["buy"]["adx_min"] = 31
+    assert wf.expected_profile(tuned, manifest)["signals"]["adx_min"] == 31.0
+    wf.check_effective(tuned, manifest, _effective(tuned, manifest))
 
 
 def test_universe_pairs_with_alts() -> None:
@@ -265,6 +405,8 @@ class FakeLab:
     root: Path
     calls: list[tuple[str, ...]] = field(default_factory=list)
     backtest_params: list[dict[str, Any]] = field(default_factory=list)
+    events: str = ""
+    """What the strategy logs to its events file on each backtest."""
 
     def reports(self, pattern: str) -> list[Path]:
         return list((self.root / "out").glob(pattern))
@@ -274,7 +416,8 @@ class FakeLab:
 def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeLab:
     """Lab isolated in ``tmp_path`` with a simulated Freqtrade (Docker)."""
     user_data = tmp_path / "user_data"
-    (user_data / "strategies").mkdir(parents=True)
+    strategies = user_data / "strategies"
+    strategies.mkdir(parents=True)
     (user_data / "config.base.json").write_text(json.dumps(BASE), encoding="utf-8")
     monkeypatch.setattr(wf, "USER_DATA", user_data)
     monkeypatch.setattr(wf, "LAB", tmp_path)
@@ -288,7 +431,12 @@ def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeLab:
         if args[0] == "hyperopt":  # Freqtrade exports only the optimized spaces
             params_file.write_text(json.dumps(_exported(tp_trailing=0.02)), encoding="utf-8")
         if args[0] == "backtesting":
-            fake.backtest_params.append(json.loads(params_file.read_text(encoding="utf-8")))
+            params = json.loads(params_file.read_text(encoding="utf-8"))
+            fake.backtest_params.append(params)
+            manifest = json.loads((strategies / wf.PROFILE_FILE).read_text(encoding="utf-8"))
+            effective = _effective(params, manifest)
+            (strategies / wf.EFFECTIVE_FILE).write_text(json.dumps(effective), encoding="utf-8")
+            (strategies / wf.EVENTS_FILE).write_text(fake.events, encoding="utf-8")
             directory = tmp_path / args[args.index("--backtest-directory") + 1]
             (directory / "r.json").write_text(json.dumps(_stats()), encoding="utf-8")
             (directory / ".last_result.json").write_text(json.dumps({"latest_backtest": "r.json"}))
@@ -458,3 +606,55 @@ def test_freqtrade_invokes_docker_compose_with_retries(monkeypatch: pytest.Monke
     )
     with pytest.raises(wf.subprocess.CalledProcessError):  # type: ignore[attr-defined]
         wf._freqtrade("backtesting", attempts=2)
+
+
+def test_main_records_the_effective_values_and_the_events(lab: FakeLab) -> None:
+    lab.events = '{"kind": "scope", "reason": "perdas seguidas do perfil"}\n'
+    profiles = lab.root / "profiles.yaml"
+    profiles.write_text(yaml.safe_dump(_local_profiles()), encoding="utf-8")
+    code = wf.main(
+        [
+            "--profile", "local", "--start", "2025-01-01", "--end", "2025-04-01",
+            "--profiles-file", str(profiles), "--capital-model", "operational",
+            "--fee", "0.0015", "--label", "D-x",
+        ]
+    )  # fmt: skip
+    assert code == 0
+    (backtest,) = lab.calls
+    assert backtest[backtest.index("--fee") + 1] == "0.0015"
+    (report,) = lab.reports("walk-forward-local-fixo-detalhe5m-capital-fee0.0015-D-x-*.md")
+    text = report.read_text(encoding="utf-8")
+    assert "sem reinvestir o resultado" in text and "Taxa de 0.15% por lado." in text
+    manifest = json.loads(report.with_suffix(".json").read_text(encoding="utf-8"))
+    (window,) = manifest["effective"]
+    assert window["profile"]["family"] == "pair_pullback_rsi"
+    assert window["events"] == [{"kind": "scope", "reason": "perdas seguidas do perfil"}]
+
+
+def test_main_stops_on_an_error_the_strategy_logged(lab: FakeLab) -> None:
+    lab.events = '{"kind": "error", "callback": "custom_roi", "error": "KeyError()"}\n'
+    with pytest.raises(RuntimeError, match="custom_roi"):
+        wf.main(
+            [
+                "--profile", "conservador", "--start", "2025-01-01", "--end", "2025-04-01",
+                "--profiles-file", str(PROFILES),
+            ]
+        )  # fmt: skip
+
+
+def test_main_without_an_events_file(lab: FakeLab, monkeypatch: pytest.MonkeyPatch) -> None:
+    lab.events = ""
+    original = wf._read_effective
+
+    def without_events() -> dict[str, Any]:
+        (wf.USER_DATA / "strategies" / wf.EVENTS_FILE).unlink()
+        return original()
+
+    monkeypatch.setattr(wf, "_read_effective", without_events)
+    args = ["--profile", "conservador", "--start", "2025-01-01", "--end", "2025-04-01"]
+    assert wf.main([*args, "--profiles-file", str(PROFILES)]) == 0
+
+
+def _local_profiles() -> dict[str, Any]:
+    data = raw_config(local={})
+    return {"account": data["account"], "profiles": {"local": data["profiles"]["local"]}}

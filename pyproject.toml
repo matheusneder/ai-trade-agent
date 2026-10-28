@@ -91,7 +91,7 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 mypy_path = "src"
-files = ["src", "tests", "scripts", "lab/walk_forward.py", "lab/paper.py"]
+files = ["src", "tests", "scripts", "lab/walk_forward.py", "lab/paper.py", "lab/experiments.py"]
 # the conftest.py of the E2E folders (dashed names are not packages: both would be module
 # "conftest"); they only re-export the fixtures typed in tests/support
 exclude = ['^tests/[^/]+-[^/]+/conftest\.py$']
