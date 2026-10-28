@@ -13,8 +13,13 @@ Groups (doc/lab-results.md, section 2.10):
 * ``C``: ``B`` with the local score (``local_score: true``) at four ``min_score`` thresholds;
 * ``A_op``: ``A`` sized on the configured capital, in one continuous run (the reference of
   ``D``);
-* ``D``: each pair-local family on 1h and 4h, continuous, sized on the configured capital;
-* ``E``: ``D`` with one component changed at a time.
+* ``D``: each pair-local family on 1h and 4h, continuous, sized on the configured capital,
+  with the scope's whole risk budget (the operation);
+* ``E``: the 1h families without the scope's pauses (``no_pauses``: daily loss, losing streak
+  and the drawdown review off; the re-entry wait and the open-risk cap stay, they are entry
+  rules), then with one component changed at a time. A pause can stop a continuous run for
+  good (the drawdown review never expires), so the components are compared on the strategy's
+  own edge.
 
 Usage::
 
@@ -50,6 +55,9 @@ THRESHOLDS = (0.52, 0.57, 0.62, 0.67)
 """``C``: without the relative strength the score tops out at 0.80; these thresholds keep the
 next four reachable sums (0.55, 0.60, 0.65 and 0.70)."""
 CONTINUOUS = ("--window-months", "45")
+NO_PAUSES: dict[str, Any] = {
+    "risk": {"daily_loss_pct": None, "consecutive_losses": None, "max_drawdown_pct": None}
+}
 """2023-01 to 2026-09 in one run: positions cross the quarters, as in the operation."""
 
 
@@ -106,6 +114,7 @@ def matrix(profiles: dict[str, Any]) -> list[Experiment]:
     continuous = (*CONTINUOUS, "--capital-model", "operational")
     variants: dict[str, dict[str, dict[str, Any]]] = {
         "pair_pullback_1h": {
+            "no_pauses": {},
             "no_adx": {"signals": {"adx_min": 0}},
             "no_extension": {"signals": {"max_extension_atr": 0}},
             "no_volume": {"signals": {"vol_rel_min": 0}},
@@ -122,13 +131,14 @@ def matrix(profiles: dict[str, Any]) -> list[Experiment]:
             },
         },
         "pair_breakout_1h": {
+            "no_pauses": {},
             "no_extension": {"signals": {"max_extension_atr": 0}},
             "no_range": {"signals": {"max_range_atr": 0}},
             "adx": {"signals": {"adx_filter": True}},
             "retest": {"signals": {"retest": True}},
             "trailing15": {"protection": {"take_profit": {"trailing_atr_mult": 1.5}}},
         },
-        "pair_range_1h": {},
+        "pair_range_1h": {"no_pauses": {}},
     }
     for name in LOCAL:
         base = name.removesuffix("_1h")
@@ -138,8 +148,8 @@ def matrix(profiles: dict[str, Any]) -> list[Experiment]:
             Experiment(f"D-{base}-4h", "D", name, on_4h(profiles[name], code), args=continuous),
         ]
         experiments += [
-            Experiment(f"E-{base}-{variant}", "E", name, overrides, args=continuous)
-            for variant, overrides in variants[name].items()
+            Experiment(f"E-{base}-{variant}", "E", name, merge(NO_PAUSES, o), args=continuous)
+            for variant, o in variants[name].items()
         ]
     return [
         Experiment(e.name, e.group, e.profile, e.overrides, e.args, alts)

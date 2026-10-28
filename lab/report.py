@@ -671,7 +671,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not list((directory / "user_data" / "backtest_results").glob("wf-*/*.zip")):
             continue
         run = load_run(directory)
-        for bps in EXTRA_COSTS_BPS:
+        # the extra costs are reported for the continuous runs, the operation's capital model
+        for bps in EXTRA_COSTS_BPS if run.continuous else (0,):
             results.append(run_metrics(run, bps))
         print(directory.name, flush=True)
     args.out.write_text(

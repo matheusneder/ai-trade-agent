@@ -30,7 +30,7 @@ def test_the_matrix_covers_every_group_on_both_universes(tmp_path: Path) -> None
     labels = [e.label for e in experiments]
     assert len(labels) == len(set(labels))
     groups = {g: sum(e.group == g for e in experiments) for g in ("A", "B", "C", "A_op", "D", "E")}
-    assert groups == {"A": 6, "B": 6, "C": 24, "A_op": 6, "D": 12, "E": 22}
+    assert groups == {"A": 6, "B": 6, "C": 24, "A_op": 6, "D": 12, "E": 28}
     assert all(e.alts == e.label.endswith("-alts") for e in experiments)
     for experiment in experiments:  # every profile file is a valid configuration
         directory = tmp_path / experiment.label
@@ -48,6 +48,11 @@ def test_the_matrix_covers_every_group_on_both_universes(tmp_path: Path) -> None
     }
     d = next(e for e in experiments if e.name == "D-pair_breakout-4h")
     assert d.overrides["timeframe"] == "4h" and "--capital-model" in d.args
+    e = next(e for e in experiments if e.name == "E-pair_pullback-obv")
+    assert e.overrides == {
+        "risk": {"daily_loss_pct": None, "consecutive_losses": None, "max_drawdown_pct": None},
+        "signals": {"vol_rel_min": 0, "obv_confirm": True},
+    }
 
 
 def test_run_gives_each_experiment_its_own_user_data(
