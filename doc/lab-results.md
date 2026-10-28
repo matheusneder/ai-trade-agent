@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9; pair-local families and the lab's parity on 2026-10-28, section 2.10). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -306,6 +306,123 @@ Section 2.8 found two former rejections that won on both periods: more risk per 
 - **Drawdown:** more risk is leverage, so the drawdown grows with the return. `momentum_alpha` on `--alts` reaches 12.89%, at the cap.
 - **What the lab does not simulate:** the global circuit breakers (`config/stop_conditions.yaml`). Four stops in one day (two per profile at their caps) cost about 2.5% of the managed capital before and **about 3.2% now**, above the 3% daily-loss pause. The 15% maximum drawdown halt is further away, since the worst window of the portfolio is 8.35%.
 - **Holdout:** the 2025–2026 holdout has been used for every decision since D-034, so none of this is out of sample. The Demo is the validation.
+
+### 2.10 Pair-local families (2026-10-28, D-044)
+
+**Question.** Since 2026-10-22 BTC closes below its 4h EMA 200, and the regime filter (D-016) leaves every profile without a setup. Can a profile whose entries and exits read only the pair's own candles find an edge after costs, also with BTC below its EMA 200? Three families were implemented with the research seeds of the specification, frozen before the runs (`trade_agent/signals/local.py`): `pair_pullback_rsi`, `pair_volatility_breakout` and `pair_range_reversion`. `config/profiles.yaml` carries them disabled (`pair_pullback_1h`, `pair_breakout_1h`, `pair_range_1h`), and the configuration refuses them enabled.
+
+**Lab parity first.** The lab now receives every value of the profile: the Freqtrade parameters, which *hyperopt* may change, and `trade_agent_profile.json` with everything else. That covers all the signal parameters of the family (before, `use_regime_filter`, `rsi_overbought` and `min_stop_pct` never reached the strategy), the local take-profit options, the scope's risk budget and the capital model. The strategy writes back the values it used, and every window checks them (`check_effective`). Errors in the callbacks Freqtrade swallows go to an events file the lab checks. The first runs found four silent problems, all fixed:
+
+1. Freqtrade calls `bot_start` before loading the parameter file: a strategy reading its parameters there would use the defaults.
+2. Freqtrade rounds a loaded value to the parameter's `decimals`: a 0.25% risk per trade ran as 0.3% (`risk_per_trade` now has 4 decimals). The legacy values were not affected.
+3. With `--detail 5m`, Freqtrade retries a refused entry on every 5m candle of the next candle, so it could buy later at another price. The agent sends the entry once, right after the close, and so does the lab now for the pair-local families. The legacy strategy never refuses an entry in `confirm_trade_entry`.
+4. Freqtrade reads `after_fill` from `custom_stoploss`'s signature (`getfullargspec`, blind to decorators). A logging decorator there made it skip the stop placed after the fill, so every stop was labelled `trailing_stop_loss`, and the scope's re-entry wait after a stop never applied. A test now guards the signature.
+
+**Nothing changed for the legacy profiles.** A snapshot of `swing_trend`, `momentum_alpha` and `alt_atr`, computed on the base commit (features, score, setups, stops, entry and exit masks, protection policy and an entry plan, on seven series), is reproduced bit for bit (`tests/unit/signals/test_legacy_regression.py`). Group A below ran on the lab before and after this change, and the six walk-forwards export the same trades: the same entries, exits, prices, sizes and results.
+
+**Independence from BTC and history.** For each family, moving BTC above or below its EMA 200, crashing it or removing it changes no score, setup, stop, target or technical exit (`tests/unit/signals/test_local.py`, and `tests/integration/decision/test_local_engine.py` in the engine, which goes on without the benchmark's candles). On the lab's candles of 8 pairs (BTC, ETH, SOL, LINK, ATOM, OP, INJ and MAGIC, the last two listed in 2022-10), every setup and 40 random candles per pair and family give the same setup and stop on the agent's 999 candles as on the whole history: 2,581 candles checked on 1h and 4h, no difference. In the image, every exported trade of a pullback and a breakout run was checked against the family's own frames (`tests/integration/lab/test_lab_families.py`): entries only at the open of the candle after a setup, fixed targets filled at their price (a native limit order, Freqtrade's ROI), stops never above the signal candle's stop, and technical exits only after a closed candle with the rule.
+
+**Method (fixed before the runs).**
+
+| Group | What | How |
+|---|---|---|
+| A | The three current profiles, unchanged | 15 quarterly windows 2023-01 → 2026-09, `--detail 5m`, wallet sizing (the documented method of sections 2.7–2.9) |
+| B | A with `use_regime_filter: false` | as A |
+| C | B with the local score (`local_score: true`: the score without the relative strength, which then tops out at 0.80) at `min_score` 0.52, 0.57, 0.62 and 0.67 | as A; 0.67 is the mechanical removal, and the threshold is also re-chosen on the previous 4 windows (windows 5–15) |
+| A_op | A sized on the configured capital | one continuous backtest 2023-01 → 2026-09, marked to market |
+| D | Each family on 1h and on 4h (the same rules in candles: the 4h maximum holding is 4× the 1h one in hours), with the scope's whole budget | continuous, on 100 USDT of virtual capital, sized on that capital |
+| E | The 1h families without the scope's pauses (`no_pauses`), then one component changed at a time | continuous, as D |
+
+Every run is on the tier lists and on `--alts`. The 1h candles of the 18 `--alts` pairs were downloaded on 2026-10-28 (public Binance klines). The continuous runs keep positions across the quarters. The equity is marked to market on each candle close, the quarters are cut from it, and the report adds the costs of 5, 10 and 20 extra bps per side to both legs of every trade. On the configured capital that matches a run with a higher fee, except for the cash left for the next entry. The BTC regime at the entry is the one the agent saw: BTC's close against its EMA 200 on the profile's timeframe, on the last candle closed at the entry. It is for auditing only. `lab/report.py` computes every metric; the full reports are in `var/lab/` (not versioned).
+
+```bash
+uv run python -m lab.experiments --list                     # the 82 runs
+uv run python -m lab.experiments --only A B C A_op D E --jobs 4 --resume
+uv run python -m lab.report --out var/lab/report-d044.json --markdown var/lab/report-d044.md
+```
+
+A continuous 1h run on `--alts` takes up to ~2.7 GB of Docker's memory, which the production containers share: keep `--jobs` within it.
+
+**What it is not.** 2023-01 → 2026-09 was already used to select the current profiles, so it is no clean holdout. Nothing here was calibrated on it, but every result is **exploratory**. Freqtrade fills at the stop, target or candle open with no slippage; the extra costs and the 0.3% round-trip cost in the sizing stand in for it. The universe is the static tier lists plus 18 alts picked among the ones the agent traded or saw in 2026-10 (survivorship and selection bias), with the 24h volume approximated by `close × volume`. Neither the global stop conditions, the tier limits nor the LLM are simulated.
+
+**A, B and C: the current profiles without the BTC regime filter or the relative strength** (15 windows, compounded, tier lists / `--alts`; worst window drawdown marked to market):
+
+| Profile | A (as today) | B (filter off) | C (filter off, no relative strength, `min_score` 0.67) | Worst window DD A | Worst window DD B | B: entries with BTC below its EMA 200 | Their net (USDT) |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `swing_trend` | +106.41% / +89.00% | +87.82% / +79.13% | +16.35% / −3.88% | 14.60% / 14.52% | 14.60% / 14.52% | 30 / 34 | +43.69 / +46.07 |
+| `momentum_alpha` | +61.83% / +45.36% | +54.40% / +33.96% | +15.42% / +6.21% | 10.67% / 13.38% | 12.31% / 17.43% | 24 / 30 | +11.56 / +9.78 |
+| `alt_atr` | +23.24% / +20.55% | +19.82% / +17.36% | +25.53% / +26.19% | 6.75% / 6.78% | 7.05% / 7.05% | 35 / 37 | +1.66 / +1.67 |
+
+- **B:** without the filter every profile makes less, on both baskets. The entries it adds with BTC below its EMA 200 make money in themselves, but they take slots and cash that the later entries with BTC above it would have used.
+- **C:** at 0.52, 0.57 and 0.62 the runs are identical (with the local score a legacy setup scores 0.60 or more, or below 0.52), so C has two points: 0.52 and 0.67. At 0.67, the mechanical removal, `swing_trend` and `momentum_alpha` lose most of their result; `alt_atr` gains a little with a third of the trades. Re-choosing the threshold on the 4 windows before each window (windows 5–15, compounded, tier / `--alts`) gives:
+  - `swing_trend`: +19.63% / +1.61%, against A's +85.34% / +58.38%;
+  - `momentum_alpha`: +21.97% / +11.17%, against +36.16% / +18.29%;
+  - `alt_atr`: +6.55% / +11.96%, against +11.53% / +9.80%.
+
+  What the regime filter and the relative strength select is most of what makes these profiles work.
+- **The worst windows' drawdown, marked to market,** reaches 14.60% in `swing_trend`. Freqtrade's figure in sections 2.7–2.9 (12.03%) only counted closed trades.
+
+**A_op: the current profiles as one continuous run sized on the configured capital** (tier / `--alts`):
+
+| Profile | Trades | Return | Max DD (MTM) | Recovery (days) | PF | Expectancy in R [5%; 95%] | With +20 bps per side |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `swing_trend` | 176 / 205 | +89.84% / +80.00% | **28.02% / 27.18%** | 314 / 314 | 1.64 / 1.46 | 0.37 [0.09; 0.64] / 0.28 [0.04; 0.50] | +65.20% / +51.62% |
+| `momentum_alpha` | 181 / 219 | +57.77% / +44.30% | 15.03% / 19.98% | 325 / 325 | 1.36 / 1.21 | 0.20 [0.01; 0.35] / 0.13 [−0.03; 0.25] | +32.72% / +14.92% |
+| `alt_atr` | 180 / 184 | +20.50% / +17.54% | 11.69% / 13.39% | 328 / 328 | 1.24 / 1.20 | 0.11 [−0.09; 0.28] / 0.09 [−0.10; 0.26] | +5.41% / +2.23% |
+
+As the specification warned, the worst quarter is no substitute for the whole path: over the continuous run `swing_trend`'s drawdown is about twice its worst window's. These runs are the reference of D; nothing in the current profiles was changed.
+
+**D: the families, with the scope's whole budget** (continuous, 100 USDT, tier / `--alts`):
+
+| Family | Trades | Return | Max DD (MTM) | PF | Win rate | Expectancy in R [5%; 95%] | Entries with BTC below EMA 200 | Their R | With +20 bps |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `pair_pullback_rsi` 1h | 21 / 25 | +2.09% / +3.09% | 2.03% / 1.42% | 1.64 / 1.82 | 42.9% / 44.0% | 0.25 [−0.19; 0.57] / 0.29 [0.02; 0.59] | 2 / 2 | 0.03 / 0.03 | +0.28% / +1.12% |
+| `pair_pullback_rsi` 4h | 1 / 1 | +0.19% / +0.19% | 0.51% / 0.51% | — | — | — | 0 / 0 | — | +0.14% / +0.14% |
+| `pair_volatility_breakout` 1h | 113 / 149 | −3.43% / −3.77% | 8.11% / 8.14% | 0.85 / 0.87 | 15.0% / 14.1% | −0.08 [−0.26; 0.08] / −0.05 [−0.19; 0.10] | 36 / 40 | −0.28 / −0.16 | −15.14% / −18.03% |
+| `pair_volatility_breakout` 4h | 157 / 169 | −1.37% / +5.09% | 6.79% / 5.18% | 0.95 / 1.16 | 14.0% / 16.0% | −0.02 [−0.20; 0.16] / 0.06 [−0.11; 0.23] | 27 / 25 | 0.04 / 0.07 | −10.24% / −4.06% |
+| `pair_range_reversion` 1h and 4h | 0 | 0% | — | — | — | — | — | — | — |
+
+On 1h the breakout reached the 8% drawdown and the review stopped its entries for the rest of the run (about 1,000 refused). The other pauses fired too: losing streaks 27–41 times in the breakout, 1–2 in the pullback. The baskets' *buy & hold* over the period: +116.85% (tier lists) and +60.21% (`--alts`); BTC +375.05%. Cash: 0%.
+
+**E: the 1h families without the scope's pauses, one component at a time** (tier / `--alts`):
+
+| Variant | Trades | Return | Max DD (MTM) | PF | Expectancy in R [5%; 95%] | Entries with BTC below EMA 200 | Their R |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| pullback, no pauses (base of E) | 21 / 25 | +2.09% / +3.09% | 2.03% / 1.42% | 1.64 / 1.82 | 0.25 [−0.19; 0.57] / 0.29 [0.02; 0.59] | 2 / 2 | 0.03 / 0.03 |
+| without ADX | 33 / 39 | +1.17% / +2.53% | 3.21% / 2.47% | 1.21 / 1.38 | 0.10 [−0.23; 0.30] / 0.15 [−0.11; 0.36] | 5 / 6 | −0.20 / −0.29 |
+| without the extension filter | 21 / 26 | +2.09% / +2.86% | 2.03% / 1.42% | 1.64 / 1.72 | 0.25 [−0.19; 0.57] / 0.26 [0.02; 0.52] | 2 / 2 | 0.03 / 0.03 |
+| without the volume | 26 / 30 | +2.27% / +3.26% | 1.56% / 1.41% | 1.59 / 1.75 | 0.21 [−0.07; 0.43] / 0.25 [0.05; 0.47] | 2 / 2 | 0.03 / 0.03 |
+| OBV instead of the volume | 6 / 9 | +1.90% / +2.97% | 0.57% / 0.94% | 6.59 / 4.73 | 0.74 / 0.73 | 0 / 0 | — |
+| RSI dip ≤ 45 (instead of 40) | 135 / 179 | −0.57% / −0.93% | 4.96% / 4.09% | 0.98 / 0.98 | −0.01 [−0.13; 0.11] / −0.01 [−0.10; 0.08] | 24 / 28 | −0.13 / −0.11 |
+| trailing from 2.5R, 1 ATR | 21 / 25 | +3.30% / +3.86% | 2.16% / 1.48% | 2.01 / 1.92 | 0.38 [−0.16; 0.82] / 0.37 [0.07; 0.68] | 2 / 2 | 0.03 / 0.03 |
+| breakout, no pauses (base of E) | 780 / 910 | −39.80% / −40.10% | 41.20% / 41.44% | 0.74 / 0.77 | −0.10 [−0.17; −0.04] / −0.09 [−0.15; −0.03] | 174 / 207 | −0.06 / −0.12 |
+| without the extension limit | 804 / 932 | −37.52% / −38.73% | 40.06% / 40.54% | 0.76 / 0.79 | −0.09 [−0.16; −0.03] / −0.08 [−0.14; −0.02] | 188 / 220 | −0.07 / −0.13 |
+| without the true range limit | 888 / 1,046 | −29.84% / −32.59% | 34.62% / 35.53% | 0.83 / 0.84 | −0.07 [−0.13; −0.01] / −0.06 [−0.12; −0.00] | 201 / 247 | −0.01 / −0.07 |
+| ADX ≥ 20 or rising | 757 / 893 | −38.44% / −40.14% | 39.87% / 41.52% | 0.74 / 0.77 | −0.10 [−0.16; −0.04] / −0.09 [−0.15; −0.03] | 165 / 199 | −0.06 / −0.13 |
+| entry on the retest | 502 / 587 | −27.47% / −29.00% | 31.79% / 34.15% | 0.76 / 0.78 | −0.12 [−0.20; −0.04] / −0.11 [−0.18; −0.03] | 93 / 116 | −0.10 / −0.11 |
+| trailing 1.5 ATR | 776 / 901 | −39.57% / −38.44% | 40.95% / 39.80% | 0.73 / 0.78 | −0.11 [−0.17; −0.04] / −0.09 [−0.15; −0.03] | 174 / 207 | −0.06 / −0.12 |
+| range, no pauses | 0 / 0 | 0% | — | — | — | — | — |
+
+The pullback's pauses never stopped it, so its E base equals D. In the breakout, 525 of the 780 exits were the technical one (a close back below the level) and the win rate was 13%. Its average MFE was 1.9% against an MAE of −1.1%. It loses on both baskets, on 11 and 13 of the 15 quarters and in both BTC regimes.
+
+**Verdicts.** These are section 11's criteria, fixed before the runs: positive net expectancy with an interval that excludes zero, profit factor ≥ 1.15, a conservative planned R:R ≥ 1.5, the scope's drawdown within 8%, a positive or clearly bounded result in the entries with BTC below its EMA 200, and no dependence on one pair, one trade or a narrow parameter.
+
+| Family | Verdict | Why |
+|---|---|---|
+| `pair_pullback_rsi` | **Inconclusive** | Positive on both baskets (PF 1.64 / 1.82, robust to +20 bps), but with 21 and 25 trades in 44 months, ~1% of the time in position and +0.6% to +0.8% a year on the profile's capital. The interval of the expectancy includes zero on the tier lists, and without its 5 best trades the result is negative. **Only 2 entries had BTC below its EMA 200**, so the central hypothesis was not tested. The one change that brings enough trades (an RSI dip ≤ 45) has no edge (PF 0.98, −0.13 R with BTC below its EMA 200): the result sits on a narrow point of the parameter. 4h: 1 trade |
+| `pair_volatility_breakout` | **Rejected** | Without the pauses, negative expectancy with the whole interval below zero on both baskets and in every variant (PF 0.73–0.84, drawdown 32–42%). With the budget, the 1h run hit the 8% drawdown review. It loses with BTC below its EMA 200 too. The only positive run (4h on `--alts`, +5.09%) is negative without its 5 best trades and at +20 bps |
+| `pair_range_reversion` | **Rejected** | No trade. Over 44 months the pattern appears 14 times on 1h and once on 4h across both baskets, and the middle band is always too close: net R:R median 0.62, maximum 1.34, never the 1.5 the Risk Guard requires. The specification forbids lowering that floor |
+
+**F (combined portfolio) was not run:** no family is fit for the next phase, so there is no candidate to combine. **No prospective paper trading either:** that phase was for a family fit for it, and its virtual portfolio would need its own account and state in production (§6 of the specification).
+
+**Economic result.** The families run without the LLM (no research cost) and would share the agent's infrastructure (no incremental cost measured). The trading results above are after Freqtrade's 0.1% fee per side; the 0.3% round-trip cost of the sizing is not deducted again.
+
+**Limitations of this section.**
+
+- Groups B and C ran before the fourth parity fix. Their stops are labelled `trailing_stop_loss` in the exports, but their prices, sizes and results are not affected: group A ran before and after the fix with identical trades.
+- The continuous runs take the fixed sizing of the configured capital, without reinvesting.
+- The bootstrap resamples the daily returns in 10-day blocks and cannot create regimes the period does not have.
+- No family that kept a positive expectancy reached the ~100 trades and 30 entries with BTC below its EMA 200 that the specification asks of a prospective test.
 
 ## 3. Out-of-sample results (2026-10-01)
 
