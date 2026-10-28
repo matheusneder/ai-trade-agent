@@ -7,7 +7,8 @@ with 5m detail, and checks every trade against the family's own frames computed 
 
 * the strategy used every value of the profile (``trade_agent_effective.json``);
 * entries only at the open of the candle after the signal, on a candle with the setup;
-* a stop never fills above the signal candle's stop; a fixed target fills exactly at
+* a stop never fills above the signal candle's stop, give or take Freqtrade's fee bias
+  (``_check``); a fixed target fills exactly at
   ``entry × (1 + 1.5 × (stop + cost) + cost)``, as a native limit order;
 * a technical exit follows a closed candle with the exit rule (the breakout's: a close below
   the level its entry broke); a maximum-holding exit comes after the maximum holding.
@@ -138,7 +139,13 @@ def _check(
         reason = trade["exit_reason"]
         reasons[reason] = reasons.get(reason, 0) + 1
         if reason == "stop_loss":
-            assert trade["close_rate"] <= trade["open_rate"] * (1 - stop) * (1 + 1e-9)
+            # Freqtrade passes custom_stoploss a profit net of fees, and stoploss_from_open
+            # reads it as a price ratio: the lab's stop sits (1 + fee) / (1 − fee) above the
+            # agent's, about 0.2%, in every profile since D-014 (lab-results.md, 2.10)
+            # and rounds the stop price up to the pair's tick
+            fee = trade["fee_open"]
+            bias = (1 + fee) / (1 - fee)
+            assert trade["close_rate"] <= trade["open_rate"] * (1 - stop) * bias * (1 + 5e-4)
         elif reason == "roi":
             target = 1.5 * (stop + cost) + cost
             # at the target, rounded to the pair's tick like the native limit order
