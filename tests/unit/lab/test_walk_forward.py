@@ -1,4 +1,5 @@
 import argparse
+import ast
 import dataclasses
 import gzip
 import json
@@ -658,3 +659,22 @@ def test_main_without_an_events_file(lab: FakeLab, monkeypatch: pytest.MonkeyPat
 def _local_profiles() -> dict[str, Any]:
     data = raw_config(local={})
     return {"account": data["account"], "profiles": {"local": data["profiles"]["local"]}}
+
+
+def test_the_lab_strategy_keeps_the_after_fill_signature() -> None:
+    """Freqtrade calls ``custom_stoploss`` right after the fill only when ``after_fill`` is in
+    its ``getfullargspec`` (which ignores ``functools.wraps``): a decorator there labelled
+    every stop ``trailing_stop_loss`` and turned off the re-entry wait after a stop (D-044)."""
+    source = (wf.USER_DATA / "strategies" / "trade_agent_strategy.py").read_text(encoding="utf-8")
+    (strategy,) = [
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.ClassDef) and node.name == wf.STRATEGY
+    ]
+    (stoploss,) = [
+        node
+        for node in strategy.body
+        if isinstance(node, ast.FunctionDef) and node.name == "custom_stoploss"
+    ]
+    assert stoploss.decorator_list == []
+    assert "after_fill" in [a.arg for a in stoploss.args.args]

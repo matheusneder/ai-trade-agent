@@ -66,6 +66,8 @@ TRANSITION_CANDLES = 6
 ATR_WINDOW = 500
 QUARTERS = pd.date_range("2023-01-01", "2026-09-01", freq="QS", tz="UTC")
 BENCHMARK = "BTC/USDT"
+THRESHOLDS = (0.52, 0.57, 0.62, 0.67)
+"""``lab.experiments.THRESHOLDS``: the ``min_score`` of the ``C`` runs."""
 
 
 @dataclass(frozen=True)
@@ -242,8 +244,9 @@ def with_extra_cost(trades: pd.DataFrame, bps: float) -> pd.DataFrame:
 def equity_curve(
     trades: pd.DataFrame, capital: float, timeframe: str, start: pd.Timestamp, end: pd.Timestamp
 ) -> pd.Series:
-    """Marked-to-market equity on the profile's candle closes between ``start`` and ``end``."""
-    grid = pd.date_range(start, end, freq=timeframe, tz="UTC", inclusive="left")
+    """Marked-to-market equity on the profile's candle closes from ``start`` to ``end``, both
+    included: the trades the backtest closes at its end are realized there."""
+    grid = pd.date_range(start, end, freq=timeframe, tz="UTC", inclusive="both")
     equity = pd.Series(capital, index=grid, dtype="float64")
     span = pd.Timedelta(timeframe)
     for trade in trades.itertuples():
@@ -489,12 +492,178 @@ def _quarters(equity: pd.Series) -> list[dict[str, Any]]:
     return rows
 
 
+# ============================================================================ Markdown
+def _n(value: Any, digits: int = 2) -> str:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "—"
+    if isinstance(value, float) and math.isinf(value):
+        return "∞"
+    return f"{value:.{digits}f}" if isinstance(value, float) else str(value)
+
+
+def _table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
+    lines = ["| " + " | ".join(header) + " |", "|" + "|".join("---" for _ in header) + "|"]
+    for row in rows:
+        cells = (v if isinstance(v, str) else _n(v) for v in row)
+        lines.append("| " + " | ".join(cells) + " |")
+    return [*lines, ""]
+
+
+def _r_interval(m: dict[str, Any]) -> str:
+    interval = m.get("expectancy_interval") or {}
+    if not interval:
+        return _n(m.get("expectancy_r"))
+    return f"{_n(m.get('expectancy_r'))} [{_n(interval['r_p05'])}; {_n(interval['r_p95'])}]"
+
+
+def render(results: Sequence[dict[str, Any]]) -> str:
+    """The report's Markdown tables (Portuguese headers, like the other lab reports)."""
+    base = {r["label"]: r for r in results if r["extra_bps"] == 0}
+    costs = {(r["label"], r["extra_bps"]): r for r in results}
+    windowed = [r for r in base.values() if "windows" in r]
+    continuous = [r for r in base.values() if "quarters" in r]
+    lines = ["# Experimentos D-044", ""]
+    lines += ["## Walk-forward em janelas (A, B, C)", ""]
+    lines += _table(
+        ["Experimento", "Trades", "Composto %", "Pior DD MTM %", "Acerto %", "Payoff",
+         "Expect. R [p05; p95]", "PF", "Trades BTC↓", "Líquido BTC↓"],
+        [
+            [r["label"], r["trades"], r.get("return"), r.get("max_drawdown"), r.get("win_rate"),
+             r.get("payoff"), _r_interval(r), r.get("profit_factor"),
+             r["segments"].get("btc_down", {}).get("trades", 0),
+             r["segments"].get("btc_down", {}).get("net")]
+            for r in windowed
+        ],
+    )  # fmt: skip
+    lines += ["## Carteira contínua marcada a mercado (A_op, D, E)", ""]
+    lines += _table(
+        ["Experimento", "Trades", "Retorno %", "Anual %", "DD MTM %", "Recup. dias", "Sharpe",
+         "Sortino", "Acerto %", "Payoff", "Expect. USDT", "Expect. R [p05; p95]", "PF",
+         "Exposição %", "Giro", "+5 bps %", "+10 bps %", "+20 bps %"],
+        [
+            [r["label"], r["trades"], r.get("return"), r.get("annualized"), r.get("max_drawdown"),
+             r.get("recovery_days"), r.get("sharpe"), r.get("sortino"), r.get("win_rate"),
+             r.get("payoff"), r.get("expectancy"), _r_interval(r), r.get("profit_factor"),
+             r.get("exposure"), r.get("turnover"),
+             *(costs.get((r["label"], bps), {}).get("return") for bps in (5, 10, 20))]
+            for r in continuous
+        ],
+    )  # fmt: skip
+    lines += ["## Regime do BTC na entrada (auditoria; não decide nada nas famílias locais)", ""]
+    lines += _table(
+        ["Experimento", "BTC↑ trades", "BTC↑ líquido", "BTC↑ R", "BTC↓ trades", "BTC↓ líquido",
+         "BTC↓ R", "Transição trades", "Transição líquido", "Vol. alta R", "Vol. baixa R"],
+        [
+            [r["label"], *(r["segments"].get(k, {}).get(f) for k in ("btc_up", "btc_down")
+                           for f in ("trades", "net", "expectancy_r")),
+             r["segments"].get("transition", {}).get("trades"),
+             r["segments"].get("transition", {}).get("net"),
+             r["segments"].get("vol_high", {}).get("expectancy_r"),
+             r["segments"].get("vol_low", {}).get("expectancy_r")]
+            for r in [*windowed, *continuous] if r["trades"]
+        ],
+    )  # fmt: skip
+    lines += ["## Concentração, MFE/MAE e saídas", ""]
+    lines += _table(
+        ["Experimento", "Pares", "Melhor par", "Líquido", "Sem o melhor par", "Sem os 5 melhores",
+         "MFE %", "MAE %", "Devolvido %", "Perdas seguidas", "Horas", "Taxas", "Saídas"],
+        [
+            [r["label"], r["concentration"].get("pairs"), str(r["concentration"].get("best_pair")),
+             r.get("net"), r["concentration"].get("net_without_best_pair"),
+             r["concentration"].get("net_without_top5_trades"), r.get("mfe"), r.get("mae"),
+             r.get("given_back"), r.get("max_losing_streak"), r.get("hours"), r.get("fees"),
+             ", ".join(f"{k} {v}" for k, v in sorted(r.get("exits", {}).items()))]
+            for r in [*windowed, *continuous] if r["trades"]
+        ],
+    )  # fmt: skip
+    lines += ["## Bootstrap por blocos de 10 dias (2000 sorteios)", ""]
+    lines += _table(
+        ["Experimento", "Retorno p05 %", "p50 %", "p95 %", "P(perda)", "DD p50 %", "DD p95 %",
+         "Pausas e recusas do escopo"],
+        [
+            [r["label"], *(r.get("bootstrap", {}).get(k) for k in (
+                "return_p05", "return_p50", "return_p95", "p_loss", "drawdown_p50",
+                "drawdown_p95")),
+             ", ".join(f"{k} {v}" for k, v in sorted(r.get("events", {}).items())) or "—"]
+            for r in continuous
+        ],
+    )  # fmt: skip
+    lines += ["## Trimestres da carteira contínua (retorno %)", ""]
+    quarters = sorted({q["start"] for r in continuous for q in r["quarters"]})
+    rows = []
+    for r in continuous:
+        by_quarter = {q["start"]: q["return"] for q in r["quarters"]}
+        rows.append([r["label"], *(by_quarter.get(k) for k in quarters)])
+    lines += _table(["Experimento", *quarters], rows)
+    reselected = threshold_walk_forward(windowed)
+    if reselected:
+        lines += ["## C: limiar do score local reescolhido nos 12 meses anteriores", ""]
+        lines += _table(
+            ["Perfil", "Limiares escolhidos (janelas 5–15)", "C reescolhido %", "C 0.67 %",
+             "B %", "A %"],
+            reselected,
+        )  # fmt: skip
+    return "\n".join(lines)
+
+
+TRAIN_WINDOWS = 4
+"""C's re-selection: 12 months (4 quarterly windows) before each window."""
+
+
+def _tail(run: dict[str, Any] | None, count: int) -> float | None:
+    """Compounded return of the windows after the first training (5 to ``count``)."""
+    if run is None:
+        return None
+    tail = [w["return"] for w in run["windows"]][TRAIN_WINDOWS:count]
+    return (math.prod(1 + v / 100 for v in tail) - 1) * 100
+
+
+def threshold_walk_forward(windowed: Sequence[dict[str, Any]]) -> list[list[Any]]:
+    """For each profile and basket, the ``min_score`` of the ``C`` runs that compounded the most
+    over the 4 windows before each window, applied to it (windows 5 to 15: the first 4 only
+    train). Compared with ``C`` at 0.67, ``B`` and ``A`` over the same windows."""
+    by_label = {r["label"]: r for r in windowed}
+    rows = []
+    for label in sorted(by_label):
+        if not label.startswith("A-"):
+            continue
+        base = label.removeprefix("A-")
+        runs = {t: by_label.get(f"C{t:g}-{base}") for t in THRESHOLDS}
+        if any(r is None for r in runs.values()):
+            continue
+        returns = {t: [w["return"] for w in r["windows"]] for t, r in runs.items() if r}
+        count = min(len(v) for v in returns.values())
+        chosen, applied = [], []
+        for i in range(TRAIN_WINDOWS, count):
+            best = max(
+                THRESHOLDS,
+                key=lambda t: math.prod(1 + v / 100 for v in returns[t][i - TRAIN_WINDOWS : i]),
+            )
+            chosen.append(f"{best:g}")
+            applied.append(returns[best][i])
+
+        rows.append(
+            [
+                base, " ".join(chosen), (math.prod(1 + v / 100 for v in applied) - 1) * 100,
+                _tail(runs[0.67], count), _tail(by_label.get(f"B-{base}"), count),
+                _tail(by_label.get(label), count),
+            ]
+        )  # fmt: skip
+    return rows
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", type=Path, default=RUNS)
     parser.add_argument("--only", nargs="+", help="prefixos dos rótulos")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--markdown", type=Path, help="tabelas em Markdown")
+    parser.add_argument("--from-json", action="store_true", help="só refaz o Markdown do --out")
     args = parser.parse_args(argv)
+    if args.from_json:
+        cached = json.loads(args.out.read_text(encoding="utf-8"))["runs"]
+        args.markdown.write_text(render(cached), encoding="utf-8")
+        return 0
     results = []
     for directory in sorted(p for p in args.runs.iterdir() if p.is_dir()):
         if args.only and not directory.name.startswith(tuple(args.only)):
@@ -509,6 +678,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dumps({"generated": datetime.now(UTC).isoformat(), "runs": results}, default=str),
         encoding="utf-8",
     )
+    if args.markdown:
+        args.markdown.write_text(render(json.loads(args.out.read_text())["runs"]), encoding="utf-8")
     return 0
 
 

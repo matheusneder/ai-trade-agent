@@ -400,7 +400,6 @@ class TradeAgentStrategy(IStrategy):
         return float(self._local_activation(stop, atr, target))
 
     # ------------------------------------------------------------------ protection and exits
-    @_logged
     def custom_stoploss(
         self,
         pair: str,
@@ -411,6 +410,19 @@ class TradeAgentStrategy(IStrategy):
         after_fill: bool,
         **kwargs: Any,
     ) -> float | None:
+        # Not decorated: Freqtrade reads ``after_fill`` from this signature
+        # (``getfullargspec``, which ignores ``functools.wraps``). Without it, Freqtrade skips
+        # the stop placed right after the fill, and the next adjustment marks every stop as a
+        # trailing one (``trailing_stop_loss``), at the same prices.
+        try:
+            return self._stoploss(pair, trade, current_time, current_profit)
+        except Exception as exc:
+            _event("error", callback="custom_stoploss", error=repr(exc))
+            raise
+
+    def _stoploss(
+        self, pair: str, trade: Trade, current_time: datetime, current_profit: float
+    ) -> float:
         max_rate = trade.max_rate or trade.open_rate
         if self._family().local:
             stop_pct = self._entry_stop_pct(pair, trade)
