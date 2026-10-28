@@ -54,7 +54,7 @@ from freqtrade.persistence import Trade
 from freqtrade.strategy import (
     DecimalParameter,
     IStrategy,
-    stoploss_from_open,
+    stoploss_from_absolute,
     timeframe_to_minutes,
     timeframe_to_prev_date,
 )
@@ -84,6 +84,15 @@ EVENTS_FILE = Path(__file__).with_name("trade_agent_events.jsonl")
 MIN_TRAILING_BIPS, MAX_TRAILING_BIPS = 10, 2000
 """``trade_agent.strategy.profiles``: Binance's ``trailingDelta`` range."""
 LOCAL_COLUMNS = ("setup", "score", "stop_pct", "target_pct", "entry_cap", "level")
+
+
+def _stop_at(trade: Trade, price: float, current_rate: float) -> float:
+    """``custom_stoploss``'s ratio for a stop at ``price``, the agent's OCO stop price.
+
+    Not ``stoploss_from_open`` on Freqtrade's ``current_profit``: that profit is net of both
+    fees, and read as a price ratio it puts the stop ``(1 + fee) / (1 − fee)`` above the price,
+    about 0.2% at 0.1% a side (the lab's stops before lab-results.md 2.11)."""
+    return stoploss_from_absolute(price, current_rate, is_short=False, leverage=trade.leverage)
 
 
 # Freqtrade drops ``startup_candle_count`` rows from the start of each pair's data (by count),
@@ -415,13 +424,13 @@ class TradeAgentStrategy(IStrategy):
         # the stop placed right after the fill, and the next adjustment marks every stop as a
         # trailing one (``trailing_stop_loss``), at the same prices.
         try:
-            return self._stoploss(pair, trade, current_time, current_profit)
+            return self._stoploss(pair, trade, current_time, current_rate)
         except Exception as exc:
             _event("error", callback="custom_stoploss", error=repr(exc))
             raise
 
     def _stoploss(
-        self, pair: str, trade: Trade, current_time: datetime, current_profit: float
+        self, pair: str, trade: Trade, current_time: datetime, current_rate: float
     ) -> float:
         max_rate = trade.max_rate or trade.open_rate
         if self._family().local:
@@ -430,19 +439,13 @@ class TradeAgentStrategy(IStrategy):
                 atr = self._entry_value(pair, trade, "atr_pct", 0.0)
                 if max_rate >= trade.open_rate * (1 + self._local_target(pair, trade)):
                     return -float(self._trailing(atr))
-            return stoploss_from_open(
-                -stop_pct, current_profit, is_short=False, leverage=trade.leverage
-            )
+            return _stop_at(trade, trade.open_rate * (1 - stop_pct), current_rate)
         if max_rate >= trade.open_rate * (1 + self._tp_activation(pair, trade)):
             return -float(self.tp_trailing.value)  # trailing TP activated: follows the top
         stop_pct = self._entry_stop_pct(pair, trade)
         if self._break_even_reached(pair, trade, stop_pct, current_time):
-            return stoploss_from_open(
-                BREAK_EVEN_FEE_BUFFER, current_profit, is_short=False, leverage=trade.leverage
-            )
-        return stoploss_from_open(
-            -stop_pct, current_profit, is_short=False, leverage=trade.leverage
-        )
+            return _stop_at(trade, trade.open_rate * (1 + BREAK_EVEN_FEE_BUFFER), current_rate)
+        return _stop_at(trade, trade.open_rate * (1 - stop_pct), current_rate)
 
     def _tp_activation(self, pair: str, trade: Trade) -> float:
         return self._activation_for(self._entry_value(pair, trade, "atr_pct", 0.0))

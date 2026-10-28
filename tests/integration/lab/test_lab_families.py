@@ -7,8 +7,8 @@ with 5m detail, and checks every trade against the family's own frames computed 
 
 * the strategy used every value of the profile (``trade_agent_effective.json``);
 * entries only at the open of the candle after the signal, on a candle with the setup;
-* a stop never fills above the signal candle's stop, give or take Freqtrade's fee bias
-  (``_check``); a fixed target fills exactly at
+* a stop never fills above ``entry × (1 − stop)``, the signal candle's stop, give or take the
+  tick Freqtrade rounds it up to; a fixed target fills exactly at
   ``entry × (1 + 1.5 × (stop + cost) + cost)``, as a native limit order;
 * a technical exit follows a closed candle with the exit rule (the breakout's: a close below
   the level its entry broke); a maximum-holding exit comes after the maximum holding.
@@ -26,6 +26,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 from lab import walk_forward as wf
@@ -112,12 +113,31 @@ def _backtest(tmp: Path, profile_name: str) -> tuple[list[dict[str, Any]], dict[
     return trades, manifest
 
 
-def _frame(pair: str, profile: ProfileConfig) -> pd.DataFrame:
+def _candles(pair: str) -> pd.DataFrame:
     path = _data_dir() / f"{pair.replace('/', '_')}-1h.json.gz"
     rows = json.loads(gzip.decompress(path.read_bytes()))
     candles = pd.DataFrame(rows, columns=["t", "open", "high", "low", "close", "volume"])
     candles.index = pd.to_datetime(candles["t"], unit="ms", utc=True)
-    features = compute_local_features(compute_features(candles.drop(columns="t")))
+    return candles.drop(columns="t")
+
+
+def _tick(pair: str, at: pd.Timestamp) -> float:
+    """The pair's price tick in the backtest at ``at``: Freqtrade takes it from the history,
+    as 10 ** −(the most decimals of the month's prices) (``get_tick_size_over_time``)."""
+    month = _candles(pair).loc[at.strftime("%Y-%m"), ["open", "high", "low", "close"]]
+    decimals = max(
+        len(
+            np.format_float_positional(price, precision=14, unique=False, fractional=False)
+            .partition(".")[2]
+            .rstrip("0")
+        )
+        for price in month.to_numpy().ravel()
+    )
+    return 10.0**-decimals
+
+
+def _frame(pair: str, profile: ProfileConfig) -> pd.DataFrame:
+    features = compute_local_features(compute_features(_candles(pair)))
     frame = local_frame(features, profile.local_params())
     return frame.join(features[["close", "ema_short", "rsi"]])
 
@@ -139,13 +159,10 @@ def _check(
         reason = trade["exit_reason"]
         reasons[reason] = reasons.get(reason, 0) + 1
         if reason == "stop_loss":
-            # Freqtrade passes custom_stoploss a profit net of fees, and stoploss_from_open
-            # reads it as a price ratio: the lab's stop sits (1 + fee) / (1 − fee) above the
-            # agent's, about 0.2%, in every profile since D-014 (lab-results.md, 2.10)
-            # and rounds the stop price up to the pair's tick
-            fee = trade["fee_open"]
-            bias = (1 + fee) / (1 - fee)
-            assert trade["close_rate"] <= trade["open_rate"] * (1 - stop) * bias * (1 + 5e-4)
+            # at the agent's OCO stop or below it (a gap), up to the tick Freqtrade rounds the
+            # stop price up to; before lab-results.md 2.11 it sat ~0.2% higher
+            tick = _tick(trade["pair"], opened)
+            assert trade["close_rate"] <= trade["open_rate"] * (1 - stop) + tick * (1 + 1e-6)
         elif reason == "roi":
             target = 1.5 * (stop + cost) + cost
             # at the target, rounded to the pair's tick like the native limit order
