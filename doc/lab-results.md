@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9; pair-local families and the lab's parity on 2026-10-28, section 2.10). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9; pair-local families and the lab's parity on 2026-10-28, section 2.10; the lab's stop at the agent's price on 2026-10-28, section 2.11). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -16,7 +16,7 @@
 | Optimization (D-017) | For each window, *hyperopt* (`SharpeHyperOptLossDaily`, 150 epochs, seed 42) on the **previous 12 months**. The chosen parameters are applied **unchanged** to the window |
 | Optimized parameters | `min_score`, `adx_min`, `rsi_pullback_max`, `vol_rel_min`, `exit_score`, `atr_stop_mult`, `tp_activation`, `tp_trailing` |
 | Fixed (from the profile) | Maximum stop, risk per trade, maximum size, cash reserve, *break-even* and maximum holding. Since 2026-10-16 the lab simulates the agent's *break-even* (checked at the candle close, like the 4h cycle) and maximum holding |
-| Simulated protection | Fixed stop `entry × (1 − min(k·ATR%, max_stop))` and a *trailing take-profit* with activation, like the native OPOCO |
+| Simulated protection | Fixed stop `entry × (1 − min(k·ATR%, max_stop))` and a *trailing take-profit* with activation, like the native OPOCO. Until 2026-10-28 the stop and the *break-even* sat about 0.2% above the agent's prices (section 2.11) |
 | Risk Guard R:R | Since 2026-10-17, no entry when `(activation − fees) ÷ (stop + fees)` is below `pre_trade.min_reward_risk` (`config/stop_conditions.yaml`), like the agent. The 2026-10-16 profiles always pass it |
 | Fees | 0.1% per side (standard Spot fee, without the BNB discount) |
 | References | *Buy & hold* of the profile's pair basket (simple average) and of BTC |
@@ -306,6 +306,7 @@ Section 2.8 found two former rejections that won on both periods: more risk per 
 - **Drawdown:** more risk is leverage, so the drawdown grows with the return. `momentum_alpha` on `--alts` reaches 12.89%, at the cap.
 - **What the lab does not simulate:** the global circuit breakers (`config/stop_conditions.yaml`). Four stops in one day (two per profile at their caps) cost about 2.5% of the managed capital before and **about 3.2% now**, above the 3% daily-loss pause. The 15% maximum drawdown halt is further away, since the worst window of the portfolio is 8.35%.
 - **Holdout:** the 2025–2026 holdout has been used for every decision since D-034, so none of this is out of sample. The Demo is the validation.
+- **At the agent's stop (section 2.11):** the adopted set still beats the profiles it replaced on both baskets, but on `--alts` `momentum_alpha`'s worst window rises to 13.28% and the 13% activation lowers the 15 windows.
 
 ### 2.10 Pair-local families (2026-10-28, D-044)
 
@@ -320,9 +321,9 @@ Section 2.8 found two former rejections that won on both periods: more risk per 
 
 **Nothing changed for the legacy profiles.** A snapshot of `swing_trend`, `momentum_alpha` and `alt_atr`, computed on the base commit (features, score, setups, stops, entry and exit masks, protection policy and an entry plan, on seven series), is reproduced bit for bit (`tests/unit/signals/test_legacy_regression.py`). Group A below ran on the lab before and after this change, and the six walk-forwards export the same trades: the same entries, exits, prices, sizes and results.
 
-**Independence from BTC and history.** For each family, moving BTC above or below its EMA 200, crashing it or removing it changes no score, setup, stop, target or technical exit (`tests/unit/signals/test_local.py`, and `tests/integration/decision/test_local_engine.py` in the engine, which goes on without the benchmark's candles). On the lab's candles of 8 pairs (BTC, ETH, SOL, LINK, ATOM, OP, INJ and MAGIC, the last two listed in 2022-10), every setup and 40 random candles per pair and family give the same setup and stop on the agent's 999 candles as on the whole history: 2,581 candles checked on 1h and 4h, no difference. In the image, every exported trade of a pullback and a breakout run was checked against the family's own frames (`tests/integration/lab/test_lab_families.py`): entries only at the open of the candle after a setup, fixed targets filled at their price (a native limit order, Freqtrade's ROI), stops at the signal candle's stop (with the bias below), and technical exits only after a closed candle with the rule.
+**Independence from BTC and history.** For each family, moving BTC above or below its EMA 200, crashing it or removing it changes no score, setup, stop, target or technical exit (`tests/unit/signals/test_local.py`, and `tests/integration/decision/test_local_engine.py` in the engine, which goes on without the benchmark's candles). On the lab's candles of 8 pairs (BTC, ETH, SOL, LINK, ATOM, OP, INJ and MAGIC, the last two listed in 2022-10), every setup and 40 random candles per pair and family give the same setup and stop on the agent's 999 candles as on the whole history: 2,581 candles checked on 1h and 4h, no difference. In the image, every exported trade of a pullback and a breakout run was checked against the family's own frames (`tests/integration/lab/test_lab_families.py`): entries only at the open of the candle after a setup, fixed targets filled at their price (a native limit order, Freqtrade's ROI), stops at the signal candle's stop (with the bias below, fixed in section 2.11), and technical exits only after a closed candle with the rule.
 
-**Open finding, not fixed here: the lab's stop sits ~0.2% above the agent's.** Freqtrade passes `custom_stoploss` a profit net of the fees, and `stoploss_from_open` reads it as a price ratio. The stop then lands at `entry × (1 − stop) × (1 + fee) ÷ (1 − fee)`, rounded up to the tick: with the 0.1% fee, about 0.2% above the stop the agent's OCO places (a 4.5% stop behaves as about 4.3%). It concerns every profile and every result since D-014, the current profiles' included, so fixing it would move all the documented numbers. It is left for a decision of its own; the fidelity test pins the current behavior.
+**Open finding, fixed in section 2.11: the lab's stop sat ~0.2% above the agent's.** Freqtrade passes `custom_stoploss` a profit net of the fees, and `stoploss_from_open` reads it as a price ratio. The stop then lands at `entry × (1 − stop) × (1 + fee) ÷ (1 − fee)`, rounded up to the tick: with the 0.1% fee, about 0.2% above the stop the agent's OCO places (a 4.5% stop behaves as about 4.3%). It concerns every profile and every result since D-014, the current profiles' included. The tables of this section ran with it; section 2.11 re-runs them at the agent's price.
 
 **Method (fixed before the runs).**
 
@@ -426,6 +427,76 @@ The pullback's pauses never stopped it, so its E base equals D. In the breakout,
 - The bootstrap resamples the daily returns in 10-day blocks and cannot create regimes the period does not have.
 - No family that kept a positive expectancy reached the ~100 trades and 30 entries with BTC below its EMA 200 that the specification asks of a prospective test.
 
+### 2.11 The lab's stop at the agent's price (2026-10-28)
+
+**What changed.** Since D-014 the lab converted the profile's stop with `stoploss_from_open` on the profit Freqtrade passes `custom_stoploss`. That profit is net of both fees, so the stop landed at `entry × (1 − stop) × (1 + fee) ÷ (1 − fee)`, rounded up to the tick. With the 0.1% fee that is about 0.2% above the agent's OCO stop: a 4.5% stop filled at about 4.3%. The *break-even* had the same bias (`entry × 1.003` sat at about `entry × 1.005`). The strategy now places both at the agent's absolute prices (`stoploss_from_absolute`). Two tests guard it:
+
+- `tests/integration/lab/test_lab_causality.py` reads the stop price Freqtrade places from the strategy's ratio, called as the backtest calls it.
+- The families' fidelity test bounds every stop fill by the agent's stop plus one tick. Freqtrade rounds the stop up to a historic tick it derives from the month's prices; the agent rounds down, so the two can differ by one tick.
+
+Freqtrade still fills at the stop price, without the slippage of the agent's stop-market leg.
+
+**Why it moves the results.** The size is the risk ÷ the stop, so the bias made each stop lose less than the planned risk. A stop exit now gives up 0.2 p.p. more of the price: −4.13% → −4.32% on average in `swing_trend` (tier lists), −5.64% → −5.84% in `momentum_alpha`. That is about 4% of R on a 4.5% stop and up to 20% on the families' 1% stops. A few trades that touched the old stop now go on, so there are slightly fewer stop exits.
+
+**Section 2.9 (D-041) at the agent's stop.** Same method and lab as section 2.9, 15 windows; its tables have the numbers before the fix.
+
+| Per profile, after (tier / `--alts`) | Design 2023–2024 | Holdout 2025–2026 | 15 windows | Worst window DD | Before: 15 windows |
+|---|--:|--:|--:|--:|--:|
+| `swing_trend` before D-041 | +29.65% / +44.68% | +25.14% / +16.66% | +62.26% / +68.77% | 10.18% / 10.15% | +72.27% / +69.24% |
+| `swing_trend` activation 13% | +40.22% / +46.81% | +25.79% / **+14.59%** | +76.38% / **+68.23%** | 10.16% / 10.13% | +86.02% / +73.01% |
+| `swing_trend` risk 1.5% | +36.32% / +55.74% | +29.54% / +19.48% | +76.59% / +86.07% | 12.59% / 12.56% | +90.23% / +86.63% |
+| **`swing_trend` risk 1.5% + activation 13% (current)** | **+48.77% / +56.85%** | **+29.92% / +16.28%** | **+93.28% / +82.39%** | 12.57% / 12.53% | +106.39% / +89.00% |
+| `momentum_alpha` before D-041 (risk 1.5%) | +30.38% / +28.33% | +16.49% / +5.66% | +51.87% / +35.60% | 6.93% / 10.09% | +53.83% / +41.23% |
+| **`momentum_alpha` risk 2.0% (current)** | **+34.93% / +31.97%** | **+18.18% / +4.55%** | **+59.47% / +37.97%** | 9.22% / **13.28%** | +61.84% / +45.34% |
+| `alt_atr` (current) | +16.57% / +17.04% | +5.83% / +3.17% | +23.36% / +20.75% | 6.56% / 6.53% | +23.26% / +20.56% |
+
+| Portfolio 65 / 30 / 5%, after | Tier: design / holdout / 15 windows (worst window) | `--alts`: design / holdout / 15 windows (worst window) | Before: 15 windows (tier / `--alts`) |
+|---|--:|--:|--:|
+| Before D-041 | +29.67% / +21.56% / +57.63% (−6.60%) | +38.65% / +12.62% / +56.14% (−6.17%) | +64.49% / +58.19% |
+| **Current (risk + activation 13%)** | **+43.55% / +25.23% / +79.76%** (−8.81%) | **+47.55% / +12.11% / +65.42%** (−4.95%) | +88.44% / +71.79% |
+| Risk only | +35.51% / +24.94% / +69.30% (−8.18%) | +46.86% / **+14.07% / +67.52%** (−7.27%) | +78.44% / +70.26% |
+| Activation 13% only | +36.51% / +21.98% / +66.51% (−7.12%) | +39.99% / +11.33% / +55.85% (−4.01%) | +73.04% / +60.54% |
+
+- **D-041 still beats the profiles it replaced** over the 15 windows on both baskets (portfolio +57.63% → +79.76% on the tier lists, +56.14% → +65.42% on `--alts`), and the higher risk is still where the gain comes from.
+- **Two of its premises no longer hold on `--alts`:**
+  - `momentum_alpha` at 2.0% risk has a 13.28% worst window, above the 13% cap sections 2.7 and 2.9 chose by (12.89% before the fix). At 1.5% it is 10.09%.
+  - The 13% activation in `swing_trend` now lowers the 15 windows on `--alts` too, not only the holdout: alone +68.23% against +68.77%, and in the portfolio the current set makes +65.42% against risk only's +67.52%. On the tier lists it still helps on both periods, by 0.3 p.p. in the portfolio's holdout, within the noise. On `--alts` the current set's holdout (+12.11%) is now below the one before D-041 (+12.62%).
+- **The operator's choice (D-045, PR #41):** `momentum_alpha`'s risk goes back to 1.5%, and `swing_trend` keeps D-041. The 13% activation stays, since it wins the design on both baskets and section 2.8's rule keeps the current value unless another one does.
+
+**A_op at the agent's stop** (one continuous run sized on the configured capital, section 2.10; return and drawdown before → after, the other columns after):
+
+| Profile (tier / `--alts`) | Trades | Return | Max DD (MTM) | PF | Expectancy in R [5%; 95%] | With +20 bps per side |
+|---|--:|--:|--:|--:|--:|--:|
+| `swing_trend` | 174 / 204 | +89.84% → **+81.99%** / +80.00% → **+77.64%** | 28.02% → **29.98%** / 27.18% → **29.14%** | 1.58 / 1.44 | 0.34 [0.05; 0.63] / 0.27 [0.03; 0.51] | +57.63% / +49.41% |
+| `momentum_alpha` | 179 / 217 | +57.77% → **+55.82%** / +44.30% → **+37.97%** | 15.03% → 15.12% / 19.98% → **21.14%** | 1.34 / 1.18 | 0.19 [0.00; 0.34] / 0.11 [−0.05; 0.23] | +31.02% / +8.86% |
+| `alt_atr` | 180 / 184 | +20.50% → +20.53% / +17.54% → +17.49% | 11.69% → 11.99% / 13.39% → 12.51% | 1.23 / 1.19 | 0.12 [−0.08; 0.29] / 0.10 [−0.09; 0.27] | +5.44% / +2.19% |
+
+**A, B and C at the agent's stop** (section 2.10's table, 15 windows compounded, tier / `--alts`; before → after, drawdowns after):
+
+| Profile | A (as today) | B (filter off) | C (filter off, no relative strength, `min_score` 0.67) | Worst window DD A | Worst window DD B | B: entries with BTC below its EMA 200 (net USDT) |
+|---|--:|--:|--:|--:|--:|--:|
+| `swing_trend` | +106.41% → **+93.29%** / +89.00% → **+82.39%** | +87.82% → **+78.12%** / +79.13% → **+74.95%** | +16.35% → **+18.36%** / −3.88% → **−1.29%** | 15.12% / 15.09% | 15.12% / 15.09% | 28 / 32 (+50.00 / +51.03) |
+| `momentum_alpha` | +61.83% → **+59.48%** / +45.36% → **+37.98%** | +54.40% → **+53.23%** / +33.96% → **+27.96%** | +15.42% → **+20.12%** / +6.21% → **+6.42%** | 10.95% / 13.76% | 12.78% / 17.99% | 23 / 29 (+13.45 / +11.24) |
+| `alt_atr` | +23.24% → **+23.34%** / +20.55% → **+20.75%** | +19.82% → **+22.50%** / +17.36% → **+19.94%** | +25.53% → **+23.03%** / +26.19% → **+24.85%** | 6.99% / 7.01% | 7.28% / 7.28% | 33 / 35 (+2.68 / +2.68) |
+
+- **B:** without the filter every profile still makes less over the 15 windows, on both baskets. The margin is wide in `swing_trend` and `momentum_alpha`, but under 1 p.p. in `alt_atr` (it was 3.4 / 3.2 p.p.). On windows 5–15, `momentum_alpha` without the filter now makes slightly more than with it: +34.60% / +18.29% against +34.01% / +15.45%.
+- **C:** the reading holds. At 0.67 `swing_trend` and `momentum_alpha` lose most of their result; `alt_atr` now matches A on the tier lists (+23.03% vs +23.34%) and still beats it on `--alts` (+24.85% vs +20.75%), with about half the trades (86 / 93 against 180 / 184). Re-choosing the threshold on the 4 windows before each window (windows 5–15, tier / `--alts`; before the fix in parentheses):
+  - `swing_trend`: +15.60% / −1.09% against A's +78.24% / +57.76% (+19.63% / +1.61% against +85.34% / +58.38%);
+  - `momentum_alpha`: +31.11% / +10.22% against +34.01% / +15.45% (+21.97% / +11.17% against +36.16% / +18.29%);
+  - `alt_atr`: +6.12% / +10.86% against +12.64% / +11.02% (+6.55% / +11.96% against +11.53% / +9.80%).
+
+**The pair-local families (section 2.10, D and E) at the agent's stop.** The verdicts hold:
+
+- `pair_pullback_rsi` 1h: 21 / 25 trades, +2.19% / +3.17% (was +2.09% / +3.09%), PF 1.69 / 1.86, expectancy 0.26 R [−0.15; 0.57] / 0.29 R [0.04; 0.59]. Still **inconclusive**: few trades, an interval that includes zero on the tier lists, and the same two entries with BTC below its EMA 200. Its stops are wide and rare (1 and 2 stop exits), so the fix barely touches it.
+- `pair_volatility_breakout`: worse, since its 1% stops are where the bias weighed most. Without the pauses −41.12% / −42.45% (was −39.80% / −40.10%), PF 0.73 / 0.76, expectancy −0.11 R [−0.17; −0.05] / −0.10 R [−0.16; −0.03]. Every E variant stays below zero. Still **rejected**.
+- `pair_range_reversion`: still no trade. Still **rejected**.
+
+**Reading.**
+
+- **The lab was optimistic, and still is.** Over the 15 windows `swing_trend` loses 13 p.p. on the tier lists and 7 on `--alts`, `momentum_alpha` 2 and 7; `alt_atr`, whose stops are wider, hardly moves. Freqtrade still fills at the stop price and at the candle open with no slippage, so the agent's results should sit lower still.
+- **Drawdowns.** As one continuous run, `swing_trend` reaches 30.0% / 29.1% and `momentum_alpha` 15.1% / 21.1%. The worst windows marked to market reach 15.12% in `swing_trend`.
+- **Older sections.** Sections 2 to 2.8 compare variants run on the same biased lab, so the bias moves both sides of each comparison. Here the gap between two variants of one profile moved by up to ~6 p.p. over the 15 windows (`swing_trend`'s activation on `--alts`), and the worst windows by up to ~0.6 p.p. The choices of D-034, D-036 and D-039 in sections 2.7 and 2.8 rest on margins of about 8 p.p. or more on the period they were chosen by, or reject drawdowns 3 p.p. or more above the cap, so they were not re-run; only a re-run would settle them. Section 3 is superseded.
+
 ## 3. Out-of-sample results (2026-10-01)
 
 > **Superseded by section 2:** these numbers come from 4h backtests without intra-candle exits and are inflated by the tight trailings that *hyperopt* chose.
@@ -471,6 +542,7 @@ The median uses trainings later than the first windows, so this set was **not** 
 ## 5. Limitations
 
 - **Entry stop before section 2.7:** until 2026-10-24 the lab placed the stop at the cap during the entry's first 4h candle, then at that candle's own stop, instead of the signal candle's stop the agent uses. Sections 2 to 2.6 ran that way (section 2.7); section 2.8 re-runs their decisions, except the five D-039 hypotheses whose code was never versioned.
+- **Stop before section 2.11:** until 2026-10-28 the lab's fixed stop and *break-even* sat `(1 + fee) ÷ (1 − fee)` above the agent's prices, about 0.2%. Sections 2 to 2.10 ran that way; section 2.11 re-runs sections 2.9 and 2.10.
 - **Survivorship bias:** the pair list is static, made of assets that exist since 2021. The real universe changes every cycle (D-027), and most of the recent setups showed up in assets outside that list. `--alts` (section 2.4) emulates the minimum 24h volume of the universe, not its *tier* ranking, and its 18 alts were picked among the ones the agent traded or saw in 2026-10.
 - **Indicator history:** the agent computes the features on the last 251 candles (`warmup + 50`), so its EMA 200 is still close to the TA-Lib seed (an SMA); the lab uses the whole history. In 2025–2026, on the `swing_trend` pairs, about 9% of the entry signals differ each way (section 2.4).
 - **Idealized execution:** fills at the stop price and at the candle open, with no *slippage* beyond the fee. With `--detail 5m` the order of events within the 4h candle follows 5m candles; within each 5m candle it is still approximated.

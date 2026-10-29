@@ -12,6 +12,10 @@ the pinned image with its cursor ahead (552 candles of history), and an entry wh
 candle has not closed yet. Changing that candle's future high and low must not change the stop
 nor the size, which come from the signal candle closed at the entry, as in the agent.
 
+The third test reads the stop price Freqtrade places from ``custom_stoploss``'s ratio, called as
+the backtest calls it (at the candle's high, with a profit net of fees): the fixed stop at
+``entry × (1 − stop_pct)`` and the *break-even* at ``entry × 1.003``, the agent's prices.
+
 Needs Docker, the pinned image and, for the first test, the lab's candles (``LAB_DATA_DIR``,
 default ``lab/freqtrade/user_data/data/binance``); they are skipped without them (as on CI).
 """
@@ -192,7 +196,7 @@ def test_changing_future_candles_does_not_change_earlier_sizing_or_exits(tmp_pat
 # The review's case, run inside the pinned image: synthetic 4h candles around 100 with an ATR%
 # of about 0.8% (a 2.48% stop at 3.1 ATR, below the 4.5% cap), 552 of them before the window,
 # and the DataProvider cursor where Freqtrade puts it (startup + row), i.e. ahead of time.
-CALLBACK_SCRIPT = r"""
+CALLBACK_SETUP = r"""
 import json
 import sys
 from datetime import UTC, datetime, timedelta
@@ -212,7 +216,7 @@ ENTRY = WINDOW + timedelta(hours=4)  # its candle closes at 08:00
 HISTORY = 552
 
 
-def candles(entry_high, entry_low):
+def candles(entry_high, entry_low, entry_close):
     dates = pd.date_range(WINDOW - timedelta(hours=4 * HISTORY), periods=HISTORY + 12, freq="4h")
     close = 100 * np.exp(np.cumsum(np.random.default_rng(7).normal(0, 0.001, len(dates))))
     close = close / close[HISTORY] * 100  # the signal candle (00:00) closes at 100
@@ -222,7 +226,7 @@ def candles(entry_high, entry_low):
     frame["low"] = frame[["open", "close"]].min(axis=1) * 0.996
     frame["volume"] = 1000.0
     entry = frame["date"] == ENTRY
-    frame.loc[entry, ["open", "close"]] = 100.0
+    frame.loc[entry, ["open", "close"]] = 100.0, entry_close
     frame.loc[entry, "high"], frame.loc[entry, "low"] = entry_high, entry_low
     return frame
 
@@ -232,7 +236,7 @@ class Wallets:
         return 1000.0
 
 
-def run(entry_high, entry_low):
+def setup(entry_high, entry_low, entry_close=100.0):
     config = {
         "timeframe": "4h", "stake_currency": "USDT", "dry_run": True,
         "runmode": RunMode.BACKTEST, "candle_type_def": CandleType.SPOT,
@@ -245,7 +249,9 @@ def run(entry_high, entry_low):
     }.items():
         getattr(strategy, name).value = value
     strategy.dp = None  # no benchmark: the regime uses the pair's own close
-    frame = strategy.populate_indicators(candles(entry_high, entry_low), {"pair": PAIR})
+    frame = strategy.populate_indicators(
+        candles(entry_high, entry_low, entry_close), {"pair": PAIR}
+    )
     frame = strategy.populate_entry_trend(frame, {"pair": PAIR})
     provider = DataProvider(config, None)
     provider._set_cached_df(PAIR, "4h", frame, CandleType.SPOT)
@@ -256,19 +262,29 @@ def run(entry_high, entry_low):
         fee_open=0.001, fee_close=0.001, exchange="binance", is_short=False, leverage=1.0,
         max_rate=100.0,
     )
+    signal = float(frame.loc[frame["date"] == WINDOW, "stop_pct"].iloc[0])
+    return strategy, trade, signal
+"""
+
+CALLBACK_SCRIPT = (
+    CALLBACK_SETUP
+    + r"""
+def run(entry_high, entry_low):
+    strategy, trade, signal = setup(entry_high, entry_low)
     stop = strategy.custom_stoploss(
         PAIR, trade, ENTRY + timedelta(minutes=5), 100.0, 0.0, after_fill=False
     )
     stake = strategy.custom_stake_amount(PAIR, ENTRY, 100.0, 0.0, None, 10_000.0, 1.0, "b", "long")
-    signal = float(frame.loc[frame["date"] == WINDOW, "stop_pct"].iloc[0])
     return {"stop": stop, "stake": stake, "signal_stop": signal}
 
 
 print(json.dumps([run(100.4, 99.6), run(110.0, 90.0)]))
 """
+)
 
 
-def test_the_entry_stop_comes_from_the_closed_signal_candle(tmp_path: Path) -> None:
+def _callbacks(tmp_path: Path, script: str) -> Any:
+    """Runs ``script`` in the pinned image with the strategy and returns its last JSON line."""
     _require_image()
     strategies = tmp_path / "strategies"
     strategies.mkdir()
@@ -279,16 +295,52 @@ def test_the_entry_stop_comes_from_the_closed_signal_candle(tmp_path: Path) -> N
             _docker(), "run", "--rm", "--entrypoint", "python",
             "-v", f"{strategies.as_posix()}:/freqtrade/user_data/strategies:ro",
             "-v", f"{(ROOT / 'src').as_posix()}:/opt/trade_agent_src:ro",
-            "-e", "PYTHONPATH=/opt/trade_agent_src", _image(), "-c", CALLBACK_SCRIPT,
+            "-e", "PYTHONPATH=/opt/trade_agent_src", _image(), "-c", script,
         ],
         check=True,
         capture_output=True,
         text=True,
     )  # fmt: skip
-    calm, wide = json.loads(result.stdout.strip().splitlines()[-1])
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_the_entry_stop_comes_from_the_closed_signal_candle(tmp_path: Path) -> None:
+    calm, wide = _callbacks(tmp_path, CALLBACK_SCRIPT)
     # the unfinished entry candle (high/low 100.4/99.6 vs 110/90) changes nothing at 04:05
     assert wide == calm
     # the stop is the signal candle's (below the cap), and the size is risk / that stop
     assert calm["stop"] == pytest.approx(calm["signal_stop"])
     assert calm["signal_stop"] < 0.045
     assert calm["stake"] == pytest.approx(min(1000 * 0.012 / calm["signal_stop"], 420.0))
+
+
+# The stop price Freqtrade places: ``current_rate × (1 − ratio)``, with the ratio
+# ``custom_stoploss`` returns for the candle's high and the profit at that high net of both fees,
+# as the backtest calls it. The entry candle closes at 104, above break-even's trigger (1.2 R of
+# a 2.48% stop, 102.98), so on the next candle the stop moves to break-even.
+STOP_SCRIPT = (
+    CALLBACK_SETUP
+    + r"""
+def placed(strategy, trade, at, high):
+    ratio = strategy.custom_stoploss(
+        PAIR, trade, at, high, trade.calc_profit_ratio(high), after_fill=False
+    )
+    return high * (1 - abs(ratio))
+
+
+strategy, trade, signal = setup(104.5, 99.6, entry_close=104.0)
+print(json.dumps({
+    "signal_stop": signal,
+    "fixed": placed(strategy, trade, ENTRY + timedelta(minutes=5), 101.0),
+    "break_even": placed(strategy, trade, ENTRY + timedelta(hours=4, minutes=5), 104.5),
+}))
+"""
+)
+
+
+def test_the_stops_sit_at_the_agents_prices_net_of_fees(tmp_path: Path) -> None:
+    placed = _callbacks(tmp_path, STOP_SCRIPT)
+    # not (1 + fee) / (1 − fee) above, where stoploss_from_open on the profit net of fees put
+    # them before lab-results.md 2.11
+    assert placed["fixed"] == pytest.approx(100 * (1 - placed["signal_stop"]), rel=1e-12)
+    assert placed["break_even"] == pytest.approx(100 * 1.003, rel=1e-12)
