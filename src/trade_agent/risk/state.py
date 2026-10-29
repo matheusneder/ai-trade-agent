@@ -138,6 +138,13 @@ class StateStore:
     async def put(self, scope: str, state: ScopeState) -> None:
         await self._store.set_checkpoint(self._key(scope), state.to_json())
 
+    async def scope_risk(self, scope: str) -> dict[str, Any] | None:
+        """A pair-local profile's risk budget state (D-044), apart from its operating state."""
+        return await self._store.get_checkpoint(f"risk.scope.{scope}")
+
+    async def put_scope_risk(self, scope: str, data: Mapping[str, Any]) -> None:
+        await self._store.set_checkpoint(f"risk.scope.{scope}", data)
+
     async def fired(self) -> FiredMap:
         data = await self._store.get_checkpoint(FIRED_KEY) or {}
         return {

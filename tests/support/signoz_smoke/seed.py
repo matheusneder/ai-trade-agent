@@ -722,7 +722,7 @@ class _Generator:
         cycle.log(
             "decision.cycle", "info", profile=profile, state=state, evaluated=evaluated,
             dry_run=False, research="ok" if research else "sem candidatos (leitura anterior)",
-            setups=setups,
+            setups=setups, family="legacy", regime_filter=True,
         )  # fmt: skip
         cycle.close()
         self.finish_job(job, f"decide_{profile}")

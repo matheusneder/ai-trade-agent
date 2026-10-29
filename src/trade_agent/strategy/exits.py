@@ -30,13 +30,17 @@ def exit_reason(
     age: timedelta | None,
     weak_cycles: int,
     veto: bool = False,
+    technical: str | None = None,
 ) -> str | None:
-    """Reason to close the position by decision, or ``None`` to keep it."""
+    """Reason to close the position by decision, or ``None`` to keep it. ``technical`` is the
+    exit rule of a pair-local family that fired (D-044)."""
     if veto:
         return "veto do analista"
     max_holding = profile.protection.max_holding
     if max_holding is not None and age is not None and age >= max_holding:
         return "tempo máximo de permanência"
+    if technical is not None:
+        return technical
     if weak_cycles >= profile.exits.exit_after_cycles:
         return "rotação: score no nível de saída"
     return None

@@ -21,6 +21,7 @@ from trade_agent.exchange.factory import build_rest_client, build_signer
 from trade_agent.exchange.user_stream import UserDataStream
 from trade_agent.execution.gateway import ExecutionGateway
 from trade_agent.execution.service import PositionService, RulesCache
+from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.market.universe import UniverseConfig
 from trade_agent.metrics import configure_metrics
 from trade_agent.metrics import install as install_metrics
@@ -45,7 +46,7 @@ from trade_agent.research.config import ResearchConfig, load_research_config
 from trade_agent.research.service import ResearchService
 from trade_agent.research.tagging import AssetTagger
 from trade_agent.risk.conditions import StopConditions, load_stop_conditions
-from trade_agent.risk.guard import RiskGuard, evaluate
+from trade_agent.risk.guard import RiskGuard, ScopeSpec, evaluate
 from trade_agent.risk.monitor import RiskMonitor
 from trade_agent.risk.state import StateStore
 from trade_agent.runtime import Action, AgentRuntime, Service
@@ -59,6 +60,21 @@ RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
 
 log = structlog.get_logger(__name__)
+
+
+def scope_specs(strategy: StrategyConfig) -> dict[str, ScopeSpec]:
+    """The risk budgets of the enabled pair-local profiles (D-044), for the Risk Guard."""
+    return {
+        name: ScopeSpec(
+            profile.code,
+            profile.risk.limits(
+                strategy.profile_capital(name),
+                timedelta(milliseconds=INTERVAL_MS[profile.timeframe]),
+            ),
+        )
+        for name, profile in strategy.enabled_profiles().items()
+        if profile.risk is not None
+    }
 
 
 @dataclass
@@ -100,7 +116,11 @@ def assemble(
         notifier = TelegramNotifier(bot, settings.telegram_chat_id, min_severity=Severity.INFO)
 
     guard = RiskGuard(
-        conditions=conditions, states=StateStore(store), store=store, notify=notifier.notify
+        conditions=conditions,
+        states=StateStore(store),
+        store=store,
+        notify=notifier.notify,
+        scopes=scope_specs(strategy),
     )
     research_store = ResearchStore(db)
     names = research_config.asset_names
@@ -144,6 +164,7 @@ def assemble(
     async def check_risk() -> None:
         snapshot = await monitor.snapshot()
         await guard.apply(evaluate(conditions, snapshot))  # before telemetry: a failure there
+        await guard.track_scopes(snapshot)
         await telemetry.observe(snapshot)  # must not keep the guard from acting
 
     symbols = [f"{asset}{strategy.account.quote_asset}" for asset in names]
