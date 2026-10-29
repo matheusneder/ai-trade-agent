@@ -461,7 +461,7 @@ Freqtrade still fills at the stop price, without the slippage of the agent's sto
 - **Two of its premises no longer hold on `--alts`:**
   - `momentum_alpha` at 2.0% risk has a 13.28% worst window, above the 13% cap sections 2.7 and 2.9 chose by (12.89% before the fix). At 1.5% it is 10.09%.
   - The 13% activation in `swing_trend` now lowers the 15 windows on `--alts` too, not only the holdout: alone +68.23% against +68.77%, and in the portfolio the current set makes +65.42% against risk only's +67.52%. On the tier lists it still helps on both periods, by 0.3 p.p. in the portfolio's holdout, within the noise. On `--alts` the current set's holdout (+12.11%) is now below the one before D-041 (+12.62%).
-- **No profile was changed.** Whether to keep D-041 as it is is the operator's decision.
+- **The operator's choice (D-045, PR #41):** `momentum_alpha`'s risk goes back to 1.5%, and `swing_trend` keeps D-041. The 13% activation stays, since it wins the design on both baskets and section 2.8's rule keeps the current value unless another one does.
 
 **A_op at the agent's stop** (one continuous run sized on the configured capital, section 2.10; return and drawdown before → after, the other columns after):
 
