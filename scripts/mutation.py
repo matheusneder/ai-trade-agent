@@ -510,10 +510,13 @@ class Plan:
     seed: int = 0
     flaky: list[str] = field(default_factory=list)
     """Smoke fronts: killed once, survived when run again in another session."""
+    unconfirmed: list[str] = field(default_factory=list)
+    """Smoke fronts: killed once, not run again (that batch's clean run failed twice)."""
 
     def save(self) -> None:
         data = {"names": self.names, "effects": self.effects, "seed": self.seed}
-        PLAN.write_text(json.dumps(data | {"flaky": self.flaky}), encoding="utf-8")
+        data |= {"flaky": self.flaky, "unconfirmed": self.unconfirmed}
+        PLAN.write_text(json.dumps(data), encoding="utf-8")
 
     @classmethod
     def load(cls) -> "Plan":
@@ -614,7 +617,7 @@ def _run_smoke(stack: SmokeStack, work: Plan, batch: int, env: dict[str, str]) -
     first = statuses()
     kills = [n for n in work.names if first.get(n) in KILLED and n not in skipped]
     _say(f"confirming the {len(kills)} kills: each must fail again, in another session")
-    _batches(stack, kills, batch, env)
+    work.unconfirmed = sorted(_batches(stack, kills, batch, env))
     again = statuses()
     work.flaky = sorted(n for n in kills if again.get(n) not in KILLED)
     work.save()
@@ -674,6 +677,7 @@ def report(front_name: str, work: Plan | None = None, duration: float | None = N
     sources, status = mutants(), statuses()
     tested = {n: status[n] for n in (work.names or status) if n in status}
     tested |= {n: "flaky" for n in work.flaky if n in tested}
+    tested |= {n: "unconfirmed" for n in work.unconfirmed if n in tested}
     counts = Counter(tested.values())
     killed = sum(counts[s] for s in KILLED)
     survived = counts["survived"] + counts["suspicious"]
@@ -688,7 +692,8 @@ def report(front_name: str, work: Plan | None = None, duration: float | None = N
     ]
     effects = work.effects
     if front.smoke:
-        lines += _smoke_summary(effects, killed, survived, work.seed, counts["flaky"])
+        left_out = counts["flaky"], counts["unconfirmed"]
+        lines += _smoke_summary(effects, killed, survived, work.seed, left_out)
     else:
         low, high = _wilson(killed, killed + survived)
         sample = (
@@ -745,7 +750,11 @@ def report(front_name: str, work: Plan | None = None, duration: float | None = N
 
 
 def _smoke_summary(
-    effects: dict[str, dict[str, Any]], killed: int, survived: int, seed: int, flaky: int
+    effects: dict[str, dict[str, Any]],
+    killed: int,
+    survived: int,
+    seed: int,
+    left_out: tuple[int, int],
 ) -> list[str]:
     kinds = Counter(e["kind"] for e in effects.values())
     crash, candidates = kinds["crash"], kinds["candidate"]
@@ -762,8 +771,9 @@ def _smoke_summary(
         f"Random sample of {tested} of those {candidates} (seed {seed}),"
         f" run against the smoke tests: {killed} killed (each in two sessions), {survived}"
         f" survived, **{_pct(killed, tested)}** (95% CI {low:.1%}-{high:.1%}). Left out:"
-        f" {flaky} flaky (killed once, survived the second time: a test failed for a reason"
-        " of its own).",
+        f" {left_out[0]} flaky (killed once, survived the second time: a test failed for a"
+        f" reason of its own) and {left_out[1]} unconfirmed (killed once, not run again: the"
+        " clean run of their batch failed twice).",
         "",
         f"**Estimated mutation score: {overall:.1%}** of the {crash + candidates} mutants that"
         " change a dashboard or break the generator.",

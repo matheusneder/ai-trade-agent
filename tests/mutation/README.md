@@ -135,8 +135,8 @@ The first runs (2026-10-29, this machine: Docker with 12 CPUs, the real stack ru
 | --- | --- | --- |
 | `unit` | all 14,581 mutants, 6 in parallel | 36 min |
 | `integration` | a sample of 1,000 (`--sample 1000`), 8 in parallel | 13 min (all: about 3 h) |
-| `smoke-grafana` | 150 candidates | about 1 h |
-| `smoke-signoz` | 60 candidates (`--sample 60`) | 66 min (150: about 3 h) |
+| `smoke-grafana` | 150 candidates, kills confirmed | 87 min |
+| `smoke-signoz` | 60 candidates (`--sample 60`), kills confirmed | 104 min (150: about 4 h) |
 
 A SigNoz mutant whose function the tests also use directly (`_builder`, through `events`) runs
 the whole suite (about 5 minutes); one that changes a single dashboard runs its tests only (one
