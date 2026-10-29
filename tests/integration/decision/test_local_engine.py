@@ -22,6 +22,7 @@ from tests.integration.decision.test_engine import (
 from tests.support.candles import START_MS, ohlcv, pair_breakout, pair_pullback, raw_klines
 from tests.support.fake_binance import FakeBinance, Fault
 from tests.support.local_profiles import LOCAL_PULLBACK, merge
+from tests.support.risk import closed_position, snapshot
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.errors import BinanceError
 from trade_agent.execution.orders import (
@@ -34,6 +35,8 @@ from trade_agent.execution.orders import (
 from trade_agent.execution.positions import PositionState
 from trade_agent.execution.service import PositionService
 from trade_agent.persistence.store import Store
+from trade_agent.risk.guard import ScopeSpec
+from trade_agent.risk.scope import REENTRY
 from trade_agent.signals import Family
 from trade_agent.signals.local import TECHNICAL_EXITS
 from trade_agent.strategy.profiles import StrategyConfig
@@ -119,6 +122,42 @@ async def test_a_local_profile_goes_on_without_the_benchmark(
     assert report.regime is None and report.opened == ("SOLUSDT",)
     (warning,) = [e for e in logs if e["event"] == "decision.benchmark_unavailable"]
     assert warning["profile"] == "ppb" and "Too many requests" in warning["error"]
+
+
+async def test_a_stop_on_its_pair_holds_back_the_local_profiles_entry(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """The profile's budget (D-044) reaches the engine's pre-trade check: no entry on a pair
+    for three candles after a stop on it."""
+    _setup_market(fake)
+    fake.candles[("SOLUSDT", "4h")] = _sol(pair_pullback())
+    strategy = _strategy()
+    profile = strategy.profiles["local"]
+    assert profile.risk is not None
+    limits = profile.risk.limits(strategy.profile_capital("local"), timedelta(hours=4))
+    clock = Clock()
+    engine, guard = _engine(
+        api,
+        service,
+        store,
+        strategy=strategy,
+        dry_run=True,
+        clock=clock,
+        scopes={"local": ScopeSpec(profile.code, limits)},
+    )
+    await guard.track_scopes(snapshot(now=clock.now))  # the budget's first reading
+    await closed_position(
+        store,
+        profile=profile.code,
+        pnl="-1",
+        closed_at=clock.now - timedelta(hours=1),
+        symbol="SOLUSDT",
+        exit_reason="stop_loss",
+    )
+    await guard.track_scopes(snapshot(now=clock.now))
+    report = await engine.run_profile("local")
+    assert report.opened == ()
+    assert ("SOLUSDT", REENTRY) in report.rejected
 
 
 async def test_local_signals_do_not_change_with_the_benchmark(

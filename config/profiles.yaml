@@ -128,12 +128,12 @@ profiles:
       on_failure: ta_only_reduced
 
   # ------------------------------------------------------------ pair-local families (D-044)
-  # Experimental, lab only: StrategyConfig refuses them enabled, since their risk budget
-  # (`risk`) only exists in the lab and they would compete with the profiles above for the
-  # same account. Entries and exits read only the pair's own candles, so they may buy with BTC
-  # below its EMA 200. The signals are research seeds (trade_agent.signals.local), not a
-  # calibration; the results are in doc/lab-results.md, section 2.10. capital_share gives the
-  # lab a virtual capital of 100 USDT; no share of the account is taken.
+  # Experimental and disabled: none was fit for the next phase (doc/lab-results.md, section
+  # 2.10). Their risk budget (`risk`) runs in the production Risk Guard as in the lab
+  # (trade_agent.risk.scope). Entries and exits read only the pair's own candles, so they may
+  # buy with BTC below its EMA 200. The signals are research seeds (trade_agent.signals.local),
+  # not a calibration. capital_share gives the lab a virtual capital of 100 USDT; enabling one
+  # takes that share from the profiles above (the enabled shares add up to at most 1).
   pair_pullback_1h:
     code: ppb1h
     enabled: false

@@ -27,7 +27,7 @@ from trade_agent.execution.orders import EntryMode, StopMode, TakeProfitMode
 from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.risk.conditions import StopConditions, load_stop_conditions
 from trade_agent.risk.guard import PreTradeContext, pre_trade_violations
-from trade_agent.risk.scope import ScopeLimits, ScopeRisk
+from trade_agent.risk.scope import ScopeRisk
 from trade_agent.risk.state import OpState
 from trade_agent.signals import position_exit
 from trade_agent.strategy.exits import DEFAULT_FEE_BUFFER
@@ -86,16 +86,9 @@ class PaperPortfolio:
         self.scopes: dict[str, ScopeRisk] = {}
         for name, profile in simulated.items():
             if profile.risk is not None:
-                candle = INTERVAL_MS[profile.timeframe] * profile.risk.reentry_candles
+                candle = timedelta(milliseconds=INTERVAL_MS[profile.timeframe])
                 self.scopes[name] = ScopeRisk(
-                    ScopeLimits(
-                        capital=float(strategy.profile_capital(name)),
-                        daily_loss_pct=_float(profile.risk.daily_loss_pct),
-                        consecutive_losses=profile.risk.consecutive_losses,
-                        cooldown=profile.risk.cooldown,
-                        max_drawdown_pct=_float(profile.risk.max_drawdown_pct),
-                        reentry=timedelta(milliseconds=candle),
-                    )
+                    profile.risk.limits(strategy.profile_capital(name), candle)
                 )
 
     def close(self, symbol: str, bid: Decimal, at: datetime, reason: str) -> None:
@@ -304,10 +297,6 @@ class PaperPortfolio:
             "rejections": self.rejections,
             "pnl": sum(self.cash.values(), D(0)) + marked - initial,
         }
-
-
-def _float(value: Decimal | None) -> float | None:
-    return None if value is None else float(value)
 
 
 def replay(path: Path, accounts: dict[str, PaperPortfolio]) -> dict[str, Any]:

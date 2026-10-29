@@ -1,8 +1,8 @@
 """Entry pauses of a pair-local profile (D-044), from its own equity and closed trades.
 
 Pure and dependency-free, like :mod:`trade_agent.signals`: the lab strategy imports it inside
-the Freqtrade image. The production Risk Guard does not run it yet, which is why
-:class:`~trade_agent.strategy.profiles.StrategyConfig` refuses an enabled pair-local profile.
+the Freqtrade image, and the production Risk Guard (``RiskGuard.track_scopes``) runs the same
+code on each profile's state, persisted apart from the global one.
 
 * daily loss: the marked-to-market equity ``daily_loss_pct`` (% of the capital) below its
   first mark of the UTC day pauses new entries for ``cooldown``, once a day;
@@ -15,6 +15,7 @@ the Freqtrade image. The production Risk Guard does not run it yet, which is why
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from typing import Any
 
 DAILY_LOSS = "perda diária do perfil"
 LOSING_STREAK = "perdas seguidas do perfil"
@@ -79,6 +80,42 @@ class ScopeRisk:
         if self.paused_until is None or until > self.paused_until:
             self.paused_until, self.pause_reason = until, reason
         self.events.append((at, reason))
+
+    def reviewed(self) -> None:
+        """The operator's review (``/resume``): ends the pauses, and the drawdown counts again
+        from the next mark."""
+        self.review, self.peak = False, None
+        self.paused_until, self.pause_reason = None, ""
+
+    def to_json(self) -> dict[str, Any]:
+        """The state, without the limits or the events."""
+        return {
+            "peak": self.peak,
+            "day": self.day.isoformat() if self.day else None,
+            "day_start": self.day_start,
+            "daily_hit": self.daily_hit,
+            "losses": self.losses,
+            "paused_until": self.paused_until.isoformat() if self.paused_until else None,
+            "pause_reason": self.pause_reason,
+            "review": self.review,
+            "stops": {symbol: at.isoformat() for symbol, at in sorted(self.stops.items())},
+        }
+
+    @classmethod
+    def from_json(cls, limits: ScopeLimits, data: dict[str, Any]) -> "ScopeRisk":
+        until = data["paused_until"]
+        return cls(
+            limits,
+            peak=data["peak"],
+            day=date.fromisoformat(data["day"]) if data["day"] else None,
+            day_start=data["day_start"],
+            daily_hit=data["daily_hit"],
+            losses=data["losses"],
+            paused_until=datetime.fromisoformat(until) if until else None,
+            pause_reason=data["pause_reason"],
+            review=data["review"],
+            stops={symbol: datetime.fromisoformat(at) for symbol, at in data["stops"].items()},
+        )
 
     def blocked(self, at: datetime, symbol: str) -> str | None:
         """Why a new entry on ``symbol`` is not allowed at ``at`` (``None``: it is)."""

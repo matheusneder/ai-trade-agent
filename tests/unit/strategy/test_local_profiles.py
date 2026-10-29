@@ -11,8 +11,11 @@ from pydantic import ValidationError
 
 from tests.support.local_profiles import local_config, local_profile, raw_config
 from tests.unit.strategy.test_portfolio_and_exits import CONSERVATIVE, _candidate
+from trade_agent.app import scope_specs
 from trade_agent.execution.orders import TakeProfitMode
 from trade_agent.market.universe import Tier
+from trade_agent.risk.guard import ScopeSpec
+from trade_agent.risk.scope import ScopeLimits
 from trade_agent.signals import BreakoutParams, Family, PullbackParams, RangeParams
 from trade_agent.strategy.exits import exit_reason
 from trade_agent.strategy.portfolio import Holding, plan_entries
@@ -43,9 +46,32 @@ def test_repository_local_profiles_are_disabled_seeds() -> None:
         assert config.profiles[name].uses_regime_filter
 
 
-def test_a_local_profile_cannot_be_enabled() -> None:
-    with pytest.raises(ValidationError, match="só de laboratório"):
-        local_config(local={"enabled": True})
+def test_a_local_profile_can_be_enabled_on_a_share_of_the_account() -> None:
+    # its budget runs in the production Risk Guard (D-044): only the shares limit it
+    with pytest.raises(ValidationError, match="capital_share"):
+        local_config(local={"enabled": True, "capital_share": 0.3})
+    config = local_config(local={"enabled": True})
+    profile = config.profiles["local"]
+    assert profile.enabled and profile.risk is not None
+    assert profile.risk.limits(D(100), timedelta(hours=1)) == ScopeLimits(
+        capital=100.0,
+        daily_loss_pct=1.5,
+        consecutive_losses=3,
+        cooldown=timedelta(hours=24),
+        max_drawdown_pct=8.0,
+        reentry=timedelta(hours=3),
+    )
+
+
+def test_the_risk_guard_gets_the_budgets_of_the_enabled_local_profiles() -> None:
+    assert scope_specs(load_strategy_config(REPOSITORY_FILE)) == {}  # the guard as before
+    assert scope_specs(local_config()) == {}  # a disabled one has none
+    config = local_config(local={"enabled": True, "timeframe": "4h"})
+    profile = config.profiles["local"]
+    assert profile.risk is not None
+    limits = profile.risk.limits(config.profile_capital("local"), timedelta(hours=4))
+    assert limits.reentry == timedelta(hours=12)
+    assert scope_specs(config) == {"local": ScopeSpec("ppb", limits)}
 
 
 def test_each_family_has_its_own_parameters() -> None:
