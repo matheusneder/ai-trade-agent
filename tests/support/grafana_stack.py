@@ -9,6 +9,10 @@ The project name carries the PID of the pytest process that owns it
 (``ta-grafana-smoke-<pid>-<random>``). A run killed before its teardown (a run stopped in
 VS Code, a closed terminal) leaves its containers behind; the next run removes every smoke
 stack whose owner process no longer exists, and never the stack of a run still going.
+
+``GRAFANA_SMOKE_ATTACH`` names the JSON of a stack already running and seeded (:class:`Attached`,
+written by the mutation tests, see tests/mutation/README.md): the session uses it instead of
+starting its own, and provisions the generator's dashboards into it again.
 """
 
 import asyncio
@@ -24,7 +28,8 @@ import sys
 import time
 from collections.abc import Coroutine, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -32,6 +37,7 @@ from urllib.parse import urlencode
 import httpx
 import pytest
 import yaml
+from scripts.grafana_dashboards import build, render
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from trade_agent.persistence.migrate import upgrade_to_head
@@ -44,6 +50,7 @@ PROJECT_PREFIX = "ta-grafana-smoke-"
 PROJECT = re.compile(rf"{PROJECT_PREFIX}(?P<pid>\d+)-[0-9a-f]+")
 KEEP_ENV = "GRAFANA_SMOKE_KEEP"
 """``GRAFANA_SMOKE_KEEP=1`` leaves the stack running after the tests (debugging)."""
+ATTACH_ENV = "GRAFANA_SMOKE_ATTACH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +62,38 @@ class Stack:
     """As the agent's owner user (``trade_agent``): migrations and seed."""
     admin_user: str
     admin_password: str
+    dashboards: Path | None = None
+    """The directory Grafana provisions the dashboards from; ``None``: the versioned JSON of
+    ``deploy/grafana/dashboards``, as in production."""
+
+
+@dataclass(frozen=True, slots=True)
+class Attached:
+    """A stack started and seeded once, for many sessions (``GRAFANA_SMOKE_ATTACH``)."""
+
+    stack: Stack
+    seed: int
+    hours: int
+    end: datetime
+    """The seeded day's end: ``generate(seed, hours, end)`` gives the same rows again."""
+
+    def save(self, path: Path) -> None:
+        folder = self.stack.dashboards
+        stack = asdict(self.stack) | {"dashboards": str(folder) if folder else None}
+        data = {"stack": stack, "seed": self.seed, "hours": self.hours, "end": self.end}
+        path.write_text(json.dumps(data, default=datetime.isoformat), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: Path) -> "Attached":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        folder = data["stack"]["dashboards"]
+        stack = Stack(**data["stack"] | {"dashboards": Path(folder) if folder else None})
+        return cls(stack, data["seed"], data["hours"], datetime.fromisoformat(data["end"]))
+
+
+def attached() -> Attached | None:
+    path = os.environ.get(ATTACH_ENV)
+    return Attached.load(Path(path)) if path else None
 
 
 def images() -> dict[str, str]:
@@ -107,16 +146,49 @@ async def _migrate(url: str) -> None:
 
 
 def logs(stack: Stack) -> str:
-    env = _env(stack.admin_password, "-", "-")
+    env = _env(stack.admin_password, "-", "-", stack.dashboards)
     return _compose(stack.project, env, "logs", "--no-color", "--tail", "200")
 
 
-def _env(admin: str, postgres: str, grafana_db: str) -> dict[str, str]:
-    return images() | {
-        "SMOKE_GRAFANA_ADMIN_PASSWORD": admin,
-        "SMOKE_POSTGRES_PASSWORD": postgres,
-        "SMOKE_GRAFANA_DB_PASSWORD": grafana_db,
-    }
+def _env(admin: str, postgres: str, grafana_db: str, dashboards: Path | None) -> dict[str, str]:
+    folder = {"SMOKE_GRAFANA_DASHBOARDS": str(dashboards)} if dashboards else {}
+    return (
+        images()
+        | folder
+        | {
+            "SMOKE_GRAFANA_ADMIN_PASSWORD": admin,
+            "SMOKE_POSTGRES_PASSWORD": postgres,
+            "SMOKE_GRAFANA_DB_PASSWORD": grafana_db,
+        }
+    )
+
+
+def write_dashboards(directory: Path) -> None:
+    """The generator's dashboards (``build()``), as ``python -m scripts.grafana_dashboards``
+    writes them, alone in ``directory``."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for old in directory.iterdir():
+        old.unlink()
+    for name, board in build().items():
+        (directory / name).write_text(render(board), encoding="utf-8", newline="\n")
+
+
+def provision(stack: Stack) -> None:
+    """Replaces every dashboard of the stack by the generator's, from a clean slate: an earlier
+    session's dashboards (another UID, for one) never stay behind. With the folder empty, Grafana
+    lets go of the provisioned dashboards (deletion is disabled in the provisioning: it keeps
+    them, unprovisioned), the API deletes them, and Grafana reads the new files."""
+    assert stack.dashboards is not None, "the versioned dashboards are provisioned at startup"
+    auth = (stack.admin_user, stack.admin_password)
+    with httpx.Client(base_url=stack.grafana_url, auth=auth, timeout=60) as api:
+        for old in stack.dashboards.iterdir():
+            old.unlink()
+        api.post("/api/admin/provisioning/dashboards/reload").raise_for_status()
+        found = api.get("/api/search", params={"type": "dash-db"}).raise_for_status().json()
+        for board in found:
+            api.delete(f"/api/dashboards/uid/{board['uid']}").raise_for_status()
+        write_dashboards(stack.dashboards)
+        api.post("/api/admin/provisioning/dashboards/reload").raise_for_status()
 
 
 if sys.platform == "win32":
@@ -167,14 +239,13 @@ def remove_stale_stacks() -> list[str]:
     return stale
 
 
-def ephemeral_stack() -> Iterator[Stack]:
-    """Starts the stack, migrates the database (Alembic) and removes everything at the end."""
-    if shutil.which("docker") is None:
-        pytest.skip("Docker indisponível: smoke tests do Grafana ignorados")
-    remove_stale_stacks()
-    project = f"{PROJECT_PREFIX}{os.getpid()}-{secrets.token_hex(4)}"
+def start(project: str, dashboards: Path | None = None) -> Stack:
+    """Starts the stack and migrates the database (Alembic); removes it again if it does not
+    get ready. ``dashboards``: a folder for the generator's dashboards (:func:`provision`)."""
     admin, postgres, grafana_db = (secrets.token_urlsafe(18) for _ in range(3))
-    env = _env(admin, postgres, grafana_db)
+    env = _env(admin, postgres, grafana_db, dashboards)
+    if dashboards is not None:
+        write_dashboards(dashboards)
     try:
         _compose(project, env, "up", "-d", "--quiet-pull")
         pg_port = _port(project, env, "postgres", 5432)
@@ -184,12 +255,36 @@ def ephemeral_stack() -> Iterator[Stack]:
         run_async(_migrate(url))
         _wait(f"{loki}/ready", lambda r: r.text.strip() == "ready", "Loki")
         _wait(f"{grafana}/api/health", lambda r: r.json().get("database") == "ok", "Grafana")
-        yield Stack(project, grafana, loki, url, "admin", admin)
+    except BaseException:
+        stop(Stack(project, "", "", "", "admin", admin, dashboards))
+        raise
+    return Stack(project, grafana, loki, url, "admin", admin, dashboards)
+
+
+def stop(stack: Stack) -> None:
+    """Removes the stack (``down -v``), unless ``GRAFANA_SMOKE_KEEP=1``."""
+    if os.environ.get(KEEP_ENV) == "1":
+        print(f"\n{KEEP_ENV}=1: {stack.project} kept until the next run (or `down -v` it)")
+        return
+    env = _env(stack.admin_password, "-", "-", stack.dashboards)
+    _compose(stack.project, env, "down", "-v", "--remove-orphans", "--timeout", "5")
+
+
+def ephemeral_stack() -> Iterator[Stack]:
+    """The session's stack: the one of ``GRAFANA_SMOKE_ATTACH``, with the generator's dashboards
+    provisioned again, or a new one (:func:`start`) removed at the end."""
+    if (running := attached()) is not None:
+        provision(running.stack)
+        yield running.stack
+        return
+    if shutil.which("docker") is None:
+        pytest.skip("Docker indisponível: smoke tests do Grafana ignorados")
+    remove_stale_stacks()
+    stack = start(f"{PROJECT_PREFIX}{os.getpid()}-{secrets.token_hex(4)}")
+    try:
+        yield stack
     finally:
-        if os.environ.get(KEEP_ENV) == "1":
-            print(f"\n{KEEP_ENV}=1: {project} kept until the next run (or `down -v` it)")
-        else:
-            _compose(project, env, "down", "-v", "--remove-orphans", "--timeout", "5")
+        stop(stack)
 
 
 def push_logs(loki_url: str, streams: list[dict[str, Any]], window_s: int = 1800) -> None:

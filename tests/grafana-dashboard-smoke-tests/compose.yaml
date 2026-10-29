@@ -65,7 +65,9 @@ services:
       - "127.0.0.1::3000"
     volumes:
       - ../../deploy/grafana/provisioning:/etc/grafana/provisioning-src:ro
-      - ../../deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+      # the versioned dashboards, as in production; the mutation tests point it at a folder
+      # with the generator's output (tests/support/grafana_stack.py, provision)
+      - ${SMOKE_GRAFANA_DASHBOARDS:-../../deploy/grafana/dashboards}:/etc/grafana/dashboards:ro
     depends_on:
       postgres:
         condition: service_healthy

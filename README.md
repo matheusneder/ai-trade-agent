@@ -24,6 +24,8 @@ uv run pytest -m live        # tests against Binance Testnet/Demo (need keys in 
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
+Mutation tests (mutmut, in Docker; minutes to hours per front) measure how much of the code the tests would notice going wrong: `uv run python -m scripts.mutation run unit` (also `integration`, `smoke-grafana`, `smoke-signoz`), see [`tests/mutation/README.md`](tests/mutation/README.md).
+
 ## Binance keys (Testnet / Demo)
 
 1. Generate an Ed25519 key pair locally and keep the private key **out of git** (the `secrets/` folder is ignored):
@@ -146,6 +148,7 @@ tests/integration/    integration tests (simulated Binance, Postgres in a contai
 tests/live/           tests against Testnet/Demo (`live` marker)
 tests/grafana-dashboard-smoke-tests/  E2E smoke tests of the Grafana dashboards (`e2e` marker)
 tests/signoz-dashboard-smoke-tests/  SigNoz dashboards end to end (Docker + Playwright; see its README)
+tests/mutation/       mutation tests of the suites above (mutmut; scripts/mutation.py runs them)
 scripts/              OPOCO spike and the Grafana and SigNoz dashboard generators
 lab/                  backtesting lab (Freqtrade through Docker, walk-forward)
 config/               allocation profiles (profiles.yaml) and analyst (research.yaml)

@@ -1,11 +1,18 @@
-"""PostgreSQL in a container (testcontainers) for the integration tests."""
+"""PostgreSQL in a container (testcontainers) for the integration tests.
+
+``TA_TEST_POSTGRES_SERVER`` (the URL of an ephemeral server's maintenance database, set by the
+mutation tests, see tests/mutation/README.md) gives each session a new database on that server
+instead of a container of its own: the mutation tests run thousands of short sessions.
+"""
 
 import asyncio
+import os
+import secrets
 import shutil
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.support.logs import image
@@ -16,6 +23,7 @@ TABLES = (
     "positions, intents, exchange_orders, fills, events, checkpoints, "
     "news_items, research_reports, llm_usage"
 )
+SERVER_ENV = "TA_TEST_POSTGRES_SERVER"
 
 
 async def _migrate(url: str) -> None:
@@ -24,7 +32,31 @@ async def _migrate(url: str) -> None:
     await engine.dispose()
 
 
+async def _create_or_drop(server: str, statement: str) -> None:
+    engine = create_async_engine(server, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text(statement))
+    finally:
+        await engine.dispose()
+
+
+def _database_on(server: str) -> Iterator[str]:
+    """A new, migrated database on ``server`` for this session, dropped at the end."""
+    name = f"ta_test_{os.getpid()}_{secrets.token_hex(4)}"
+    asyncio.run(_create_or_drop(server, f'CREATE DATABASE "{name}"'))
+    try:
+        url = make_url(server).set(database=name).render_as_string(hide_password=False)
+        asyncio.run(_migrate(url))
+        yield url
+    finally:
+        asyncio.run(_create_or_drop(server, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+
+
 def postgres_container_url() -> Iterator[str]:
+    if server := os.environ.get(SERVER_ENV):
+        yield from _database_on(server)
+        return
     if shutil.which("docker") is None:
         pytest.skip("Docker indisponível: testes com PostgreSQL ignorados")
     from testcontainers.community.postgres import PostgresContainer
@@ -52,6 +84,7 @@ async def terminate_lock_holder(db: Database, key: int) -> None:
             text(
                 "SELECT pg_terminate_backend(pid) FROM pg_locks"
                 " WHERE locktype = 'advisory' AND objid = :low AND classid = :high"
+                " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
             ).bindparams(low=key & 0xFFFFFFFF, high=key >> 32)
         )
         await admin.commit()

@@ -14,6 +14,10 @@ telemetry is sent, and Chromium (Playwright) checks every dashboard, panel and v
 >   `test_signoz_dashboards.py` (`EXPECTED_NUMBERS`, `EXPECTED_LEGENDS`, `EXPECTED_ROWS`).
 > - The tests evolve with the dashboards: a dashboard change is not done until this suite is
 >   green with it.
+> - A new test says which dashboards it reads: `@pytest.mark.dashboards("trade-agent-saude")`
+>   (`"*"`: all; bare: none), unless a `name` parameter tells it. The mutation tests run a
+>   mutant of the generator only against the tests of the dashboards it changes
+>   ([`tests/mutation/README.md`](../mutation/README.md)).
 
 ## Running
 
@@ -50,6 +54,7 @@ Variables:
 | `SIGNOZ_SMOKE_SEED` | `7` | seed of the synthetic data |
 | `SIGNOZ_SMOKE_HOURS` | `24` | length of the seeded window (≥ 4) |
 | `SIGNOZ_SMOKE_KEEP` | unset | `1` leaves the stack running after the tests |
+| `SIGNOZ_SMOKE_ATTACH` | unset | a JSON describing a stack already running, registered and seeded (`Attached` in `tests/support/signoz_smoke/fixtures.py`, the mutation tests): the session starts nothing, deletes the stack's dashboards and applies the generator's again |
 
 Playwright's own options work too (`--browser`, `--headed`, `--tracing retain-on-failure`,
 `--screenshot only-on-failure`, `--output`).

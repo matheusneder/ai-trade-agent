@@ -26,6 +26,8 @@ from trade_agent.persistence.models import (
     IntentRecord,
 )
 
+# no dashboard read here (the mutation tests leave these out for a mutant of the generator)
+pytestmark = pytest.mark.dashboards
 END = datetime(2026, 10, 16, 15, 7, 31, tzinfo=UTC)
 
 

@@ -44,6 +44,11 @@ dev = [
     "testcontainers[postgres]==4.15.0",
     "types-pyyaml==6.0.12.20260906",
 ]
+# mutation testing (tests/mutation/README.md): mutmut needs fork(), so on Windows it runs in
+# the Linux image of tests/mutation/Dockerfile; not in the default groups (CI, `uv sync`)
+mutation = [
+    "mutmut==3.8.1",
+]
 
 [build-system]
 requires = ["hatchling==1.32.4"]
@@ -73,6 +78,9 @@ ignore = [
 "scripts/**" = ["T201", "S101"]
 # constant SQL queries of the panels (no external input)
 "scripts/grafana_dashboards.py" = ["T201", "E501", "S608"]
+# the mutation runner: docker/git/mutmut subprocesses, a seeded sample, the imports of the
+# work copy only where they are used (it starts with the standard library alone)
+"scripts/mutation.py" = ["T201", "S101", "S603", "S607", "S108", "S311", "PLC0415"]
 "src/trade_agent/persistence/migrations/**" = ["E501"]
 "lab/freqtrade/**" = ["E501", "ARG002", "PLR0917"]
 
@@ -98,7 +106,7 @@ exclude = ['^tests/[^/]+-[^/]+/conftest\.py$']
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["talib", "talib.*", "testcontainers.*"]
+module = ["talib", "talib.*", "testcontainers.*", "mutmut", "mutmut.*"]
 ignore_missing_imports = true
 
 # the lab's report (D-044) is pandas analysis over exported trades: pandas-stubs' unions make
@@ -127,6 +135,7 @@ markers = [
     "e2e: end-to-end tests with Docker and a browser (Playwright); run by path, e.g. `uv run pytest tests/grafana-dashboard-smoke-tests`",
     "grafana: Grafana dashboard smoke tests (tests/grafana-dashboard-smoke-tests)",
     "signoz: SigNoz dashboard smoke tests (ephemeral SigNoz + Chromium); `uv run pytest tests/signoz-dashboard-smoke-tests`",
+    "dashboards(*ids): the dashboards a smoke test reads (`*`: all; none: no dashboard); the mutation tests run a mutant against the tests of the dashboards it changes",
 ]
 filterwarnings = ["error"]
 

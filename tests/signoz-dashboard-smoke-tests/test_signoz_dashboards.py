@@ -128,6 +128,7 @@ def open_board(
 
 
 # ================================================================== listing and loading
+@pytest.mark.dashboards("*")
 def test_dashboard_list_shows_every_dashboard(
     page: Page, browser_issues: BrowserIssues, dashboard_ids: dict[str, str]
 ) -> None:
@@ -230,6 +231,7 @@ def _fixed_window(query: dict[str, Any]) -> bool:
     return "clickhouse_sql" in json.dumps(query["compositeQuery"])
 
 
+@pytest.mark.dashboards("trade-agent-operacao")
 @pytest.mark.parametrize("relative", ["1h", "1w"])
 def test_daily_chart_ignores_the_time_range(
     open_board: Callable[[str], Dashboard], telemetry: Telemetry, relative: str
@@ -247,6 +249,7 @@ def test_daily_chart_ignores_the_time_range(
     assert others == {{"1h": 60, "1w": 7 * 24 * 60}[relative]}
 
 
+@pytest.mark.dashboards("*")
 def test_every_expectation_points_at_a_real_panel() -> None:
     """A renamed panel key must not leave its expectation silently unused."""
     keys = {key for board in BOARDS.values() for key in board["spec"]["panels"]}
@@ -279,6 +282,7 @@ def test_time_range_selector_reloads_the_panels(
         assert {round((q["end"] - q["start"]) / 60_000) for q in follow} == {minutes}
 
 
+@pytest.mark.dashboards("trade-agent-saude")
 def test_shorter_range_shows_fewer_requests(
     open_board: Callable[[str], Dashboard], telemetry: Telemetry
 ) -> None:
@@ -364,6 +368,7 @@ def test_legend_hides_and_shows_a_series(
     expect(item).to_have_attribute("aria-checked", "true")
 
 
+@pytest.mark.dashboards("trade-agent-conteineres")
 @pytest.mark.parametrize(("term", "key"), [("postgres", "cpu"), ("signoz", "memory")])
 def test_legend_search_filters_the_series(
     open_board: Callable[[str], Dashboard], telemetry: Telemetry, term: str, key: str
@@ -400,6 +405,7 @@ def test_variables_render_their_selector(
     expect(bar).to_contain_text(variable["spec"]["name"])
 
 
+@pytest.mark.dashboards("trade-agent-llm")
 def test_seeded_window_is_the_time_range(
     open_board: Callable[[str], Dashboard], window: tuple[int, int]
 ) -> None:

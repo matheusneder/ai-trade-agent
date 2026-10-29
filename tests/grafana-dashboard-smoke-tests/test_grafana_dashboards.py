@@ -60,6 +60,7 @@ def test_dashboard_loads_with_data_in_every_panel(grafana: GrafanaPage, uid: str
             expect(element.get_by_role("row").nth(1)).to_be_visible()  # header + data
 
 
+@pytest.mark.dashboards("ta-overview")
 def test_overview_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     expected = seeded.expected
@@ -128,6 +129,7 @@ def _same(found: Series, expected: Series) -> None:
         assert [v for _, v in found[scope]] == pytest.approx([v for _, v in points], abs=1e-9)
 
 
+@pytest.mark.dashboards
 def test_daily_scope_pnl_restarts_at_the_utc_midnight(stack: Stack, seeded: Dataset) -> None:
     """Around the seeded midnight: the day before keeps its series up to 23:59:59, nothing
     shows before the day's first snapshot, which starts the day at zero."""
@@ -144,6 +146,7 @@ def test_daily_scope_pnl_restarts_at_the_utc_midnight(stack: Stack, seeded: Data
     _same(_daily_at(stack, seeded.end), daily_scope_series(seeded, seeded.end))
 
 
+@pytest.mark.dashboards("ta-positions")
 def test_positions_match_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     open_dashboard(page, watch, "ta-positions")
@@ -160,6 +163,7 @@ def test_positions_match_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None
     assert exposure[-1] == pytest.approx(seeded.expected.exposure, abs=1e-6)
 
 
+@pytest.mark.dashboards("ta-performance")
 def test_performance_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     expected = seeded.expected
@@ -186,6 +190,7 @@ def test_performance_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> 
     assert {(p, s): n for p, s, n in found} == expected.by_profile_symbol
 
 
+@pytest.mark.dashboards("ta-research")
 def test_research_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     expected = seeded.expected
@@ -236,6 +241,7 @@ def test_research_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
         ).to_be_visible()
 
 
+@pytest.mark.dashboards("ta-health")
 def test_health_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     open_dashboard(page, watch, "ta-health")
@@ -260,6 +266,7 @@ def test_health_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     assert max(errors) > 20  # the burst that paused the global scope
 
 
+@pytest.mark.dashboards("ta-logs")
 def test_logs_match_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     open_dashboard(page, watch, "ta-logs")

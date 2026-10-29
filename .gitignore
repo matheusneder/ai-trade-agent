@@ -46,3 +46,7 @@ lab/freqtrade/user_data/config.*.json
 lab/freqtrade/user_data/strategies/*.json
 lab/freqtrade/user_data/strategies/*.jsonl
 lab/freqtrade/user_data/*.lock
+
+# Mutation tests (scripts/mutation.py): work copies and reports; mutmut's tree
+.mutation/
+mutants/
