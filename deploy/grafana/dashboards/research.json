@@ -37,7 +37,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, CASE WHEN jsonb_typeof(payload->'regime') = 'object' THEN CASE WHEN (payload->'regime'->>'up')::bool THEN 'alta' ELSE 'baixa' END END AS regime, (payload->>'setups')::int AS setups, payload->>'stop_noise' AS ruido_d039, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
+          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, CASE WHEN jsonb_typeof(payload->'regime') = 'object' THEN CASE WHEN (payload->'regime'->>'up')::bool THEN 'alta' ELSE 'baixa' END END AS regime, (payload->>'setups')::int AS setups, payload->>'stop_noise' AS ruido_d039, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas, COALESCE(payload->>'family', 'legacy') AS familia, COALESCE((payload->>'regime_filter')::bool, true) AS usa_filtro, payload->>'filtered' AS filtrados FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
         }
       ],
       "fieldConfig": {
@@ -86,7 +86,7 @@
     {
       "type": "table",
       "title": "Setups e filtros por perfil",
-      "description": "Por perfil, no período: ciclos de decisão, setups encontrados, setups que só o filtro de stop no ruído (D-039) removeu, entradas abertas e ciclos com o regime em baixa (sem setup possível).",
+      "description": "Por perfil, no período: família de estratégia (D-044), se usa o filtro de regime, ciclos de decisão, setups encontrados, setups que só o filtro de stop no ruído (D-039) removeu, padrões que um filtro da família local descartou, entradas abertas e ciclos com o regime em baixa (sem setup possível quando usa_filtro).",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "trade-agent-pg"
@@ -107,7 +107,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa, max(COALESCE(payload->>'family', 'legacy')) AS familia, bool_and(COALESCE((payload->>'regime_filter')::bool, true)) AS usa_filtro, sum(COALESCE(jsonb_array_length(payload->'filtered'), 0)) AS filtrados FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {

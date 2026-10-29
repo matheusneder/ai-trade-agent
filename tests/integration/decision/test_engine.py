@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import math
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -43,7 +44,7 @@ from trade_agent.research.config import WebResearchConfig
 from trade_agent.research.reading import MarketReading
 from trade_agent.research.service import ResearchService
 from trade_agent.research.tagging import AssetTagger
-from trade_agent.risk.guard import RiskGuard
+from trade_agent.risk.guard import RiskGuard, ScopeSpec
 from trade_agent.risk.state import GLOBAL, StateStore
 from trade_agent.signals import FeatureParams, compute_features, evaluate
 from trade_agent.strategy.portfolio import MarketOpinion
@@ -112,6 +113,7 @@ def _engine(
     clock: Clock | None = None,
     alerts: list[str] | None = None,
     research_wait: timedelta = engine_module.SHARED_RESEARCH_WAIT,
+    scopes: Mapping[str, ScopeSpec] | None = None,
 ) -> tuple[DecisionEngine, RiskGuard]:
     async def notify(severity: Severity, text: str) -> None:
         if alerts is not None:
@@ -119,7 +121,12 @@ def _engine(
 
     clock = clock or Clock()
     guard = RiskGuard(
-        conditions=CONDITIONS, states=StateStore(store), store=store, notify=notify, clock=clock
+        conditions=CONDITIONS,
+        states=StateStore(store),
+        store=store,
+        notify=notify,
+        clock=clock,
+        scopes=scopes,
     )
     engine = DecisionEngine(
         api=api,

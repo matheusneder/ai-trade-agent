@@ -221,6 +221,8 @@ def test_list_panels_show_the_seeded_rows(
     header = board.panel(key).locator("thead")
     for field in fields:
         expect(header).to_contain_text(field["name"])
+    if key == "last-cycles":  # the family and the filter flag of each cycle (D-044)
+        expect(board.panel(key).locator("tbody")).to_contain_text("legacy")
 
 
 def _fixed_window(query: dict[str, Any]) -> bool:

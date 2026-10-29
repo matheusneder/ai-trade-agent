@@ -7,8 +7,13 @@ services:
   freqtrade:
     image: freqtradeorg/freqtrade:2026.9@sha256:989aff5636d8f0213ed44fe334c3314a194a51c0c755d16866960247aafd2eae
     working_dir: /freqtrade
+    # one network per run would exhaust Docker's address pools with parallel runs
+    network_mode: bridge
     volumes:
-      - ./user_data:/freqtrade/user_data
+      # TA_LAB_USER_DATA (absolute) gives a run its own parameters and results, and
+      # TA_LAB_DATA (absolute) the candles they share, so runs can go in parallel
+      - ${TA_LAB_USER_DATA:-./user_data}:/freqtrade/user_data
+      - ${TA_LAB_DATA:-./user_data/data}:/freqtrade/user_data/data
       # the same signals package used in production; TA_LAB_SRC points to another copy
       # (e.g. a git worktree of another commit) for A/B comparisons
       - ${TA_LAB_SRC:-../../src}:/opt/trade_agent_src:ro

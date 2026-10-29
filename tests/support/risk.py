@@ -68,6 +68,7 @@ async def closed_position(
     pnl: str,
     closed_at: datetime,
     symbol: str = "BTCUSDT",
+    exit_reason: str | None = None,
 ) -> Position:
     decision = f"{next(_decisions):010x}"
     position, _ = await store.create_position(
@@ -85,5 +86,9 @@ async def closed_position(
         intent_payload={},
     )
     return await store.update_position(
-        position.id, state=PositionState.CLOSED, realized_pnl=D(pnl), closed_at=closed_at
+        position.id,
+        state=PositionState.CLOSED,
+        realized_pnl=D(pnl),
+        closed_at=closed_at,
+        exit_reason=exit_reason,
     )

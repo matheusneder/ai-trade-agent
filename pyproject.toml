@@ -91,7 +91,7 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 mypy_path = "src"
-files = ["src", "tests", "scripts", "lab/walk_forward.py", "lab/paper.py"]
+files = ["src", "tests", "scripts", "lab/walk_forward.py", "lab/paper.py", "lab/experiments.py"]
 # the conftest.py of the E2E folders (dashed names are not packages: both would be module
 # "conftest"); they only re-export the fixtures typed in tests/support
 exclude = ['^tests/[^/]+-[^/]+/conftest\.py$']
@@ -100,6 +100,12 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["talib", "talib.*", "testcontainers.*"]
 ignore_missing_imports = true
+
+# the lab's report (D-044) is pandas analysis over exported trades: pandas-stubs' unions make
+# strict typing there mostly casts; its tests cover the computations instead
+[[tool.mypy.overrides]]
+module = ["lab.report"]
+ignore_errors = true
 
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]

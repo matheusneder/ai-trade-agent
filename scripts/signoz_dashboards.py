@@ -317,8 +317,10 @@ def dashboard(
 
 REGIME_HELP = (
     "Fechamento do BTC no candle do último ciclo de decisão acima (+) ou abaixo (−) da EMA200, "
-    "em %. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra: "
-    "nenhum perfil abre posição até o BTC fechar acima da EMA200."
+    "em %. Abaixo de zero, o filtro de regime (D-016) bloqueia os setups de compra dos perfis "
+    'que usam o filtro (regime_filter em "Últimos ciclos de decisão"): esses não abrem '
+    "posição até o BTC fechar acima da EMA200. Perfis de família local (D-044) decidem pelos "
+    "candles do próprio par e não leem este filtro."
 )
 
 
@@ -629,6 +631,8 @@ def _operation() -> Json:
                                     key("state", "attribute"),
                                     key("evaluated", "attribute"),
                                     key("research", "attribute"),
+                                    key("family", "attribute"),
+                                    key("regime_filter", "attribute"),
                                 ],
                             ),
                             12,

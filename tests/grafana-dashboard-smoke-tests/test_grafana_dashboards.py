@@ -202,6 +202,12 @@ def test_research_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
     columns = ("ciclos", "setups", "ruido_d039", "entradas", "ciclos_regime_baixa")
     found = zip(setups.column("perfil"), *(setups.column(c) for c in columns), strict=True)
     assert {profile: tuple(values) for profile, *values in found} == totals
+    # the family and the filter flag of each profile (D-044); old cycles count as legacy
+    families = ("familia", "usa_filtro", "filtrados")
+    found = zip(setups.column("perfil"), *(setups.column(c) for c in families), strict=True)
+    assert {profile: tuple(values) for profile, *values in found} == expected.families_by_profile
+    assert set(cycles.column("familia")) == {"legacy"}
+    assert set(cycles.column("usa_filtro")) == {True}
     flips = _result(watch, "ta-research", "Viradas de regime")
     assert flips.rows == expected.regime_changes
     assert flips.column("anterior") == ["baixa", "alta", "primeira leitura"]  # newest first

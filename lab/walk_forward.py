@@ -9,6 +9,15 @@ With ``--optimize``, each validation window is preceded by a *hyperopt* on the p
 unchanged, to the next window. The parameters that define the profile's risk (maximum stop,
 risk per trade, maximum size) are never optimized.
 
+Every value of the profile reaches the strategy (D-044): the Freqtrade parameters, which
+*hyperopt* may change, and ``trade_agent_profile.json``, the rest of the profile (all the
+signal parameters of its family, the pair-local take-profit options, the scope's risk budget
+and the capital model). The strategy writes back the values it used
+(``trade_agent_effective.json``) and every window checks them against the profile.
+
+``TA_LAB_USER_DATA`` and ``TA_LAB_DATA`` (absolute paths) give a run its own ``user_data``
+(parameter files and results) over the shared candles, so runs can go in parallel.
+
 Usage::
 
     uv run python -m lab.walk_forward --profile swing_trend --optimize --download
@@ -37,19 +46,28 @@ from trade_agent.execution.orders import StopMode
 from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.market.universe import Tier, UniverseConfig
 from trade_agent.risk.conditions import PreTradeConfig, load_stop_conditions
-from trade_agent.signals import FeatureParams
+from trade_agent.signals import FeatureParams, SignalParams
 from trade_agent.strategy.profiles import ProfileConfig, StrategyConfig, load_strategy_config
 
 ROOT = Path(__file__).resolve().parents[1]
 LAB = ROOT / "lab" / "freqtrade"
-USER_DATA = LAB / "user_data"
+USER_DATA = Path(os.environ.get("TA_LAB_USER_DATA", LAB / "user_data"))
 COMPOSE = LAB / "docker-compose.yml"
 OUTPUT = ROOT / "var" / "lab"
 STRATEGY = "TradeAgentStrategy"
 # Freqtrade reads the parameters from the JSON named after the strategy's *file*.
 PARAMS_FILE = "trade_agent_strategy.json"
+PROFILE_FILE = "trade_agent_profile.json"
+"""The rest of the profile, read by the strategy (D-044)."""
+EFFECTIVE_FILE = "trade_agent_effective.json"
+"""The values the strategy used, written by it on each run."""
+EVENTS_FILE = "trade_agent_events.jsonl"
+"""The strategy's errors (Freqtrade swallows some), scope pauses and refused entries."""
+CAPITAL_MODELS = ("wallet", "operational")
+"""``wallet``: size from Freqtrade's current wallet (compounding, the lab until D-044);
+``operational``: from the profile's configured capital, as the agent's planner."""
 BENCHMARK = "BTC/USDT"
-DATA = USER_DATA / "data" / "binance"
+DATA = Path(os.environ.get("TA_LAB_DATA", USER_DATA / "data")) / "binance"
 OPTIMIZED_SPACES = ("buy", "sell")
 # They define the profile's risk: never optimized (optimize=False in the strategy).
 # Risk, the agent's decision exits and the ATR-based TP activation come from the profile.
@@ -67,7 +85,6 @@ RISK_PARAMS = frozenset(
         "execution_slippage",
         "cost_adjusted",
         "trailing_floor",
-        "min_stop_atr",
         "universe_min_volume",
     }
 )
@@ -203,11 +220,20 @@ def strategy_params(
 ) -> dict[str, Any]:
     """Content of ``trade_agent_strategy.json`` (Freqtrade's parameter format). ``pre_trade``
     (``config/stop_conditions.yaml``) gives the Risk Guard's minimum R:R; ``min_volume`` > 0
-    emulates the universe's minimum 24h quote volume (see ``universe_pairs``)."""
+    emulates the universe's minimum 24h quote volume (see ``universe_pairs``). A pair-local
+    family carries its own signal parameters in :func:`profile_manifest`; here the legacy
+    ones keep their defaults, unused."""
     pre_trade = pre_trade or PreTradeConfig()
-    signals = profile.signal_params()
     protection = profile.protection
     stop, take_profit = protection.stop, protection.take_profit
+    if profile.family.local:
+        signals = dataclasses.replace(
+            SignalParams(),
+            atr_stop_mult=float(stop.atr_mult or 0),
+            max_stop_pct=float(stop.max_pct or 0) / 100,
+        )
+    else:
+        signals = profile.signal_params()
     if stop.mode is StopMode.FIXED:  # already reflected in signal_params()
         stop_max, atr_mult = signals.max_stop_pct, signals.atr_stop_mult
     else:  # approximation: trailing stop modeled as a fixed stop at the trailing distance
@@ -228,7 +254,6 @@ def strategy_params(
                 "execution_slippage": pre_trade.slippage_pct / 100,
                 "cost_adjusted": int(pre_trade.risk_model == "cost_adjusted"),
                 "trailing_floor": int(pre_trade.reward_model == "trailing_floor"),
-                "min_stop_atr": signals.min_stop_atr or 0.0,
                 "universe_min_volume": min_volume,
             },
             "sell": {
@@ -256,6 +281,106 @@ def strategy_params(
         "ft_stratparam_v": 1,
         "export_time": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f+00:00"),
     }
+
+
+def profile_manifest(
+    profile: ProfileConfig,
+    capital: Decimal,
+    capital_model: str = "wallet",
+    pre_trade: PreTradeConfig | None = None,
+) -> dict[str, Any]:
+    """Content of ``trade_agent_profile.json``: what the Freqtrade parameters do not carry.
+
+    ``signals`` holds every field of the family's parameters (``SignalParams`` or the
+    pair-local ones), so an option of the profile can never be dropped on the way: the
+    strategy rebuilds them with the dataclass, which refuses unknown fields."""
+    if capital_model not in CAPITAL_MODELS:
+        raise ValueError(f"modelo de capital desconhecido: {capital_model}")
+    pre_trade = pre_trade or PreTradeConfig()
+    take_profit, risk = profile.protection.take_profit, profile.risk
+    params = profile.local_params() if profile.family.local else profile.signal_params()
+    allocation = profile.allocation
+    return {
+        "family": profile.family.value,
+        "timeframe": profile.timeframe,
+        "signals": dataclasses.asdict(params),
+        "take_profit": {
+            "mode": take_profit.mode.value,
+            "activation_r": take_profit.activation_r,
+            "trailing_atr_mult": take_profit.trailing_atr_mult,
+            "signal_target": take_profit.signal_target,
+        },
+        "risk": None
+        if risk is None
+        else {
+            "cost_pct": float(risk.cost_pct),
+            "max_open_risk_pct": None
+            if risk.max_open_risk_pct is None
+            else float(risk.max_open_risk_pct),
+            "daily_loss_pct": None if risk.daily_loss_pct is None else float(risk.daily_loss_pct),
+            "consecutive_losses": risk.consecutive_losses,
+            "cooldown_hours": risk.cooldown.total_seconds() / 3600,
+            "max_drawdown_pct": None
+            if risk.max_drawdown_pct is None
+            else float(risk.max_drawdown_pct),
+            "reentry_candles": risk.reentry_candles,
+        },
+        "capital_model": capital_model,
+        "capital": float(capital),
+        "cash_reserve": float(allocation.cash_reserve_pct),
+        "pre_trade": pre_trade.model_dump(mode="json"),
+        "not_simulated": [
+            "llm",
+            "global stop conditions",
+            "tier limits",
+            "universe tier ranking",
+        ],
+    }
+
+
+EFFECTIVE_SPACES = ("buy", "sell")
+LEGACY_PARAMS = {
+    "adx_min": ("buy", "adx_min"),
+    "rsi_pullback_max": ("buy", "rsi_pullback_max"),
+    "vol_rel_min": ("buy", "vol_rel_min"),
+    "atr_stop_mult": ("sell", "atr_stop_mult"),
+    "max_stop_pct": ("sell", "stop_max_pct"),
+}
+"""``SignalParams`` fields the legacy strategy takes from Freqtrade's parameters (*hyperopt*)."""
+
+
+def expected_profile(params: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """The manifest as the strategy must rebuild it: in the legacy family, the signal
+    parameters that *hyperopt* may change come from Freqtrade's parameters."""
+    if manifest["family"] != "legacy":
+        return manifest
+    signals = dict(manifest["signals"])
+    for field_name, (space, name) in LEGACY_PARAMS.items():
+        signals[field_name] = float(params["params"][space][name])
+    return {**manifest, "signals": signals}
+
+
+def check_effective(
+    params: dict[str, Any], manifest: dict[str, Any], effective: dict[str, Any]
+) -> None:
+    """The values the strategy used must be the profile's: every Freqtrade parameter and every
+    entry of the manifest (raises otherwise)."""
+    manifest = expected_profile(params, manifest)
+    problems = [
+        f"{space}.{name}: {effective['params'].get(space, {}).get(name)!r} != {value!r}"
+        for space in EFFECTIVE_SPACES
+        for name, value in params["params"][space].items()
+        if not math.isclose(
+            float(effective["params"].get(space, {}).get(name, math.nan)), float(value)
+        )
+    ]
+    problems += [
+        f"{key}: {effective['profile'].get(key)!r} != {value!r}"
+        for key, value in manifest.items()
+        if effective["profile"].get(key) != value
+    ]
+    if problems:
+        raise ValueError("a estratégia não usou os valores do perfil: " + "; ".join(problems))
 
 
 def chosen_params(exported: dict[str, Any]) -> dict[str, float]:
@@ -410,20 +535,45 @@ def _write_params(params: dict[str, Any]) -> None:
     _params_file().write_text(json.dumps(params, indent=2), encoding="utf-8")
 
 
+def _write_manifest(manifest: dict[str, Any]) -> None:
+    path = USER_DATA / "strategies" / PROFILE_FILE
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def _read_effective() -> dict[str, Any]:
+    """The values the strategy used and its events (raises on an error it logged)."""
+    path = USER_DATA / "strategies" / EFFECTIVE_FILE
+    effective: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    path.unlink()
+    events_path = USER_DATA / "strategies" / EVENTS_FILE
+    lines = events_path.read_text(encoding="utf-8").splitlines() if events_path.exists() else []
+    events = [json.loads(line) for line in lines if line]
+    errors = [e for e in events if e["kind"] == "error"]
+    if errors:
+        raise RuntimeError(f"erro na estratégia: {errors[0]}")
+    effective["events"] = events
+    return effective
+
+
 def prepare(
     config: StrategyConfig,
     profile_name: str,
     pairs: Sequence[str] | None = None,
     pre_trade: PreTradeConfig | None = None,
     min_volume: float = 0.0,
+    *,
+    capital_model: str = "wallet",
 ) -> str:
-    """Writes ``config.<profile>.json`` and ``trade_agent_strategy.json``; returns its path."""
+    """Writes ``config.<profile>.json``, ``trade_agent_strategy.json`` and
+    ``trade_agent_profile.json``; returns the first one's path."""
     profile = config.profiles[profile_name]
-    base = json.loads((USER_DATA / "config.base.json").read_text(encoding="utf-8"))
-    generated = lab_config(base, profile, config.profile_capital(profile_name), pairs)
+    capital = config.profile_capital(profile_name)
+    base = json.loads((LAB / "user_data" / "config.base.json").read_text(encoding="utf-8"))
+    generated = lab_config(base, profile, capital, pairs)
     config_file = USER_DATA / f"config.{profile_name}.json"
     config_file.write_text(json.dumps(generated, indent=2), encoding="utf-8")
     _write_params(strategy_params(profile, pre_trade, min_volume))
+    _write_manifest(profile_manifest(profile, capital, capital_model, pre_trade))
     return f"user_data/{config_file.name}"
 
 
@@ -481,6 +631,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="timeframe das saídas dentro do candle (padrão: 5m)",
     )
     parser.add_argument(
+        "--capital-model",
+        default="wallet",
+        choices=CAPITAL_MODELS,
+        help="tamanho pelo saldo corrente (wallet) ou pelo capital do perfil (operational)",
+    )
+    parser.add_argument(
+        "--fee", type=float, help="taxa por lado (ex.: 0.0015), no lugar da do config.base.json"
+    )
+    parser.add_argument(
+        "--label", default="", help="sufixo do nome do relatório (ex.: variante do experimento)"
+    )
+    parser.add_argument(
         "--exploratory-no-detail",
         action="store_true",
         help="desativa detalhe intrabar; resultado exploratório, impróprio para aprovação",
@@ -491,51 +653,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-
-    strategy_config = load_strategy_config(args.profiles_file)
-    profile = strategy_config.profiles[args.profile]
-    pre_trade = load_stop_conditions(args.stop_conditions).pre_trade
-    if pre_trade.max_portfolio_risk_pct or pre_trade.max_portfolio_exposure_pct:
-        raise ValueError(
-            "portfolio limits require the portfolio replay, not independent Freqtrade windows"
-        )
-    pairs, min_volume = universe_pairs(profile, args.pairs, args.alts)
-    config_path = prepare(strategy_config, args.profile, pairs, pre_trade, min_volume)
-    periods = windows(args.start, args.end, args.window_months)
-    if args.download:
-        history = warmup_months(profile.timeframe) + (args.train_months if args.optimize else 0)
-        warmup_start = add_months(args.start.replace(day=1), -history)
-        _freqtrade(
-            "download-data", "--config", config_path, "--timerange",
-            f"{warmup_start:%Y%m%d}-{args.end:%Y%m%d}", "-t", profile.timeframe,
-            *([args.detail] if args.detail else []),
-            "--pairs", *dict.fromkeys([*(pairs or profile_pairs(profile)), BENCHMARK]),
-        )  # fmt: skip
-    mode = (
-        ("otimizado" if args.optimize else "fixo")
-        + (f"-detalhe{args.detail}" if args.detail else "")
-        + ("-pares" if args.pairs else "")
-        + ("-alts" if args.alts else "")
-    )
-    btc_file = DATA / f"{BENCHMARK.replace('/', '_')}-{profile.timeframe}.json.gz"
-    results: list[WindowResult] = []
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
-    for index, (start, end) in enumerate(periods):
-        chosen: dict[str, float] = {}
-        if args.optimize:
-            chosen = optimize(profile, config_path, train_range(start, args.train_months), args)
-        directory = f"user_data/backtest_results/wf-{args.profile}-{mode}-{stamp}-{index:02d}"
-        (LAB / directory).mkdir(parents=True, exist_ok=True)
-        _freqtrade(
-            "backtesting", "--config", config_path, "--strategy", STRATEGY,
-            "--timerange", timerange(start, end), "--export", "trades",
-            "--backtest-directory", directory, "--cache", "none", *detail_args(args.detail),
-        )  # fmt: skip
-        result = parse_result(latest_result(LAB / directory), start, end)
-        btc = buy_and_hold_pct(btc_file, start, end)
-        results.append(dataclasses.replace(result, btc_pct=btc, params=chosen))
+def _subtitle(args: argparse.Namespace, min_volume: float) -> str:
     subtitle = (
         f"Parâmetros otimizados ({args.loss}, {args.epochs} épocas) nos {args.train_months} "
         "meses anteriores a cada janela e aplicados sem ajuste na janela."
@@ -553,18 +671,92 @@ def main(argv: Sequence[str] | None = None) -> int:
             f" Com {len(ALTS)} alts voláteis, cada par só opera com volume de 24h ≥ "
             f"{min_volume / 1e6:g} mi USDT (universo do agente)."
         )
+    if args.capital_model == "operational":
+        subtitle += " Tamanho pelo capital configurado do perfil, sem reinvestir o resultado."
+    if args.fee is not None:
+        subtitle += f" Taxa de {args.fee * 100:g}% por lado."
+    return subtitle
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    strategy_config = load_strategy_config(args.profiles_file)
+    profile = strategy_config.profiles[args.profile]
+    pre_trade = load_stop_conditions(args.stop_conditions).pre_trade
+    if pre_trade.max_portfolio_risk_pct or pre_trade.max_portfolio_exposure_pct:
+        raise ValueError(
+            "portfolio limits require the portfolio replay, not independent Freqtrade windows"
+        )
+    pairs, min_volume = universe_pairs(profile, args.pairs, args.alts)
+    model = args.capital_model
+    config_path = prepare(
+        strategy_config, args.profile, pairs, pre_trade, min_volume, capital_model=model
+    )
+    manifest = profile_manifest(
+        profile, strategy_config.profile_capital(args.profile), args.capital_model, pre_trade
+    )
+    periods = windows(args.start, args.end, args.window_months)
+    if args.download:
+        history = warmup_months(profile.timeframe) + (args.train_months if args.optimize else 0)
+        warmup_start = add_months(args.start.replace(day=1), -history)
+        _freqtrade(
+            "download-data", "--config", config_path, "--timerange",
+            f"{warmup_start:%Y%m%d}-{args.end:%Y%m%d}", "-t", profile.timeframe,
+            *([args.detail] if args.detail else []),
+            "--pairs", *dict.fromkeys([*(pairs or profile_pairs(profile)), BENCHMARK]),
+        )  # fmt: skip
+    mode = (
+        ("otimizado" if args.optimize else "fixo")
+        + (f"-detalhe{args.detail}" if args.detail else "")
+        + ("-pares" if args.pairs else "")
+        + ("-alts" if args.alts else "")
+        + ("-capital" if args.capital_model == "operational" else "")
+        + (f"-fee{args.fee:g}" if args.fee is not None else "")
+        + (f"-{args.label}" if args.label else "")
+    )
+    btc_file = DATA / f"{BENCHMARK.replace('/', '_')}-{profile.timeframe}.json.gz"
+    results: list[WindowResult] = []
+    effective: list[dict[str, Any]] = []
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+    fee = ["--fee", str(args.fee)] if args.fee is not None else []
+    for index, (start, end) in enumerate(periods):
+        chosen: dict[str, float] = {}
+        if args.optimize:
+            chosen = optimize(profile, config_path, train_range(start, args.train_months), args)
+        directory = f"backtest_results/wf-{args.profile}-{mode}-{stamp}-{index:02d}"
+        (USER_DATA / directory).mkdir(parents=True, exist_ok=True)
+        _freqtrade(
+            "backtesting", "--config", config_path, "--strategy", STRATEGY,
+            "--timerange", timerange(start, end), "--export", "trades",
+            "--backtest-directory", f"user_data/{directory}", "--cache", "none",
+            *detail_args(args.detail), *fee,
+        )  # fmt: skip
+        used = _read_effective()
+        check_effective(json.loads(_params_file().read_text(encoding="utf-8")), manifest, used)
+        effective.append(used)
+        result = parse_result(latest_result(USER_DATA / directory), start, end)
+        btc = buy_and_hold_pct(btc_file, start, end)
+        results.append(dataclasses.replace(result, btc_pct=btc, params=chosen))
+    subtitle = _subtitle(args, min_volume)
     report = summarize(args.profile, results, subtitle)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     name = f"walk-forward-{args.profile}-{mode}-{stamp}.md"
     (OUTPUT / name).write_text(report, encoding="utf-8")
-    write_manifest(OUTPUT / name.replace(".md", ".json"), args, results)
+    write_manifest(OUTPUT / name.replace(".md", ".json"), args, results, effective)
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"  # e.g. cp1252 on Windows
     sys.stdout.write(report.encode(encoding, errors="replace").decode(encoding))
     return 0
 
 
-def write_manifest(path: Path, args: argparse.Namespace, results: list[WindowResult]) -> None:
-    """Hash configuration, implementation and available data; never include environment secrets."""
+def write_manifest(
+    path: Path,
+    args: argparse.Namespace,
+    results: list[WindowResult],
+    effective: list[dict[str, Any]] | None = None,
+) -> None:
+    """Hash configuration, implementation and available data, and the values the strategy
+    used in each window; never include environment secrets."""
     source_root = Path(os.environ.get("TA_LAB_SRC", str(ROOT / "src")))
     if not source_root.is_absolute():
         source_root = (LAB / source_root).resolve()
@@ -587,6 +779,7 @@ def write_manifest(path: Path, args: argparse.Namespace, results: list[WindowRes
         "args": vars(args),
         "sha256": hashes,
         "results": [dataclasses.asdict(r) for r in results],
+        "effective": effective or [],
         "validation": "exploratory" if not args.detail else "intrabar_simulation",
         "limitations": [
             "static universe",

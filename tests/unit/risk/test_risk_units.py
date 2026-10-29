@@ -25,6 +25,7 @@ from trade_agent.risk.guard import (
     evaluate,
     pre_trade_violations,
 )
+from trade_agent.risk.scope import REENTRY, ScopeLimits, ScopeRisk
 from trade_agent.risk.state import GLOBAL, Fired, OpState, ScopeState, combined, escalate
 from trade_agent.strategy.portfolio import TradeIdea
 from trade_agent.strategy.profiles import load_strategy_config
@@ -265,3 +266,11 @@ def test_pre_trade_rejections() -> None:
         stop_mode=StopMode.TRAILING, stop_pct=None, stop_trailing_bips=300, take_profit_pct=D(8)
     )
     assert _violations(trailing_stop) == []
+
+
+def test_pre_trade_refuses_what_the_profiles_budget_blocks() -> None:
+    scope = ScopeRisk(ScopeLimits(capital=500, reentry=timedelta(hours=12)))
+    assert _violations(_idea(), scope=scope) == []
+    scope.closed(NOW - timedelta(hours=1), "BTCUSDT", -2.0, stop=True)
+    assert _violations(_idea(), scope=scope) == [REENTRY]
+    assert _violations(_idea(), scope=scope, now=NOW + timedelta(hours=11)) == []

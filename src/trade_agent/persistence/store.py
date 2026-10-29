@@ -223,7 +223,7 @@ class Store:
             return [_to_position(r) for r in records]
 
     async def closed_positions(
-        self, *, limit: int | None = 1000, since: datetime | None = None
+        self, *, limit: int | None = 1000, since: datetime | None = None, profile: str | None = None
     ) -> list[Position]:
         """Closed positions with a settled result, from the most recent to the oldest."""
         async with self.db.session() as session:
@@ -233,6 +233,7 @@ class Store:
                     PositionRecord.state == PositionState.CLOSED.value,
                     PositionRecord.realized_pnl.is_not(None),
                     *([PositionRecord.closed_at >= since] if since is not None else []),
+                    *([PositionRecord.profile == profile] if profile is not None else []),
                 )
                 .order_by(PositionRecord.closed_at.desc(), PositionRecord.id.desc())
                 .limit(limit)

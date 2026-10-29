@@ -8,7 +8,10 @@ Rules (doc 03, §6.3):
   per asset";
 * size = ``capital × risk_per_trade / stop_distance``, capped by ``max_position_pct``,
   the budget and the *tier* limit, and scaled by the ``exposure_multiplier`` (market
-  regime).
+  regime);
+* pair-local profiles (D-044) size with their own round-trip cost
+  (``risk.cost_pct``), cap the sum of their open initial risk (``risk.max_open_risk_pct``)
+  and drop a signal whose executable price ran past ``Signal.max_entry_price``.
 """
 
 from collections.abc import Sequence
@@ -33,6 +36,8 @@ class Holding:
     symbol: str
     tier: Tier
     cost: Decimal
+    risk: Decimal = Decimal(0)
+    """Initial risk with costs (quote asset); only the pair-local profiles read it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +94,42 @@ class PlanResult:
     """``(symbol, reason)`` pairs, for auditing the decisions."""
 
 
+def _rejection(
+    candidate: Candidate,
+    profile: ProfileConfig,
+    score: Decimal,
+    *,
+    held: set[str],
+    exposure_multiplier: Decimal,
+    slots: int,
+) -> str | None:
+    """Why the candidate cannot be an entry (``None``: it can)."""
+    signal = candidate.signal
+    if profile.llm.enabled and candidate.opinion is not None and candidate.opinion.veto:
+        return "veto do analista"
+    if signal.setup is None:
+        return "sem setup"
+    if score < Decimal(str(profile.entry.min_score)):
+        return "score abaixo do mínimo"
+    if signal.max_entry_price is not None and candidate.ask > Decimal(str(signal.max_entry_price)):
+        return "preço já avançou além do limite do sinal"
+    if candidate.member.symbol in held:
+        return "ativo já em carteira"
+    if exposure_multiplier <= 0:  # reading with zero exposure, or on_failure: pause_entries
+        return "exposição zero"
+    if slots <= 0:
+        return "sem vagas no perfil"
+    return None
+
+
+def _policy(
+    profile: ProfileConfig, signal: Signal, stop_pct: Decimal, cost_pct: Decimal
+) -> ProtectionPolicy:
+    target = None if signal.target_pct is None else Decimal(str(signal.target_pct)) * PCT
+    atr_pct = Decimal(str(signal.atr_pct)) * PCT
+    return profile.protection.policy(stop_pct, atr_pct, cost_pct=cost_pct, target_pct=target)
+
+
 def plan_entries(
     *,
     name: str,
@@ -102,6 +143,7 @@ def plan_entries(
 ) -> PlanResult:
     if execution_cost_pct < 0:
         raise ValueError("execution_cost_pct must be nonnegative")
+    execution_cost_pct = profile.cost_pct(execution_cost_pct)
     own = [h for h in holdings if h.profile == name]
     held = {h.symbol for h in (holdings if one_position_per_asset else own)}
     allocation = profile.allocation
@@ -112,6 +154,8 @@ def plan_entries(
     budget = capital * (1 - allocation.cash_reserve_pct) - sum((h.cost for h in own), ZERO)
     tier_used = {tier: sum((h.cost for h in own if h.tier is tier), ZERO) for tier in Tier}
     risk_budget = capital * allocation.risk_per_trade_pct / PCT
+    max_open = profile.risk.max_open_risk_pct if profile.risk is not None else None
+    open_room = capital * max_open / PCT - sum((h.risk for h in own), ZERO) if max_open else None
 
     ideas: list[TradeIdea] = []
     rejections: list[tuple[str, str]] = []
@@ -119,19 +163,10 @@ def plan_entries(
     for candidate in ranked:
         symbol, tier = candidate.member.symbol, candidate.member.tier
         score = candidate.final_score(profile)
-        reason: str | None = None
-        if profile.llm.enabled and candidate.opinion is not None and candidate.opinion.veto:
-            reason = "veto do analista"
-        elif candidate.signal.setup is None:
-            reason = "sem setup"
-        elif score < Decimal(str(profile.entry.min_score)):
-            reason = "score abaixo do mínimo"
-        elif symbol in held:
-            reason = "ativo já em carteira"
-        elif exposure_multiplier <= 0:  # reading with zero exposure, or on_failure: pause_entries
-            reason = "exposição zero"
-        elif slots <= 0:
-            reason = "sem vagas no perfil"
+        reason = _rejection(
+            candidate, profile, score, held=held, exposure_multiplier=exposure_multiplier,
+            slots=slots,
+        )  # fmt: skip
         if reason is not None:
             rejections.append((symbol, reason))
             continue
@@ -155,6 +190,10 @@ def plan_entries(
             rejections.append((symbol, "tamanho abaixo do mínimo (orçamento/tier/risco)"))
             continue
         cost = qty * price
+        risk = cost * (stop_pct + execution_cost_pct) / PCT
+        if open_room is not None and risk > open_room:
+            rejections.append((symbol, "risco aberto do perfil acima do limite"))
+            continue
         ideas.append(
             TradeIdea(
                 profile=name,
@@ -164,13 +203,13 @@ def plan_entries(
                 setup=candidate.signal.setup or "",
                 score=score,
                 entry=EntryOrder(symbol, qty, price, profile.entry.order),
-                policy=profile.protection.policy(
-                    stop_pct, Decimal(str(candidate.signal.atr_pct)) * PCT
-                ),
+                policy=_policy(profile, candidate.signal, stop_pct, execution_cost_pct),
                 notional=cost,
-                risk=cost * (stop_pct + execution_cost_pct) / PCT,
+                risk=risk,
             )
         )
+        if open_room is not None:
+            open_room -= risk
         slots -= 1
         budget -= cost
         tier_used[tier] += cost

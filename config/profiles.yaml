@@ -126,3 +126,89 @@ profiles:
       weight: 0.25
       min_confidence: 0.65
       on_failure: ta_only_reduced
+
+  # ------------------------------------------------------------ pair-local families (D-044)
+  # Experimental and disabled: none was fit for the next phase (doc/lab-results.md, section
+  # 2.10). Their risk budget (`risk`) runs in the production Risk Guard as in the lab
+  # (trade_agent.risk.scope). Entries and exits read only the pair's own candles, so they may
+  # buy with BTC below its EMA 200. The signals are research seeds (trade_agent.signals.local),
+  # not a calibration. capital_share gives the lab a virtual capital of 100 USDT; enabling one
+  # takes that share from the profiles above (the enabled shares add up to at most 1).
+  pair_pullback_1h:
+    code: ppb1h
+    enabled: false
+    family: pair_pullback_rsi
+    capital_share: 0.10
+    timeframe: 1h
+    tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
+    allocation:
+      max_open_positions: 2
+      max_position_pct: 0.35
+      cash_reserve_pct: 0.30
+      risk_per_trade_pct: 0.5
+    entry:
+      min_score: -1.0          # ranking only: the family's rules decide
+      order: limit_fok
+      max_slippage_bps: 20
+    protection:
+      # structural stop: at least 1.5 ATR away; beyond 6% the setup is discarded
+      stop: {mode: fixed, atr_mult: 1.5, max_pct: 6.0}
+      take_profit: {mode: limit, activation_pct: 0.5, activation_r: 1.5}   # target at 1.5R net
+      max_holding: 48h
+    llm: {enabled: false}
+    risk: &local_risk
+      cost_pct: 0.3            # round trip: 0.2% of fees and 0.1% of spread and slippage
+      max_open_risk_pct: 1.0
+      daily_loss_pct: 1.5      # marked to market
+      consecutive_losses: 3
+      cooldown: 24h
+      max_drawdown_pct: 8      # no new entries until a review
+      reentry_candles: 3       # after a stop on the pair
+
+  pair_breakout_1h:
+    code: pbo1h
+    enabled: false
+    family: pair_volatility_breakout
+    capital_share: 0.10
+    timeframe: 1h
+    tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
+    allocation:
+      max_open_positions: 2
+      max_position_pct: 0.35
+      cash_reserve_pct: 0.30
+      risk_per_trade_pct: 0.5
+    entry:
+      min_score: -1.0
+      order: limit_fok
+      max_slippage_bps: 20
+    protection:
+      stop: {mode: fixed, atr_mult: 2.0, max_pct: 7.0}
+      # trailing from 3R net, 1 ATR behind the top
+      take_profit: {mode: trailing, activation_pct: 0.5, activation_r: 3.0, trailing_atr_mult: 1.0}
+      max_holding: 72h
+    llm: {enabled: false}
+    risk: *local_risk
+
+  pair_range_1h:
+    code: prg1h
+    enabled: false
+    family: pair_range_reversion
+    capital_share: 0.10
+    timeframe: 1h
+    tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
+    allocation:
+      max_open_positions: 2
+      max_position_pct: 0.35
+      cash_reserve_pct: 0.30
+      risk_per_trade_pct: 0.25  # less than the trend families
+    entry:
+      min_score: -1.0
+      order: limit_fok
+      max_slippage_bps: 20
+    protection:
+      stop: {mode: fixed, atr_mult: 1.5, max_pct: 4.0}
+      # target at the middle band of the signal, frozen; the R:R check refuses it below 1.5
+      take_profit: {mode: limit, activation_pct: 0.1, signal_target: true}
+      max_holding: 12h
+    llm: {enabled: false}
+    risk: *local_risk

@@ -48,19 +48,26 @@ SELECT at AS time, escopo AS metric,
     (pnl - first_value(pnl) OVER (PARTITION BY escopo ORDER BY at))::float AS value
 FROM today ORDER BY 1, 2
 """
-# The market regime that gates every setup (D-016), as each decision cycle recorded it (D-043)
+# The market regime that gates the setups of the profiles with the regime filter (D-016), as
+# each decision cycle recorded it (D-043); the cycles before D-044 have no family nor filter flag
+# (all legacy, with the filter)
 WITH_REGIME = "kind = 'decision.cycle' AND jsonb_typeof(payload->'regime') = 'object'"
 REGIME_SIDE = "CASE WHEN (payload->'regime'->>'up')::bool THEN 'alta' ELSE 'baixa' END"
 REGIME_HELP = (
     "Fechamento do BTC no candle de 4h do último ciclo de decisão, acima (alta) ou abaixo "
-    "(baixa) da EMA200, e a distância em %. Em baixa, o filtro de regime (D-016) bloqueia "
-    "todos os setups de compra: nenhum perfil abre posição até o BTC fechar acima da EMA200."
+    "(baixa) da EMA200, e a distância em %. Em baixa, o filtro de regime (D-016) bloqueia os "
+    'setups de compra dos perfis que usam o filtro (coluna usa_filtro em "Setups e filtros por '
+    'perfil"): esses não abrem posição até o BTC fechar acima da EMA200. Perfis de família '
+    "local (D-044) decidem pelos candles do próprio par e não leem este filtro."
 )
 SETUPS_HELP = (
-    "Por perfil, no período: ciclos de decisão, setups encontrados, setups que só o filtro de "
-    "stop no ruído (D-039) removeu, entradas abertas e ciclos com o regime em baixa (sem setup "
-    "possível)."
+    "Por perfil, no período: família de estratégia (D-044), se usa o filtro de regime, ciclos "
+    "de decisão, setups encontrados, setups que só o filtro de stop no ruído (D-039) removeu, "
+    "padrões que um filtro da família local descartou, entradas abertas e ciclos com o regime "
+    "em baixa (sem setup possível quando usa_filtro)."
 )
+CYCLE_FAMILY = "COALESCE(payload->>'family', 'legacy')"
+CYCLE_FILTER = "COALESCE((payload->>'regime_filter')::bool, true)"
 DAILY_SCOPE_PNL_HELP = (
     "Resultado de cada escopo só no dia corrente, em UTC (o dia do agente, do PnL do dia e do "
     "Risk Guard): os ganhos e perdas por escopo de cada foto menos os da primeira foto do dia. "
@@ -260,9 +267,9 @@ def build() -> dict[str, dict[str, Any]]:
         table("Motivos de saída", f"SELECT exit_reason AS motivo, count(*) AS trades, sum(realized_pnl)::float AS pnl FROM positions WHERE {CLOSED} AND $__timeFilter(closed_at) GROUP BY 1 ORDER BY 2 DESC", w=8),
     ])  # fmt: skip
     research = dashboard("ta-research", "Decisões e pesquisa", [
-        table("Ciclos de decisão", f"SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, CASE WHEN jsonb_typeof(payload->'regime') = 'object' THEN {REGIME_SIDE} END AS regime, (payload->>'setups')::int AS setups, payload->>'stop_noise' AS ruido_d039, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"),
+        table("Ciclos de decisão", f"SELECT created_at AS time, payload->>'profile' AS perfil, payload->>'state' AS estado, (payload->>'dry_run')::bool AS simulacao, CASE WHEN jsonb_typeof(payload->'regime') = 'object' THEN {REGIME_SIDE} END AS regime, (payload->>'setups')::int AS setups, payload->>'stop_noise' AS ruido_d039, payload->>'research' AS analista, payload->>'opened' AS entradas, payload->>'exits' AS saidas, payload->>'rejected' AS recusas, {CYCLE_FAMILY} AS familia, {CYCLE_FILTER} AS usa_filtro, payload->>'filtered' AS filtrados FROM events WHERE kind = 'decision.cycle' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"),
         panel("BTC vs EMA200 (%)", f"SELECT date_trunc('hour', created_at) AS time, max((payload->'regime'->>'distance_pct')::float) AS distancia FROM events WHERE {WITH_REGIME} AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", unit="percent", description="Fechamento do BTC no candle de cada ciclo de decisão, acima (+) ou abaixo (−) da EMA200. Abaixo de zero, o filtro de regime (D-016) bloqueia todos os setups de compra."),
-        table("Setups e filtros por perfil", "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", w=12, h=8, description=SETUPS_HELP),
+        table("Setups e filtros por perfil", f"SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa, max({CYCLE_FAMILY}) AS familia, bool_and({CYCLE_FILTER}) AS usa_filtro, sum(COALESCE(jsonb_array_length(payload->'filtered'), 0)) AS filtrados FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", w=12, h=8, description=SETUPS_HELP),
         table("Viradas de regime", "SELECT created_at AS time, payload->>'timeframe' AS timeframe, CASE WHEN (payload->>'up')::bool THEN 'alta' ELSE 'baixa' END AS regime, CASE WHEN jsonb_typeof(payload->'previous') <> 'boolean' THEN 'primeira leitura' WHEN (payload->>'previous')::bool THEN 'alta' ELSE 'baixa' END AS anterior, (payload->>'close')::float AS btc, (payload->>'ema_slow')::float AS ema200, (payload->>'distance_pct')::float AS distancia FROM events WHERE kind = 'market.regime_changed' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50", h=7, description="Cada mudança do regime de mercado (BTC acima ou abaixo da EMA200), também enviada ao Telegram. A primeira leitura de cada timeframe só é registrada."),
         table("Última leitura do analista", "SELECT a->>'asset' AS ativo, (a->>'sentiment')::float AS sentimento, (a->>'confidence')::float AS confianca, (a->>'veto')::bool AS veto, a->>'rationale' AS justificativa FROM research_reports r, jsonb_array_elements(r.view->'assets') a WHERE r.id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=16),
         stat("Regime do analista e exposição", "SELECT view->>'market_regime' AS regime, (view->>'exposure_multiplier')::float AS exposicao FROM research_reports WHERE id = (SELECT max(id) FROM research_reports WHERE status = 'ok')", w=8, text=True),

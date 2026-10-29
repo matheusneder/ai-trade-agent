@@ -86,3 +86,39 @@ def rally_after_decline(*, interval_ms: int = HOUR_MS, start_ms: int = START_MS)
 
 def downtrend(n: int = 320) -> pd.DataFrame:
     return ohlcv([100 * math.exp(-0.004 * i) for i in range(n)])
+
+
+def pair_pullback() -> pd.DataFrame:
+    """Noisy uptrend, two 3% drops (RSI below 40) and a 3% up candle on more volume: the
+    ``pair_pullback_rsi`` setup on the last candle."""
+    rng = np.random.default_rng(0)
+    closes = list(100 * np.exp(np.cumsum(0.004 + rng.normal(0, 0.004, 300))))
+    closes += [closes[-1] * 0.97, closes[-1] * 0.97**2]
+    closes.append(closes[-1] * 1.03)
+    return ohlcv(closes, volumes=[100.0] * (len(closes) - 1) + [150.0])
+
+
+def pair_breakout() -> pd.DataFrame:
+    """A wide walk, 22 tight candles (the Bollinger squeeze) and a close 0.2% above their high
+    on triple volume: the ``pair_volatility_breakout`` setup on the last candle."""
+    rng = np.random.default_rng(0)
+    wide = 100 * np.exp(np.cumsum(0.001 + rng.normal(0, 0.008, 280)))
+    tight = wide[-1] * np.exp(np.cumsum(0.0005 + rng.normal(0, 0.002, 22)))
+    closes = [*wide, *tight]
+    closes.append(float(ohlcv(closes)["high"].iloc[-20:].max()) * 1.002)
+    return ohlcv(closes, volumes=[100.0] * (len(closes) - 1) + [300.0])
+
+
+def pair_range() -> pd.DataFrame:
+    """A range that narrows, four 0.5% drops below the lower band and a 1.5% up candle back
+    inside: the ``pair_range_reversion`` setup on the last candle."""
+    rng = np.random.default_rng(0)
+    n = np.arange(300)
+    amplitude = np.where(n < 200, 0.02, 0.002)
+    closes = list(
+        100 * (1 + amplitude * np.sin(2 * np.pi * n / 8)) * np.exp(rng.normal(0, 0.001, 300))
+    )
+    for _ in range(4):
+        closes.append(closes[-1] * 0.995)
+    closes.append(closes[-1] * 1.015)
+    return ohlcv(closes)

@@ -168,6 +168,9 @@ class Expected:
     regime_changes: int = 0
     setups_by_profile: dict[str, tuple[int, int, int, int, int]] = field(default_factory=dict)
     """profile → (cycles, setups, removed by D-039, entries, cycles in the regime down)."""
+    families_by_profile: dict[str, tuple[str, bool, int]] = field(default_factory=dict)
+    """profile → (family, uses the regime filter, setups a local filter discarded); the
+    cycles before D-044 count as legacy with the filter."""
     risk_state_changes: int = 0
     states: dict[str, str] = field(default_factory=dict)
     news_by_source: dict[str, int] = field(default_factory=dict)
@@ -683,6 +686,12 @@ class _Simulation:
                 "stop_noise": noise,
                 "regime": regime,
             }
+            if number:  # the first cycles predate D-044: no family, filter flag nor filtered
+                payload |= {
+                    "family": profile.config.family.value,
+                    "regime_filter": profile.config.uses_regime_filter,
+                    "filtered": [],
+                }
             self.event(at + timedelta(seconds=2), "decision.cycle", "info", payload)
 
     def set_global(self, at: datetime, state: OpState, reason: str | None, source: str) -> None:
@@ -1009,7 +1018,14 @@ def _expected(data: Dataset) -> Expected:
     cycles = [c for c in cycles if "setups" in c]
     regime = cycles[-1]["regime"]
     by_profile: dict[str, tuple[int, int, int, int, int]] = {}
+    families: dict[str, tuple[str, bool, int]] = {}
     for c in cycles:
+        family, gated, filtered = families.get(c["profile"], ("legacy", True, 0))
+        families[c["profile"]] = (
+            c.get("family", family),
+            gated and c.get("regime_filter", True),
+            filtered + len(c.get("filtered", [])),
+        )
         n, setups, noise, entries, down = by_profile.get(c["profile"], (0, 0, 0, 0, 0))
         by_profile[c["profile"]] = (
             n + 1,
@@ -1036,6 +1052,7 @@ def _expected(data: Dataset) -> Expected:
         regime_distance=regime["distance_pct"],
         regime_changes=sum(e.kind == "market.regime_changed" for e in events),
         setups_by_profile=by_profile,
+        families_by_profile=families,
         risk_state_changes=sum(e.kind == "risk.state_changed" for e in events),
         states=dict(last.states),
         news_by_source=news,
