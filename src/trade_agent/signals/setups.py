@@ -6,7 +6,8 @@ Score ∈ [-1, 1], a sum of simple, auditable components:
 trend (±0.35)               fast EMA vs slow EMA and price vs slow EMA
 momentum (±0.20)            MACD histogram
 strength (±0.15)            ADX ≥ minimum, in the direction of the trend
-relative strength (±0.20)   ROC of the price/benchmark ratio (e.g. BTC)
+relative strength (±0.20)   ROC of the price/benchmark ratio (e.g. BTC); off with
+                            ``local_score`` (D-044)
 volume (±0.10)              volume above average on an up/down candle
 stretched (−0.15)           RSI above the overbought level
 ==========================  ===============================================
@@ -50,6 +51,9 @@ class SignalParams:
     min_stop_atr: float | None = None
     """Setups only when the stop, after its ``max_stop_pct`` cap, is at least this many ATRs
     (``None``: off). A capped stop below it sits inside the asset's normal noise."""
+    local_score: bool = False
+    """Score without the relative strength against the benchmark (D-044): the remaining
+    components and the thresholds are unchanged, so the score tops out at 0.80."""
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,18 @@ class Signal:
     close: float
     stop_noise_setup: str | None = None
     """Setup that only ``min_stop_atr`` removed (D-039): what the stop-noise filter cost."""
+    target_pct: float | None = None
+    """Pair-local families (D-044): fixed target frozen on the signal (fraction of the close)."""
+    max_entry_price: float | None = None
+    """Pair-local families: no entry above this price (the signal is stale)."""
+    level: float | None = None
+    """Pair-local families: the price level the setup broke (its failure exit)."""
+    exit_signal: bool = False
+    """Pair-local families: the technical exit fired on this candle."""
+    filtered: str | None = None
+    """Pair-local families: why a setup pattern on this candle was discarded."""
+    local_regime: str | None = None
+    """Pair-local families: the pair's own trend reading (``alta``, ``baixa``, ``lateral``)."""
 
     def is_entry(self, min_score: float) -> bool:
         return self.setup is not None and self.score >= min_score
@@ -108,7 +124,8 @@ def score_frame(features: pd.DataFrame, params: SignalParams | None = None) -> p
     score = 0.35 * direction
     score += 0.20 * np.sign(macd.fillna(0.0))
     score += 0.15 * direction * (_col(features, "adx") >= p.adx_min)
-    score += 0.20 * np.sign(rs.fillna(0.0))
+    if not p.local_score:
+        score += 0.20 * np.sign(rs.fillna(0.0))
     score += 0.10 * (heavy & bullish) - 0.10 * (heavy & ~bullish)
     score -= 0.15 * (_col(features, "rsi") > p.rsi_overbought)
     result: pd.Series = score.clip(-1.0, 1.0).rename("score")

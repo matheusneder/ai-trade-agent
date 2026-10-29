@@ -4,6 +4,7 @@ The evaluation (``evaluate``) is a pure function over a ``RiskSnapshot``; the ap
 (``RiskGuard.apply``) persists the new state, records the event and alerts the operator,
 once per occurrence of each trigger.
 ``flatten`` delegates closing the positions to whoever executes orders (the decision engine).
+The pair-local profiles' risk budget (D-044) runs apart, in ``RiskGuard.track_scopes``.
 """
 
 import asyncio
@@ -18,6 +19,7 @@ import structlog
 from trade_agent import metrics, tracing
 from trade_agent.exchange.models import OrderSide, OrderType
 from trade_agent.exchange.rules import SymbolRules
+from trade_agent.execution.positions import ExitReason
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.risk.conditions import (
     Action,
@@ -26,6 +28,7 @@ from trade_agent.risk.conditions import (
     Trigger,
     in_trading_window,
 )
+from trade_agent.risk.scope import DRAWDOWN, ScopeLimits, ScopeRisk
 from trade_agent.risk.state import (
     GLOBAL,
     Fired,
@@ -41,6 +44,8 @@ from trade_agent.strategy.profiles import ProfileConfig
 log = structlog.get_logger(__name__)
 
 PCT = Decimal(100)
+SCOPE_LOOKBACK = timedelta(days=7)
+"""Closed trades a scope remembers as already counted (a close may commit late)."""
 
 type Flattener = Callable[[str], Awaitable[int]]
 """Closes the scope's positions (``global`` or a profile name); returns how many."""
@@ -169,6 +174,28 @@ class PreTradeContext:
     account_capital: Decimal = Decimal(0)
     open_risk: Decimal = Decimal(0)
     exposure: Decimal = Decimal(0)
+    scope: ScopeRisk | None = None
+    """The profile's risk budget (D-044): its pauses and the re-entry wait after a stop."""
+
+
+def _entry_blocked(
+    idea: TradeIdea, rules: SymbolRules, context: PreTradeContext, conditions: StopConditions
+) -> list[str]:
+    """Why no entry is allowed on the asset now, whatever the idea's size and protection."""
+    problems: list[str] = []
+    if not context.state.allows_entries:
+        problems.append(f"estado operacional {context.state.value}")
+    if not in_trading_window(conditions.global_.trading_window_utc, context.now):
+        problems.append("fora da janela de negociação")
+    if idea.symbol in context.active_symbols:
+        problems.append("já há posição ativa no ativo")
+    if rules.base_asset in context.vetoed_assets:
+        problems.append("vetado pelo analista")
+    if idea.symbol in context.delisted_symbols:
+        problems.append("em delistagem")
+    if context.scope is not None and (blocked := context.scope.blocked(context.now, idea.symbol)):
+        problems.append(blocked)
+    return problems
 
 
 def pre_trade_violations(
@@ -182,17 +209,7 @@ def pre_trade_violations(
 ) -> list[str]:
     """Mandatory checks before any entry (doc 03, §10.1)."""
     config: PreTradeConfig = conditions.pre_trade
-    problems: list[str] = []
-    if not context.state.allows_entries:
-        problems.append(f"estado operacional {context.state.value}")
-    if not in_trading_window(conditions.global_.trading_window_utc, context.now):
-        problems.append("fora da janela de negociação")
-    if idea.symbol in context.active_symbols:
-        problems.append("já há posição ativa no ativo")
-    if rules.base_asset in context.vetoed_assets:
-        problems.append("vetado pelo analista")
-    if idea.symbol in context.delisted_symbols:
-        problems.append("em delistagem")
+    problems = _entry_blocked(idea, rules, context, conditions)
 
     # "always protected": ProtectionPolicy already refuses, when built, a policy without a stop
     policy = idea.policy
@@ -229,6 +246,14 @@ def pre_trade_violations(
 
 
 # ============================================================================ application
+@dataclass(frozen=True, slots=True)
+class ScopeSpec:
+    """A pair-local profile's risk budget (D-044): its code in the positions and its limits."""
+
+    code: str
+    limits: ScopeLimits
+
+
 class RiskGuard:
     def __init__(
         self,
@@ -238,14 +263,17 @@ class RiskGuard:
         store: Store,
         notify: Callable[[Severity, str], Awaitable[None]],
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        scopes: Mapping[str, ScopeSpec] | None = None,
     ) -> None:
         self.conditions = conditions
         self._states = states
         self._store = store
         self._notify = notify
         self._clock = clock
+        self._scopes = dict(scopes or {})
         self._flatten: Flattener | None = None
         self._authorization = asyncio.Lock()
+        self._scope_lock = asyncio.Lock()
 
     def set_flattener(self, flatten: Flattener) -> None:
         self._flatten = flatten
@@ -344,6 +372,83 @@ class RiskGuard:
                 await self._states.put_fired(fired)
         return applied
 
+    # ------------------------------------------------------------------ scope budgets
+    async def scope_risk(self, scope: str) -> ScopeRisk | None:
+        """The profile's risk budget (D-044), for the pre-trade check; ``None`` without one."""
+        spec = self._scopes.get(scope)
+        if spec is None:
+            return None
+        data = await self._states.scope_risk(scope)
+        if data is None:
+            return ScopeRisk(spec.limits)
+        return ScopeRisk.from_json(spec.limits, data["risk"])
+
+    @tracing.traced("risk", "risk.scopes")
+    async def track_scopes(self, snapshot: RiskSnapshot) -> None:
+        """Feeds each pair-local profile's budget with its newly closed trades and its
+        marked-to-market equity, in the lab's order (the closed trades, then the mark), and
+        pauses the profile when a trigger acts.
+
+        The daily loss and the losing streak pause it for their cooldown. The drawdown pauses
+        it with no expiry, not ``HALTED``: the protection and the technical exits go on until
+        ``/resume``, the review. Each state change alerts like the other triggers. A budget
+        starts on its first reading: earlier trades do not count.
+        """
+        for name, spec in self._scopes.items():
+            async with self._scope_lock:
+                risk, before = await self._advance(name, spec, snapshot)
+            now = self._clock()
+            if risk.review and not before.review:
+                await self._set(name, ScopeState(OpState.PAUSED, DRAWDOWN, now), source="gatilho")
+            if risk.paused_until is not None and risk.paused_until != before.paused_until:
+                pause = ScopeState(OpState.PAUSED, risk.pause_reason, now, risk.paused_until)
+                await self._set(name, pause, source="gatilho")
+
+    async def _advance(
+        self, name: str, spec: ScopeSpec, snapshot: RiskSnapshot
+    ) -> tuple[ScopeRisk, ScopeRisk]:
+        """The budget after this reading, and before it; the new state is persisted."""
+        data = await self._states.scope_risk(name)
+        recent = await self._store.closed_positions(
+            limit=None, since=snapshot.now - SCOPE_LOOKBACK, profile=spec.code
+        )
+        if data is None:
+            risk, seen = ScopeRisk(spec.limits), {p.id for p in recent}
+        else:
+            risk, seen = ScopeRisk.from_json(spec.limits, data["risk"]), set(data["seen"])
+            shift = spec.limits.capital - data["capital"]  # a capital change is no result
+            risk.day_start += shift
+            risk.peak = None if risk.peak is None else risk.peak + shift
+        before = ScopeRisk.from_json(spec.limits, risk.to_json())
+        fresh = sorted(
+            (p.closed_at, p.id, p) for p in recent if p.id not in seen and p.closed_at is not None
+        )
+        for at, _, position in fresh:
+            pnl = float(position.realized_pnl or 0)
+            risk.closed(at, position.symbol, pnl, stop=position.exit_reason == ExitReason.STOP_LOSS)
+        equity = spec.limits.capital + float(snapshot.profile_pnl.get(name, Decimal(0)))
+        risk.mark(snapshot.now, equity)
+        state = risk.to_json()
+        await self._states.put_scope_risk(
+            name,
+            {"risk": state, "seen": sorted(p.id for p in recent), "capital": spec.limits.capital},
+        )
+        log.debug("risk.scope", scope=name, equity=equity, closed=len(fresh), **state)
+        return risk, before
+
+    async def _review(self, scope: str) -> None:
+        """``/resume`` on a pair-local profile is the review: its budget's pauses end."""
+        spec = self._scopes.get(scope)
+        if spec is None:
+            return
+        async with self._scope_lock:
+            data = await self._states.scope_risk(scope)
+            if data is None:
+                return
+            risk = ScopeRisk.from_json(spec.limits, data["risk"])
+            risk.reviewed()
+            await self._states.put_scope_risk(scope, {**data, "risk": risk.to_json()})
+
     async def _run_flatten(self, scope: str, reason: str) -> int:
         if self._flatten is None:
             raise RuntimeError("flatten sem executor configurado")
@@ -372,6 +477,7 @@ class RiskGuard:
         """Returns to ``RUNNING``; refuses during a flatten in progress."""
         if (await self.state(scope)).state is OpState.FLATTENING:
             return False
+        await self._review(scope)
         await self._set(scope, ScopeState(reason="retomado pelo operador"), source="manual")
         return True
 

@@ -155,7 +155,7 @@
     {
       "type": "stat",
       "title": "Filtro de regime (BTC vs EMA200)",
-      "description": "Fechamento do BTC no candle de 4h do último ciclo de decisão, acima (alta) ou abaixo (baixa) da EMA200, e a distância em %. Em baixa, o filtro de regime (D-016) bloqueia todos os setups de compra: nenhum perfil abre posição até o BTC fechar acima da EMA200.",
+      "description": "Fechamento do BTC no candle de 4h do último ciclo de decisão, acima (alta) ou abaixo (baixa) da EMA200, e a distância em %. Em baixa, o filtro de regime (D-016) bloqueia os setups de compra dos perfis que usam o filtro (coluna usa_filtro em \"Setups e filtros por perfil\"): esses não abrem posição até o BTC fechar acima da EMA200. Perfis de família local (D-044) decidem pelos candles do próprio par e não leem este filtro.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "trade-agent-pg"
