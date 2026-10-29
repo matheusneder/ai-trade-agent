@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from trade_agent.execution.orders import EntryMode, ProtectionPolicy, StopMode, TakeProfitMode
 from trade_agent.market.universe import Tier
+from trade_agent.risk.scope import ScopeLimits
 from trade_agent.signals import Family, LocalParams, SignalParams
 from trade_agent.signals.local import PARAMS as LOCAL_PARAMS
 from trade_agent.signals.local import STOP_PARAMS as LOCAL_STOP_PARAMS
@@ -200,9 +201,9 @@ class LlmConfig(_Strict):
 class ScopeRiskConfig(_Strict):
     """Risk budget of a pair-local profile (D-044), on top of the global conditions.
 
-    Only the lab simulates the pauses (``lab/freqtrade``): the production Risk Guard does not
-    read them, so :class:`StrategyConfig` refuses an enabled pair-local profile. A pause only
-    stops new entries; the native protection and the technical exits go on.
+    The production Risk Guard (``RiskGuard.track_scopes``) and the lab (``lab/freqtrade``,
+    ``lab.paper``) run the same pauses, :mod:`trade_agent.risk.scope`. A pause only stops new
+    entries; the native protection and the technical exits go on.
     """
 
     cost_pct: Annotated[Decimal, Field(ge=0, lt=100)]
@@ -222,6 +223,21 @@ class ScopeRiskConfig(_Strict):
     """Candles without a new entry on a pair after a stop on it."""
 
     _cooldown = field_validator("cooldown", mode="before")(parse_duration)
+
+    def limits(self, capital: Decimal, candle: timedelta) -> ScopeLimits:
+        """The scope's limits on ``capital``, with the re-entry wait in ``candle``s."""
+
+        def pct(value: Decimal | None) -> float | None:
+            return None if value is None else float(value)
+
+        return ScopeLimits(
+            capital=float(capital),
+            daily_loss_pct=pct(self.daily_loss_pct),
+            consecutive_losses=self.consecutive_losses,
+            cooldown=self.cooldown,
+            max_drawdown_pct=pct(self.max_drawdown_pct),
+            reentry=candle * self.reentry_candles,
+        )
 
 
 # Signal parameters defined in ``protection.stop``: they cannot be adjusted in ``signals``.
@@ -332,11 +348,6 @@ class StrategyConfig(_Strict):
         codes = [p.code for p in self.profiles.values()]
         if len(codes) != len(set(codes)):
             raise ValueError("códigos de perfil repetidos")
-        local = sorted(n for n, p in self.profiles.items() if p.enabled and p.family.local)
-        if local:
-            # their risk budget (``risk``) only exists in the lab, and they would compete with
-            # the legacy profiles for the same account and state (D-044)
-            raise ValueError(f"famílias locais são só de laboratório; desative {local}")
         return self
 
     def enabled_profiles(self) -> dict[str, ProfileConfig]:

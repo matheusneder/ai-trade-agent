@@ -1,5 +1,6 @@
 """Entry pauses of a pair-local profile (D-044): daily loss, losing streak, drawdown, re-entry."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from trade_agent.risk.scope import (
@@ -75,3 +76,31 @@ def test_without_limits_nothing_pauses() -> None:
         scope.closed(T0 + H, "SOLUSDT", -1.0, stop=True)
     assert scope.blocked(T0 + H, "SOLUSDT") is None
     assert scope.events == []
+
+
+def test_the_state_survives_a_round_trip_without_its_events() -> None:
+    limits = ScopeLimits(
+        capital=100, daily_loss_pct=1.5, consecutive_losses=3, max_drawdown_pct=8, reentry=3 * H
+    )
+    scope = ScopeRisk(limits)
+    assert ScopeRisk.from_json(limits, scope.to_json()) == scope
+    scope.mark(T0, 100.0)
+    scope.mark(T0 + H, 91.0)  # -9%: the daily loss and the drawdown
+    scope.closed(T0 + H, "SOLUSDT", -2.0, stop=True)
+    assert scope.review and scope.paused_until == T0 + 25 * H
+    assert ScopeRisk.from_json(limits, scope.to_json()) == replace(scope, events=[])
+
+
+def test_a_review_ends_the_pauses_and_the_drawdown_counts_again_from_the_next_mark() -> None:
+    limits = ScopeLimits(capital=100, daily_loss_pct=1.5, max_drawdown_pct=8, reentry=3 * H)
+    scope = ScopeRisk(limits)
+    scope.mark(T0, 100.0)
+    scope.mark(T0 + H, 91.0)
+    scope.closed(T0 + H, "SOLUSDT", -2.0, stop=True)
+    scope.reviewed()
+    assert scope.blocked(T0 + 2 * H, "ETHUSDT") is None
+    assert scope.blocked(T0 + 2 * H, "SOLUSDT") == REENTRY  # the wait after a stop is no pause
+    scope.mark(T0 + 2 * H, 91.0)
+    assert (scope.peak, scope.review, scope.daily_hit) == (91.0, False, True)
+    scope.mark(T0 + 30 * H, 83.0)  # -8.8% from the new peak
+    assert scope.blocked(T0 + 30 * H, "ETHUSDT") == DRAWDOWN

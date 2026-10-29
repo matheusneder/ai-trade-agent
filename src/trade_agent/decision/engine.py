@@ -786,7 +786,8 @@ class DecisionEngine:
         rejected = [r for r in plan.rejections if r[1] != "sem setup"]
         for idea in plan.ideas:
             async with self._guard.entry_authorization(name) as current:
-                context = replace(context, state=current, now=self._clock())
+                scope = await self._guard.scope_risk(name)
+                context = replace(context, state=current, now=self._clock(), scope=scope)
                 problems = pre_trade_violations(
                     idea,
                     profile=profile,

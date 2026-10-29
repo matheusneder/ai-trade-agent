@@ -164,8 +164,9 @@ The agent tries to re-protect right away. If the new OCO is rejected, it sells a
 
 | State | What it means | What to do |
 |-------|---------------|------------|
-| `paused` with a deadline | automatic pause (e.g. a BTC drop, Fear & Greed, API errors) | nothing; it returns on its own at the end of the *cooldown* |
+| `paused` with a deadline | automatic pause (e.g. a BTC drop, Fear & Greed, API errors, a pair-local profile's daily loss or losing streak) | nothing; it returns on its own at the end of the *cooldown* |
 | `paused` without a deadline | reconciliation mismatch (an orphan, or an error in two reconciliations in a row) or `/pause` | diagnose and `/resume <scope>` |
+| `paused` without a deadline, `drawdown do perfil: novas entradas só após revisão` | a pair-local profile fell `risk.max_drawdown_pct` below its peak (D-044); its protection and technical exits go on | review the profile's trades (*Performance* dashboard) and `/resume <profile>`: the drawdown counts again from the next reading |
 | `halted` | drawdown from the peak, target reached or `/halt` | analyze the cause in the *Visão geral* dashboard and `/resume` when it is safe |
 | `halted` after a flatten | *depeg* of the quote asset or `/flatten` | confirm the sells went through (*Posições* dashboard) before the `/resume` |
 
