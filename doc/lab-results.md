@@ -533,7 +533,7 @@ Freqtrade still fills at the stop price, without the slippage of the agent's sto
 | `atr_mult` (stop) | 3.1 | 3.0 |
 | `max_pct` (stop) | 4.5 | **6.5** (D-034; was 5.0) |
 | `activation_pct` (TP) | **13.0** (D-041; was 9.7) | **13.0** (D-034; was 9.5) |
-| `risk_per_trade_pct` | **1.5** (D-041; was 1.2) | **2.0** (D-041; was 1.5) |
+| `risk_per_trade_pct` | **1.5** (D-041; was 1.2) | **1.5** (D-045; D-041 had 2.0) |
 | `trailing_delta_bps` (TP) | 100 | 130 |
 | `min_stop_atr` (signals) | **1.5** (D-039) | **2.0** (D-039) |
 

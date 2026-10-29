@@ -64,7 +64,7 @@ profiles:
       max_open_positions: 2    # Lots of ~145 USDT
       max_position_pct: 0.42
       cash_reserve_pct: 0.15
-      risk_per_trade_pct: 2.0  # D-041 (was 1.5)
+      risk_per_trade_pct: 1.5  # D-045: back from D-041's 2.0 (13.28% worst window on --alts)
     entry:
       min_score: 0.67          # walk-forward (was 0.62)
       order: limit_fok
