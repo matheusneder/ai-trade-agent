@@ -17,11 +17,11 @@ profiles:
     # doc/lab-results.md section 2.9).
     code: swg
     enabled: true
-    capital_share: 0.65        # Main allocation: 650 USDT
+    capital_share: 0.35        # Main allocation: 350 USDT (was 0.65; 0.30 went to the pair-local profiles)
     timeframe: 4h
     tiers: {core: 0.70, large: 0.30, mid: 0.0, small: 0.0}
     allocation:
-      max_open_positions: 2    # Solid lots of ~275 USDT per trade (avoids fractional fees)
+      max_open_positions: 2    # Lots of ~147 USDT per trade (were ~275 at 0.65)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15   # 15% liquidity for rebalancing
       risk_per_trade_pct: 1.5  # D-041 (was 1.2)
@@ -128,15 +128,16 @@ profiles:
       on_failure: ta_only_reduced
 
   # ------------------------------------------------------------ pair-local families (D-044)
-  # Experimental and disabled: none was fit for the next phase (doc/lab-results.md, section
-  # 2.10). Their risk budget (`risk`) runs in the production Risk Guard as in the lab
+  # Experimental: none was fit for the next phase (doc/lab-results.md, section 2.10); enabled
+  # on the Demo on 2026-10-30 with 0.30 taken from swing_trend. Their risk budget (`risk`)
+  # runs in the production Risk Guard as in the lab
   # (trade_agent.risk.scope). Entries and exits read only the pair's own candles, so they may
   # buy with BTC below its EMA 200. The signals are research seeds (trade_agent.signals.local),
   # not a calibration. capital_share gives the lab a virtual capital of 100 USDT; enabling one
   # takes that share from the profiles above (the enabled shares add up to at most 1).
   pair_pullback_1h:
     code: ppb1h
-    enabled: false
+    enabled: true
     family: pair_pullback_rsi
     capital_share: 0.10
     timeframe: 1h
@@ -167,7 +168,7 @@ profiles:
 
   pair_breakout_1h:
     code: pbo1h
-    enabled: false
+    enabled: true
     family: pair_volatility_breakout
     capital_share: 0.10
     timeframe: 1h
@@ -191,7 +192,7 @@ profiles:
 
   pair_range_1h:
     code: prg1h
-    enabled: false
+    enabled: true
     family: pair_range_reversion
     capital_share: 0.10
     timeframe: 1h

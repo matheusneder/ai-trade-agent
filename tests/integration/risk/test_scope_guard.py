@@ -237,11 +237,14 @@ async def test_the_production_budget_decides_as_the_labs(store: Store) -> None:
 
 
 async def test_without_a_local_profile_the_guard_is_as_before(store: Store) -> None:
-    """Regression: the repository's profiles give the guard no budget, so ``track_scopes``
-    reads and writes nothing and no state changes, whatever the profiles' results."""
+    """Regression: without the pair-local ones (enabled since D-046), the repository's profiles
+    give the guard no budget, so ``track_scopes`` reads and writes nothing and no state
+    changes, whatever the profiles' results."""
     clock = Clock(NOW)
     alerts: list[tuple[Severity, str]] = []
-    specs = scope_specs(load_strategy_config(REPOSITORY))
+    config = load_strategy_config(REPOSITORY)
+    legacy = {name: p for name, p in config.profiles.items() if not p.family.local}
+    specs = scope_specs(config.model_copy(update={"profiles": legacy}))
     assert specs == {}
     guard = _guard(store, clock, alerts, scopes=specs)
     names = ("swing_trend", "momentum_alpha", "alt_atr")
