@@ -25,12 +25,12 @@ D = Decimal
 REPOSITORY_FILE = Path(__file__).parents[3] / "config" / "profiles.yaml"
 
 
-def test_repository_local_profiles_are_disabled_seeds() -> None:
+def test_repository_local_profiles_are_enabled_seeds() -> None:
+    # D-046: enabled on the Demo, their share taken from swing_trend
     config = load_strategy_config(REPOSITORY_FILE)
     local = {n: p for n, p in config.profiles.items() if p.family.local}
     assert set(local) == {"pair_pullback_1h", "pair_breakout_1h", "pair_range_1h"}
-    assert not any(p.enabled for p in local.values())
-    assert not set(local) & set(config.enabled_profiles())
+    assert set(local) <= set(config.enabled_profiles())
     expected = {
         "pair_pullback_1h": PullbackParams(min_stop_atr=1.5, max_stop_pct=0.06),
         "pair_breakout_1h": BreakoutParams(min_stop_atr=2.0, max_stop_pct=0.07),
@@ -64,7 +64,12 @@ def test_a_local_profile_can_be_enabled_on_a_share_of_the_account() -> None:
 
 
 def test_the_risk_guard_gets_the_budgets_of_the_enabled_local_profiles() -> None:
-    assert scope_specs(load_strategy_config(REPOSITORY_FILE)) == {}  # the guard as before
+    repository = scope_specs(load_strategy_config(REPOSITORY_FILE))  # D-046
+    assert {name: spec.code for name, spec in repository.items()} == {
+        "pair_pullback_1h": "ppb1h",
+        "pair_breakout_1h": "pbo1h",
+        "pair_range_1h": "prg1h",
+    }
     assert scope_specs(local_config()) == {}  # a disabled one has none
     config = local_config(local={"enabled": True, "timeframe": "4h"})
     profile = config.profiles["local"]

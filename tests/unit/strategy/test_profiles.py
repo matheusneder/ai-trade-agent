@@ -56,10 +56,13 @@ def _reward_risk(name: str, atr_pct: Decimal) -> tuple[Decimal, bool]:
 
 def test_repository_profiles_pass_the_minimum_reward_risk() -> None:
     """The Risk Guard refuses entries below ``pre_trade.min_reward_risk``: below the stop cap,
-    the repository profiles must not be blocked by their own stop and take-profit settings."""
+    the repository's legacy profiles must not be blocked by their own stop and take-profit
+    settings. The pair-local ones take their target from their own stop (test_local_profiles)."""
     pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
     minimum = D(str(pre_trade.min_reward_risk))
-    for name in load_strategy_config(REPOSITORY_FILE).enabled_profiles():
+    for name, profile in load_strategy_config(REPOSITORY_FILE).enabled_profiles().items():
+        if profile.family.local:
+            continue
         for atr_pct in (D("0.3"), D("0.8"), D("1.2"), D("1.8"), D("2.2"), D("2.5"), D("4"), D("7")):
             reward_risk, capped = _reward_risk(name, atr_pct)
             if name == "alt_atr" and capped:
