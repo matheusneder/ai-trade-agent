@@ -85,6 +85,15 @@ def provision(http: httpx.Client) -> dict[str, str]:
     return signoz_dashboards.existing(http)
 
 
+def remove_all(http: httpx.Client) -> None:
+    """Deletes every dashboard, through the API alone (not the generator's code): on a stack
+    shared by many sessions (the mutation tests), each one starts from none."""
+    body = http.get("/api/v2/dashboards", params={"limit": 200}).raise_for_status().json()
+    data = body.get("data", body)
+    for board in data.get("dashboards", []) if isinstance(data, dict) else data:
+        http.delete(f"/api/v2/dashboards/{board['id']}").raise_for_status()
+
+
 def count(http: httpx.Client, signal: str, where: str, summary: Summary) -> int:
     """``count()`` of logs or traces over the seeded window."""
     body = {

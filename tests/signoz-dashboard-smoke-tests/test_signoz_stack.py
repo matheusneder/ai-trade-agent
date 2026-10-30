@@ -14,6 +14,7 @@ from tests.support.signoz_smoke.seed import Telemetry
 pytestmark = [pytest.mark.e2e, pytest.mark.signoz]
 
 
+@pytest.mark.dashboards
 def test_isolation_guard_catches_the_production_names() -> None:
     """Foundry's manifests alone point at the real stack; with the override, nothing does."""
     stack = environment.Stack()
@@ -30,6 +31,7 @@ def test_isolation_guard_catches_the_production_names() -> None:
     )
 
 
+@pytest.mark.dashboards
 def test_the_api_key_has_the_editor_role(
     signoz_stack: environment.Endpoints, signoz_credentials: signoz.Credentials
 ) -> None:
@@ -40,10 +42,12 @@ def test_the_api_key_has_the_editor_role(
     assert anonymous.status_code == 401
 
 
+@pytest.mark.dashboards("*")
 def test_every_dashboard_is_provisioned(dashboard_ids: dict[str, str]) -> None:
     assert set(dashboard_ids) == {b["name"] for b in signoz_dashboards.build().values()}
 
 
+@pytest.mark.dashboards("*")
 def test_applying_again_updates_in_place(
     signoz_api: httpx.Client, dashboard_ids: dict[str, str]
 ) -> None:
@@ -51,6 +55,7 @@ def test_applying_again_updates_in_place(
     assert signoz.provision(signoz_api) == dashboard_ids
 
 
+@pytest.mark.dashboards("*")
 def test_every_panel_query_returns_data(
     signoz_api: httpx.Client, dashboard_ids: dict[str, str], telemetry: Telemetry
 ) -> None:
@@ -104,6 +109,7 @@ def _same(found: dict[str, list[tuple[int, float]]], expected: dict[str, Any]) -
         ), scope
 
 
+@pytest.mark.dashboards("trade-agent-operacao")
 def test_daily_scope_pnl_is_the_day_so_far(signoz_api: httpx.Client, telemetry: Telemetry) -> None:
     expected = telemetry.summary.daily_scope_series(time.time_ns())
     found = _daily(signoz_api)
@@ -111,6 +117,7 @@ def test_daily_scope_pnl_is_the_day_so_far(signoz_api: httpx.Client, telemetry: 
     assert all(points[0][1] == 0 for points in found.values())  # the day starts at zero
 
 
+@pytest.mark.dashboards("trade-agent-operacao")
 @pytest.mark.parametrize("hours", [1, 6, 7 * 24])
 def test_daily_scope_pnl_ignores_the_time_range(
     signoz_api: httpx.Client, telemetry: Telemetry, hours: float
@@ -119,6 +126,7 @@ def test_daily_scope_pnl_ignores_the_time_range(
     _same(_daily(signoz_api, hours=hours), telemetry.summary.daily_scope_series(time.time_ns()))
 
 
+@pytest.mark.dashboards("trade-agent-operacao")
 def test_daily_scope_pnl_restarts_at_the_utc_midnight(
     signoz_api: httpx.Client, telemetry: Telemetry
 ) -> None:

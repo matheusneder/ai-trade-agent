@@ -24,6 +24,7 @@ def api(stack: Stack, seeded: Dataset) -> Iterator[httpx.Client]:
         yield client
 
 
+@pytest.mark.dashboards("*")
 def test_every_versioned_dashboard_is_provisioned(api: httpx.Client) -> None:
     found = api.get("/api/search", params={"tag": "trade-agent"}).raise_for_status().json()
     assert {d["uid"] for d in found} == set(BOARDS)
@@ -36,6 +37,7 @@ def test_every_versioned_dashboard_is_provisioned(api: httpx.Client) -> None:
         ]
 
 
+@pytest.mark.dashboards
 @pytest.mark.parametrize("uid", ["trade-agent-pg", "trade-agent-loki"])
 def test_data_sources_are_healthy(api: httpx.Client, uid: str) -> None:
     """The versioned provisioning reaches the ephemeral services (grafana_ro on PostgreSQL)."""
@@ -49,6 +51,7 @@ def _rule_states(api: httpx.Client) -> dict[str, dict[str, Any]]:
     return {r["labels"].get("__alert_rule_uid__", r["name"]): r for r in rules}
 
 
+@pytest.mark.dashboards
 def test_alert_rules_evaluate_with_data_and_stay_normal(api: httpx.Client) -> None:
     """The three rules read the seeded tables: fresh telemetry, no unprotected position and a
     drawdown under 10 %. Grafana evaluates them every minute; the first evaluation may

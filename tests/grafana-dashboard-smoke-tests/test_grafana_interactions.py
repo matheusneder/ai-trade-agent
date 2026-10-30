@@ -26,6 +26,7 @@ TRADES = query_text(
 )
 
 
+@pytest.mark.dashboards("ta-performance")
 def test_time_range_picker_refetches_and_filters(grafana: GrafanaPage, seeded: Dataset) -> None:
     """``Last 6 hours`` counts only the trades closed in the window Grafana sent."""
     page, watch = grafana
@@ -55,6 +56,7 @@ DAILY = query_text(
 )
 
 
+@pytest.mark.dashboards("ta-overview")
 @pytest.mark.parametrize(
     "window",
     ["&from=now-1h&to=now", "&from=now-7d&to=now", "&from=now-3d&to=now-2d"],
@@ -78,6 +80,7 @@ def test_daily_scope_pnl_ignores_the_time_range(
         expect(chart.get_by_test_id(f"data-testid VizLegend series {scope}")).to_be_visible()
 
 
+@pytest.mark.dashboards("ta-overview")
 def test_refresh_button_runs_every_query_again(grafana: GrafanaPage) -> None:
     page, watch = grafana
     board = open_dashboard(page, watch, "ta-overview")
@@ -87,6 +90,7 @@ def test_refresh_button_runs_every_query_again(grafana: GrafanaPage) -> None:
     assert all(r.error is None and r.rows > 0 for r in watch.results)
 
 
+@pytest.mark.dashboards("ta-performance")
 def test_view_panel_opens_one_panel(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     open_dashboard(page, watch, "ta-performance")
@@ -99,6 +103,7 @@ def test_view_panel_opens_one_panel(grafana: GrafanaPage, seeded: Dataset) -> No
     expect(page.get_by_test_id("data-testid Panel header Taxa de acerto")).to_have_count(0)
 
 
+@pytest.mark.dashboards("ta-logs")
 def test_service_variable_filters_the_logs(grafana: GrafanaPage) -> None:
     """Picking one service narrows the URL, the queries and the legend to it.
 
@@ -129,6 +134,7 @@ def test_service_variable_filters_the_logs(grafana: GrafanaPage) -> None:
     expect(legend.get_by_test_id("data-testid VizLegend series grafana")).to_have_count(0)
 
 
+@pytest.mark.dashboards("ta-logs")
 def test_regex_search_filters_the_log_lines(grafana: GrafanaPage) -> None:
     page, watch = grafana
     board = open_dashboard(page, watch, "ta-logs", "&from=now-24h&to=now")
@@ -148,6 +154,7 @@ def test_regex_search_filters_the_log_lines(grafana: GrafanaPage) -> None:
     expect(logs.get_by_text("Request Completed")).to_have_count(0)
 
 
+@pytest.mark.dashboards("ta-logs")
 def test_level_variable_reaches_the_queries(grafana: GrafanaPage) -> None:
     """The level selection (from the URL, as a shared link would carry it) reaches LogQL."""
     page, watch = grafana

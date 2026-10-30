@@ -14,6 +14,10 @@ PostgreSQL and Loki, and Chromium (Playwright) opens every dashboard.
 >   [`tests/support/grafana_seed.py`](../support/grafana_seed.py).
 > - The tests evolve together with the dashboards: a dashboard change is not done while this
 >   suite is red or does not cover it.
+> - A new test says which dashboards it reads: `@pytest.mark.dashboards("ta-overview")` (`"*"`:
+>   all; bare: none), unless a `uid` parameter tells it. The mutation tests run a mutant of the
+>   generator only against the tests of the dashboards it changes
+>   ([`tests/mutation/README.md`](../mutation/README.md)).
 
 ## What is checked
 
@@ -81,6 +85,10 @@ bare file name. The test files carry the `grafana` prefix and the fixtures live 
   process is gone, never the stack of a run still going (two runs can share the machine).
 - `GRAFANA_SMOKE_KEEP=1` keeps the stack for debugging until the next run removes it (or
   `docker compose -p ta-grafana-smoke-<pid>-<id> down -v`, from the repository root).
+- `GRAFANA_SMOKE_ATTACH=<file>` (the mutation tests) attaches the session to a stack already
+  running and seeded, described by that JSON (`Attached` in `grafana_stack.py`): nothing starts
+  or stops, and the session provisions the generator's output (`build()`) into the folder
+  Grafana reads (`SMOKE_GRAFANA_DASHBOARDS`) instead of the versioned JSON.
 
 **Loki and Jaeger.** The Logs dashboard reads only Loki, so Loki is part of the stack and
 receives the synthetic day's logs (agent JSON lines with the `event` metadata and tracebacks,

@@ -4,7 +4,12 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from tests.support.grafana_stack import PROJECT, PROJECT_PREFIX, _process_alive
+
+# no dashboard read here (the mutation tests leave these out for a mutant of the generator)
+pytestmark = pytest.mark.dashboards
 
 
 def test_project_names_carry_the_owner_pid() -> None:

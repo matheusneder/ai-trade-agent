@@ -9,6 +9,8 @@ from scripts import signoz_dashboards
 
 from tests.support.signoz_smoke import otlp, seed
 
+# no dashboard read here (the mutation tests leave these out for a mutant of the generator)
+pytestmark = pytest.mark.dashboards
 END = datetime(2026, 10, 16, 18, 0, tzinfo=UTC)
 
 
@@ -84,6 +86,7 @@ def test_activity_follows_the_day(day: seed.Telemetry) -> None:
     assert sum(hours[13:17]) > 1.2 * sum(hours[1:5])
 
 
+@pytest.mark.dashboards("*")
 def test_every_panel_has_something_to_show(day: seed.Telemetry) -> None:
     """Rare events happen at least once, and every metric of the dashboards is emitted."""
     summary = day.summary
