@@ -60,15 +60,21 @@ def test_the_review_matrix_runs_the_forward_window_and_the_break_even_variants(
 ) -> None:
     experiments = ex.review_matrix(CONFIG["profiles"])
     labels = [e.label for e in experiments]
-    assert len(labels) == len(set(labels)) == 32
+    assert len(labels) == len(set(labels)) == 44
     groups = {g: sum(e.group == g for e in experiments) for g in ex.REVIEW_GROUPS}
-    assert groups == {"R": 6, "Rbe": 6, "Rnobe": 4, "Rfwd": 6, "Rfwd_be": 6, "Rdemo": 4}
+    assert groups == {
+        "R": 6, "Rbe": 6, "Rnobe": 4, "Rfwd": 6, "Rfwd_be": 6, "Rdemo": 4, "Rfinal": 6,
+        "Rfinal_fwd": 6,
+    }  # fmt: skip
     assert all(e.alts == e.label.endswith("-alts") for e in experiments)
     for experiment in experiments:  # every profile file is a valid configuration
         directory = tmp_path / experiment.label
         directory.mkdir()
         config = load_strategy_config(ex.profiles_file(CONFIG, experiment, directory))
         (profile,) = config.profiles.values()
+        if experiment.group in ("Rfinal", "Rfinal_fwd"):
+            assert experiment.overrides == {}  # the repository profiles as they are
+            continue
         assert profile.protection.break_even_intrabar == (experiment.group in ("Rbe", "Rfwd_be"))
         if experiment.group == "Rnobe":
             assert profile.protection.break_even_after_r is None

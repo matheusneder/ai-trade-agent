@@ -34,7 +34,9 @@ carries after D-047:
   a calibration (the Demo's losing month included); ``Rfwd_be``: the same with the intrabar
   break-even;
 * ``Rdemo``: the profiles that traded on the Demo in 2026-10 (before D-039 and D-041) on the
-  forward window, to check that the lab reproduces the Demo's result.
+  forward window, to check that the lab reproduces the Demo's result;
+* ``Rfinal`` and ``Rfinal_fwd``: the repository profiles as they are after D-047 (no override),
+  on the 15 windows and on the forward window: the "after" of the review's comparison.
 
 On ``--alts`` the forward runs take the tier lists, the 18 volatile alts and the alts the Demo
 traded or saw in 2026-10 (``REVIEW_ALTS``), each under the universe's 24h volume gate.
@@ -89,7 +91,7 @@ REVIEW_ALTS: tuple[str, ...] = (
     "STRK/USDT", "SUI/USDT", "TIA/USDT", "W/USDT", "WLD/USDT", "ZRO/USDT",
 )  # fmt: skip
 """Alts the Demo traded or saw in 2026-10, besides ``lab.walk_forward.ALTS``."""
-REVIEW_GROUPS = ("R", "Rbe", "Rnobe", "Rfwd", "Rfwd_be", "Rdemo")
+REVIEW_GROUPS = ("R", "Rbe", "Rnobe", "Rfwd", "Rfwd_be", "Rdemo", "Rfinal", "Rfinal_fwd")
 AT_CLOSE: dict[str, Any] = {"protection": {"break_even_intrabar": False}}
 INTRABAR: dict[str, Any] = {"protection": {"break_even_intrabar": True}}
 NO_BREAK_EVEN: dict[str, Any] = {
@@ -241,6 +243,9 @@ def review_matrix(profiles: dict[str, Any]) -> list[Experiment]:
             Experiment(f"Rfwd-{name}", "Rfwd", name, reviewed, (*FORWARD, *basket), True),
             Experiment(f"Rfwd_be-{name}", "Rfwd_be", name, intrabar, args=FORWARD),
             Experiment(f"Rfwd_be-{name}", "Rfwd_be", name, intrabar, (*FORWARD, *basket), True),
+            Experiment(f"Rfinal-{name}", "Rfinal", name),
+            Experiment(f"Rfinal_fwd-{name}", "Rfinal_fwd", name, args=FORWARD),
+            Experiment(f"Rfinal_fwd-{name}", "Rfinal_fwd", name, {}, (*FORWARD, *basket), True),
         ]
         if name in DEMO_ERA:
             no_break_even = merge(reviewed, NO_BREAK_EVEN)
