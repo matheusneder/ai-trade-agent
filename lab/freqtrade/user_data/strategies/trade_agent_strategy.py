@@ -12,7 +12,8 @@ into the container through ``PYTHONPATH``) and replicates the agent's native pro
 * the Risk Guard's minimum R:R: no entry when ``(activation − fee) / (stop + fee)`` is below
   ``min_reward_risk`` (``pre_trade`` in ``config/stop_conditions.yaml``);
 * risk-based size: ``wallet × risk_per_trade / stop_pct``, capped per position;
-* the agent's decision exits: stop at *break-even* after ``break_even_r`` and the maximum
+* the agent's decision exits: stop at *break-even* after ``break_even_r`` (at the candle
+  close, or also on each detail candle with ``break_even_intrabar``, D-047) and the maximum
   holding time;
 * with ``universe_min_volume`` (``--alts``), entries only while the pair's 24h quote volume
   reaches the universe's minimum, as the agent only sees a pair inside its universe.
@@ -201,6 +202,11 @@ class TradeAgentStrategy(IStrategy):
     exit_score = DecimalParameter(-0.8, 0.2, default=-0.2, decimals=2, space="sell")
     # Decision exits of the agent (``trade_agent.strategy.exits``), from the profile; 0 = off.
     break_even_r = DecimalParameter(0, 5, default=0, decimals=2, space="sell", optimize=False)
+    # 1: the break-even is also checked between the candle closes (D-047), here on each
+    # detail candle's high, which the agent polls on the bid at the risk check's cadence.
+    break_even_intrabar = DecimalParameter(
+        0, 1, default=0, decimals=0, space="sell", optimize=False
+    )
     max_holding_hours = DecimalParameter(
         0, 2000, default=0, decimals=0, space="sell", optimize=False
     )
@@ -490,13 +496,19 @@ class TradeAgentStrategy(IStrategy):
         trigger_r = float(self.break_even_r.value)
         if trigger_r <= 0:
             return False
+        trigger = trade.open_rate * (1 + stop_pct * trigger_r)
+        if self.break_even_intrabar.value and (trade.max_rate or trade.open_rate) >= trigger:
+            # The high so far, this detail candle's included: Freqtrade adjusts the stop at the
+            # candle's high before checking it against the low, so a stop armed and hit in the
+            # same detail candle fills at break-even (the pessimistic order).
+            return True
         dataframe = self._closed_candles(pair, current_time)
         if dataframe.empty:
             return False
         last = dataframe.iloc[-1]
         if last["date"] < timeframe_to_prev_date(self.timeframe, trade.open_date_utc):
             return False
-        return float(last["close"]) >= trade.open_rate * (1 + stop_pct * trigger_r)
+        return float(last["close"]) >= trigger
 
     @_logged
     def custom_exit(

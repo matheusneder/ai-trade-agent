@@ -21,10 +21,26 @@ Groups (doc/lab-results.md, section 2.10):
   good (the drawdown review never expires), so the components are compared on the strategy's
   own edge.
 
+The ``review`` matrix (2026-11-02, D-047) runs the legacy profiles on the same lab:
+
+* ``R``: the three current profiles, unchanged (15 quarterly windows: the baseline of the
+  others on the candles downloaded for the review);
+* ``Rbe``: ``R`` with the break-even checked between the candle closes
+  (``protection.break_even_intrabar``), and ``Rnobe``: ``R`` without the break-even;
+* ``Rfwd``: the current profiles on the forward window 2026-09-01 → 2026-11-02, never used by
+  a calibration (the Demo's losing month included); ``Rfwd_be``: the same with the intrabar
+  break-even;
+* ``Rdemo``: the profiles that traded on the Demo in 2026-10 (before D-039 and D-041) on the
+  forward window, to check that the lab reproduces the Demo's result.
+
+On ``--alts`` the forward runs take the tier lists, the 18 volatile alts and the alts the Demo
+traded or saw in 2026-10 (``REVIEW_ALTS``), each under the universe's 24h volume gate.
+
 Usage::
 
     uv run python -m lab.experiments --list
     uv run python -m lab.experiments --only A B --jobs 8
+    uv run python -m lab.experiments --matrix review --jobs 6
 """
 
 import argparse
@@ -33,7 +49,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -42,6 +58,8 @@ from typing import Any
 
 import yaml
 
+from lab.walk_forward import PAIRS_BY_TIER
+from trade_agent.market.universe import Tier
 from trade_agent.strategy.profiles import StrategyConfig, parse_duration
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +78,30 @@ NO_PAUSES: dict[str, Any] = {
     "risk": {"daily_loss_pct": None, "consecutive_losses": None, "max_drawdown_pct": None}
 }
 """2023-01 to 2026-09 in one run: positions cross the quarters, as in the operation."""
+FORWARD = ("--start", "2026-09-01", "--end", "2026-11-02", "--window-months", "3")
+"""The review's forward window (D-047): one window, after every calibration's data."""
+REVIEW_ALTS: tuple[str, ...] = (
+    "AERO/USDT", "CHIP/USDT", "COMP/USDT", "ENA/USDT", "LUMIA/USDT", "METIS/USDT", "MET/USDT",
+    "NIL/USDT", "ORCA/USDT", "PYTH/USDT", "QKC/USDT", "RENDER/USDT", "SNDKB/USDT", "SPCXB/USDT",
+    "STRK/USDT", "SUI/USDT", "TIA/USDT", "W/USDT", "WLD/USDT", "ZRO/USDT",
+)  # fmt: skip
+"""Alts the Demo traded or saw in 2026-10, besides ``lab.walk_forward.ALTS``."""
+REVIEW_GROUPS = ("R", "Rbe", "Rnobe", "Rfwd", "Rfwd_be", "Rdemo")
+INTRABAR: dict[str, Any] = {"protection": {"break_even_intrabar": True}}
+NO_BREAK_EVEN: dict[str, Any] = {"protection": {"break_even_after_r": None}}
+DEMO_ERA: dict[str, dict[str, Any]] = {
+    "swing_trend": {
+        "allocation": {"risk_per_trade_pct": 1.2},
+        "protection": {"take_profit": {"activation_pct": 9.7}},
+        "signals": {"min_stop_atr": 0.0},
+    },
+    "momentum_alpha": {
+        "protection": {"stop": {"max_pct": 5.0}, "take_profit": {"activation_pct": 9.5}},
+        "signals": {"min_stop_atr": 0.0},
+    },
+}
+"""The profiles behind the Demo's 2026-10 trades: before D-034 (``momentum_alpha``), D-039
+(both: ``min_stop_atr`` 0 never skips a setup) and D-041 (``swing_trend``)."""
 
 
 @dataclass(frozen=True)
@@ -159,6 +201,51 @@ def matrix(profiles: dict[str, Any]) -> list[Experiment]:
     ]
 
 
+def tier_pairs(profile: dict[str, Any]) -> list[str]:
+    """``lab.walk_forward.profile_pairs`` on the raw profile: the tier lists it may use."""
+    return [
+        pair
+        for tier in Tier
+        if float(profile["tiers"].get(tier.value, 0)) > 0
+        for pair in PAIRS_BY_TIER[tier]
+    ]
+
+
+def review_matrix(profiles: dict[str, Any]) -> list[Experiment]:
+    """The review's experiments (D-047), each on the tier lists and on ``--alts``."""
+    experiments: list[Experiment] = []
+    for name in LEGACY:
+        basket = ("--pairs", *tier_pairs(profiles[name]), *REVIEW_ALTS)
+        experiments += [
+            Experiment(f"R-{name}", "R", name),
+            Experiment(f"Rbe-{name}", "Rbe", name, INTRABAR),
+            Experiment(f"Rfwd-{name}", "Rfwd", name, args=FORWARD),
+            Experiment(f"Rfwd-{name}", "Rfwd", name, args=(*FORWARD, *basket), alts=True),
+            Experiment(f"Rfwd_be-{name}", "Rfwd_be", name, INTRABAR, args=FORWARD),
+            Experiment(
+                f"Rfwd_be-{name}", "Rfwd_be", name, INTRABAR, args=(*FORWARD, *basket), alts=True
+            ),
+        ]
+        if name in DEMO_ERA:
+            experiments += [
+                Experiment(f"Rnobe-{name}", "Rnobe", name, NO_BREAK_EVEN),
+                Experiment(f"Rdemo-{name}", "Rdemo", name, DEMO_ERA[name], args=FORWARD),
+                Experiment(
+                    f"Rdemo-{name}", "Rdemo", name, DEMO_ERA[name], (*FORWARD, *basket), True
+                ),
+            ]
+    # the windowed runs go on both baskets like the D-044 matrix; the forward ones are above
+    windowed = [e for e in experiments if "--start" not in e.args]
+    return [
+        *(e for e in experiments if "--start" in e.args),
+        *(
+            Experiment(e.name, e.group, e.profile, e.overrides, e.args, alts)
+            for e in windowed
+            for alts in (False, True)
+        ),
+    ]
+
+
 def profiles_file(config: dict[str, Any], experiment: Experiment, directory: Path) -> Path:
     """A profiles file with the experiment's profile alone (validated)."""
     profile = merge(config["profiles"][experiment.profile], experiment.overrides)
@@ -209,8 +296,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--resume", action="store_true", help="pula os experimentos que já têm relatório"
     )
     parser.add_argument("--profiles-file", type=Path, default=PROFILES)
+    parser.add_argument(
+        "--matrix", choices=MATRICES, default="d044", help="matriz: D-044 ou a revisão (D-047)"
+    )
     parser.add_argument("extra", nargs="*", help="argumentos extras do walk_forward (após --)")
     return parser.parse_args(argv)
+
+
+MATRICES: dict[str, Callable[[dict[str, Any]], list[Experiment]]] = {
+    "d044": matrix,
+    "review": review_matrix,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -218,7 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = yaml.safe_load(args.profiles_file.read_text(encoding="utf-8"))
     selected = [
         e
-        for e in matrix(config["profiles"])
+        for e in MATRICES[args.matrix](config["profiles"])
         if not args.only or {e.group, e.name, e.label} & set(args.only)
     ]
     if args.resume:

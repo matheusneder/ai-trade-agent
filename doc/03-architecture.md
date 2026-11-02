@@ -139,6 +139,7 @@ deploy/
 | `universe_refresh` | on every `decision_cycle` (5 min cache, shared by the profiles of the same close) | Universe filters and *tiers* (D-027) |
 | `research_cycle` | inside the `decision_cycle`, only with setups or positions; one per candle close for the profiles of the same timeframe (D-032) | LLM analyst → `MarketView` (without candidates, the last valid reading holds) |
 | `decision_cycle` | the profile's candle close + 20 s (e.g. 4h) | Signals → analyst → rule-based exits and *break-even* → entries (pre-trade checks) → OPOCO. With `TA_TRADING_ENABLED=false`, it runs in **simulation** (D-023) |
+| `watch_break_even` | 1 min, only with a profile that has `break_even_intrabar` | The *break-even* of the protected positions between the candle closes, on the bid (D-047); each position's stop moves once |
 | `telegram` | continuous (*long polling*) | Operator commands (§12.3, D-022) |
 
 The periodic tasks already run at startup, after the initial reconciliation. There is no automatic daily report or scheduled backup yet: the backup is manual (runbook, §4).
@@ -212,7 +213,7 @@ The universe is built every cycle, with the volume ranking of the moment (D-027)
 - **Regime:** the LLM's `exposure_multiplier ∈ [0, 1]` scales the size of each position, not the number of slots (D-030). With 0, the profile opens no positions (reason `exposição zero`, zero exposure). Without a valid reading, each profile follows its `llm.on_failure` (§7.3).
 - **Selection:** highest scores above `min_score`, honoring the slots (`max_open_positions`), the cash reserve, the *tier* limits and the one-position-per-asset rule across profiles.
 - **Size:** `qty = (profile_capital × risk_per_trade) / (entry − stop)`, capped by `max_position_pct`, the budget and the *tier* limit, and then scaled by the `exposure_multiplier` (caution holds even when a limit defines the size), rounded to the `stepSize` and validated against `minNotional`.
-- **Decision-based exits:** rotation (score ≤ `exit_score` for `exit_after_cycles` cycles), veto and maximum holding time (`max_holding`). After `break_even_after_r` R of profit, the agent raises the stop to the entry plus the fees.
+- **Decision-based exits:** rotation (score ≤ `exit_score` for `exit_after_cycles` cycles), veto and maximum holding time (`max_holding`). After `break_even_after_r` R of profit, the agent raises the stop to the entry plus the fees, once per position: at the cycle, or also between the closes, on the bid every minute, with `break_even_intrabar` (D-047). The lab checks the same trigger on the 4h close or, with the flag, on each 5m detail candle.
 
 ## 7. LLM analyst (`research/`)
 
@@ -322,6 +323,7 @@ profiles:
       stop: {mode: fixed, atr_mult: 3.1, max_pct: 4.5}   # fixed | trailing
       take_profit: {mode: trailing, activation_pct: 9.7, trailing_delta_bps: 100}
       break_even_after_r: 1.2   # adjustment made by the agent
+      break_even_intrabar: false  # true: also checked between the closes, every minute (D-047)
       max_holding: 18d
     exits: {exit_score: -0.46, exit_after_cycles: 1}
     signals: {adx_min: 24.0, rsi_pullback_max: 41.0, vol_rel_min: 2.3, min_stop_atr: 1.5}
