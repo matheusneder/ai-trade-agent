@@ -600,6 +600,22 @@ The configuration that traded until 2026-10-30 would have been halted by its own
 
 **Adopted (D-047, the operator's choices among the options above):** risk per trade 1.5% → **0.75%** in `swing_trend` and `momentum_alpha` (at the D-046 shares the lab's path stays at 7.7–9.1% of drawdown, with about half the return: +23% / +20% over 44 months against +46% / +39%); **`break_even_intrabar` on the three legacy profiles**, the Demo being its validation; the analyst and the pair-local profiles unchanged. At the caps the lots fall to about 58 and 35 USDT, and the analyst's exposure still scales them.
 
+**Before and after** (`R`: the profiles as reviewed; `Rfinal`: `config/profiles.yaml` after D-047, no override; design 2023–2024 / holdout 2025–2026 / forward 2026-09 → 2026-11-02; tier lists / `--alts`; the Sharpe is the daily one of the windows' equity, annualized with √365; the expectancy in R and the profit factor do not depend on the risk per trade, the returns and the drawdowns do):
+
+| Profile | Period | Return, before → after | Worst window DD, before → after | Sharpe, before → after | PF, before → after | Win %, before → after | Expectancy R, before → after |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `swing_trend` | design | +48.8% / +56.8% → +26.8% / +27.4% | 15.1% / 15.1% → 6.4% / 6.2% | 1.32 / 1.35 → 1.56 / 1.51 | 1.60 / 1.50 → 1.74 / 1.55 | 45.0 / 41.7 → 52.2 / 49.3 | 0.32 / 0.29 → 0.34 / 0.27 |
+| `swing_trend` | holdout | +29.9% / +16.3% → +14.0% / +9.7% | 8.6% / 9.0% → 4.5% / 4.5% | 1.12 / 0.68 → 1.11 / 0.80 | 1.62 / 1.32 → 1.64 / 1.41 | 47.0 / 43.5 → 53.6 / 52.1 | 0.40 / 0.24 → 0.31 / 0.21 |
+| `swing_trend` | forward | +1.35% / −3.14% → +0.17% / −1.80% | 5.7% / 9.8% → 3.5% / 4.7% | 0.49 / −0.15 → 0.14 / −0.27 | 1.18 / 0.78 → 1.03 / 0.75 | 40.0 / 38.9 → 46.7 / 42.1 | 0.10 / −0.15 → 0.03 / −0.14 |
+| `momentum_alpha` | design | +30.4% / +28.3% → +17.3% / +23.1% | 7.3% / 10.6% → 3.8% / 5.4% | 1.04 / 0.88 → 1.24 / 1.39 | 1.41 / 1.28 → 1.54 / 1.54 | 47.3 / 44.4 → 52.6 / 53.0 | 0.22 / 0.16 → 0.23 / 0.23 |
+| `momentum_alpha` | holdout | +16.5% / +5.7% → +8.9% / +5.4% | 8.4% / 10.1% → 4.5% / 4.1% | 0.87 / 0.34 → 0.94 / 0.57 | 1.45 / 1.15 → 1.51 / 1.26 | 52.2 / 48.7 → 58.6 / 55.8 | 0.19 / 0.06 → 0.19 / 0.11 |
+| `momentum_alpha` | forward | −5.75% / −3.10% → −3.50% / −2.53% | 6.0% / 7.5% → 3.7% / 4.5% | −1.73 / −0.36 → −2.25 / −0.97 | 0.41 / 0.76 → 0.37 / 0.65 | 33.3 / 44.4 → 35.7 / 45.0 | −0.38 / −0.13 → −0.40 / −0.20 |
+| `alt_atr` | design | +16.6% / +17.0% → +8.4% / +10.9% | 7.0% / 7.0% → 7.0% / 7.0% | 0.87 / 0.89 → 0.50 / 0.62 | 1.39 / 1.39 → 1.21 / 1.27 | 46.6 / 47.7 → 48.6 / 49.5 | 0.18 / 0.17 → 0.09 / 0.11 |
+| `alt_atr` | holdout | +5.8% / +3.2% → +6.0% / +6.2% | 5.9% / 5.9% → 5.5% / 5.8% | 0.41 / 0.25 → 0.43 / 0.44 | 1.19 / 1.11 → 1.20 / 1.20 | 49.4 / 46.8 → 52.6 / 51.3 | 0.11 / 0.07 → 0.11 / 0.12 |
+| `alt_atr` | forward | +2.79% / +0.59% → +1.36% / +1.06% | 3.9% / 5.0% → 3.9% / 4.5% | 1.16 / 0.81 → 0.65 / 1.08 | 1.39 / 1.07 → 1.19 / 1.14 | 46.7 / 41.2 → 46.7 / 47.1 | 0.19 / 0.00 → 0.08 / 0.03 |
+
+Weighted by the D-046 shares (35 / 30 / 5, the pair-local 30% at zero), as a share of the managed capital: design +27.0% / +29.2% → +15.0% / +17.1%; holdout +15.7% / +7.5% → +7.9% / +5.3%; forward −1.1% / −2.0% → −0.9% / −1.3%. The risk per trade halves the return and the drawdown and raises the Sharpe where the intrabar break-even raises the hit rate; `alt_atr`, whose risk did not change, shows the break-even alone: less on the design, slightly more on the holdout. The forward window stays negative in both profiles that lost there.
+
 **Limitations.** Two months and one regime on the forward window (10–20 trades per run); the holdout is not out of sample; the static baskets with 20 hand-picked alts carry selection bias; the lab fills at the open and at the stop price with no delay or slippage; the global stop conditions, the tier ranking and the analyst are not simulated.
 
 ## 3. Out-of-sample results (2026-10-01)
