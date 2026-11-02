@@ -6,7 +6,9 @@
    candles: the benchmark only feeds the regime telemetry, and they go on without it;
 3. LLM analyst, only when there are setups or positions (saves cost), with per-profile
    degradation;
-4. rule-based exits for the profile's positions (rotation, time, veto) and break-even;
+4. rule-based exits for the profile's positions (rotation, time, veto) and break-even, which
+   the profiles with ``break_even_intrabar`` also check between the closes
+   (:meth:`DecisionEngine.watch_break_even`, D-047);
 5. entries: portfolio (``plan_entries``) → pre-trade checks → OPOCO.
 
 With ``dry_run`` (the ``TA_TRADING_ENABLED`` lock off), decisions are recorded as events
@@ -108,6 +110,8 @@ class UniverseCache:
 
 REGIME_EVENT = "market.regime_changed"
 REGIME_CHECKPOINT = "market.regime.{timeframe}"
+BREAK_EVEN_CHECKPOINT = "break_even.{decision}"
+"""The position's stop already went to break-even: the OCO swap is never repeated (D-047)."""
 
 
 def regime_summary(timeframe: str, regime: Regime) -> dict[str, object]:
@@ -708,11 +712,60 @@ class DecisionEngine:
                 continue
             if profile.family.local:
                 continue  # no break-even in the pair-local families (D-044)
-            bid = (await self._api.book_ticker(position.symbol)).bid_price
-            protection = break_even_protection(position, profile, bid)
-            if protection is not None and not self._dry_run:
-                await self._positions.adjust_protection(position, protection)
+            await self._break_even(position, profile)
         return exits
+
+    async def _break_even(self, position: Position, profile: ProfileConfig) -> bool:
+        """Raises the stop to break-even once per position (D-047): while the price stays
+        above the trigger, the OCO swap (cancel and replace, with its fail-safe) is not
+        repeated at every check. Returns whether the protection was adjusted now."""
+        key = BREAK_EVEN_CHECKPOINT.format(decision=position.decision_id)
+        if await self._store.get_checkpoint(key):
+            return False
+        bid = (await self._api.book_ticker(position.symbol)).bid_price
+        protection = break_even_protection(position, profile, bid)
+        if protection is None:
+            return False
+        if not self._dry_run:
+            adjusted = await self._positions.adjust_protection(position, protection)
+            if adjusted.protection_seq == position.protection_seq:
+                return False  # outcome unknown or refused: checked again at the next pass
+        await self._store.set_checkpoint(
+            key, {"seq": position.protection_seq + 1, "bid": str(bid), "dry_run": self._dry_run}
+        )
+        log.info(
+            "decision.break_even",
+            symbol=position.symbol,
+            position_id=position.id,
+            bid=str(bid),
+            dry_run=self._dry_run,
+        )
+        return True
+
+    @tracing.traced("decision", "decision.break_even")
+    async def watch_break_even(self) -> list[str]:
+        """Break-even between the candle closes (D-047): the protected positions of the
+        profiles with ``break_even_intrabar`` are checked against the bid at the risk check's
+        cadence, not only at the cycle. Returns the symbols whose stop moved now."""
+        watched = {
+            p.code: (name, p)
+            for name, p in self._strategy.enabled_profiles().items()
+            if p.protection.break_even_intrabar
+        }
+        adjusted: list[str] = []
+        if not watched:
+            return adjusted
+        for position in await self._store.active_positions():
+            owner = watched.get(position.profile)
+            if owner is None or position.state not in _EXIT_STATES:
+                continue
+            name, profile = owner
+            if not (await self._guard.effective(name)).allows_rule_exits:
+                continue
+            if await self._break_even(position, profile):
+                adjusted.append(position.symbol)
+        tracing.annotate(adjusted=adjusted)
+        return adjusted
 
     async def _entries(
         self,

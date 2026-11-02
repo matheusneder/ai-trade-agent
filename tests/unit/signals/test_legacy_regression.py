@@ -49,7 +49,9 @@ def _base_snapshot(tmp_path: Path) -> dict[str, str]:
     base = yaml.safe_load(config.read_text(encoding="utf-8"))
     current = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     for name in PROFILES:
-        base["profiles"][name] = current["profiles"][name]
+        profile = base["profiles"][name] = current["profiles"][name]
+        # the base commit's schema forbids the fields added since (D-047); they change no signal
+        profile["protection"].pop("break_even_intrabar", None)
     config.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
     env = {
         **os.environ,

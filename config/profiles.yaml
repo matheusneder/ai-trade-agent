@@ -13,7 +13,8 @@ profiles:
     # Recalibrated on 2026-10-01: median of the 15 trainings of the optimized walk-forward
     # (var/lab/walk-forward-swing_trend-otimizado-20261001-190610.md, 4h candles
     # since 2021-10). Risk, break-even and maximum holding are not optimized by the
-    # lab and stay as they were. Risk 1.5% and activation 13% since 2026-10-25 (D-041,
+    # lab and stay as they were. Activation 13% since 2026-10-25 (D-041; its 1.5% of risk
+    # went to 0.75% on 2026-11-02, D-047, doc/lab-results.md section 2.12),
     # doc/lab-results.md section 2.9).
     code: swg
     enabled: true
@@ -21,10 +22,10 @@ profiles:
     timeframe: 4h
     tiers: {core: 0.70, large: 0.30, mid: 0.0, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lots of ~147 USDT per trade (were ~275 at 0.65)
+      max_open_positions: 2    # Lots of ~58 USDT at the 4.5% stop cap (D-047; were ~147 at 1.5%)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15   # 15% liquidity for rebalancing
-      risk_per_trade_pct: 1.5  # D-041 (was 1.2)
+      risk_per_trade_pct: 0.75  # D-047 (was 1.5): the lab's own path stays under the 15% halt
     entry:
       min_score: 0.67          # walk-forward (was 0.65)
       order: limit_fok
@@ -33,6 +34,7 @@ profiles:
       stop: {mode: fixed, atr_mult: 3.1, max_pct: 4.5}   # walk-forward: atr_mult 3.1 (was 2.9)
       take_profit: {mode: trailing, activation_pct: 13.0, trailing_delta_bps: 100}   # D-041: activation 13 (was 9.7)
       break_even_after_r: 1.2  # Moves the stop to 0 after 1.2R of profit (removes reversal risk)
+      break_even_intrabar: true  # D-047: also checked on the bid every minute
       max_holding: 18d
     exits:
       exit_score: -0.46        # walk-forward (was -0.53)
@@ -61,10 +63,10 @@ profiles:
     timeframe: 4h              # Moved from 1h to 4h to remove noise and fees
     tiers: {core: 0.30, large: 0.50, mid: 0.20, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lots of ~145 USDT
+      max_open_positions: 2    # Lots of ~35 USDT at the 6.5% stop cap (D-047; were ~69 at 1.5%)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15
-      risk_per_trade_pct: 1.5  # D-045: back from D-041's 2.0 (13.28% worst window on --alts)
+      risk_per_trade_pct: 0.75  # D-047 (was 1.5): the lab's own path stays under the 15% halt
     entry:
       min_score: 0.67          # walk-forward (was 0.62)
       order: limit_fok
@@ -73,6 +75,7 @@ profiles:
       stop: {mode: fixed, atr_mult: 3.0, max_pct: 6.5}   # D-034: cap 6.5 (was 5.0); atr_mult from the walk-forward
       take_profit: {mode: trailing, activation_pct: 13.0, trailing_delta_bps: 130}   # D-034: activation 13 (was 9.5)
       break_even_after_r: 1.0  # Protects the capital right at 1.0R
+      break_even_intrabar: true  # D-047: also checked on the bid every minute
       max_holding: 6d          # Quick exit if the thesis does not expand
     exits: 
       exit_score: -0.46        # walk-forward (was -0.45)
@@ -114,6 +117,7 @@ profiles:
       # would pass (exactly 1.5) and 2025-2026 goes from +11% to -5% (doc/lab-results.md, 2.3)
       take_profit: {mode: trailing, activation_pct: 10.9, trailing_delta_bps: 150}
       break_even_after_r: 1.0
+      break_even_intrabar: true  # D-047: also checked on the bid every minute
       max_holding: 10d
     exits:
       exit_score: -0.46

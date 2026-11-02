@@ -55,6 +55,59 @@ def test_the_matrix_covers_every_group_on_both_universes(tmp_path: Path) -> None
     }
 
 
+def test_the_review_matrix_runs_the_forward_window_and_the_break_even_variants(
+    tmp_path: Path,
+) -> None:
+    experiments = ex.review_matrix(CONFIG["profiles"])
+    labels = [e.label for e in experiments]
+    assert len(labels) == len(set(labels)) == 44
+    groups = {g: sum(e.group == g for e in experiments) for g in ex.REVIEW_GROUPS}
+    assert groups == {
+        "R": 6, "Rbe": 6, "Rnobe": 4, "Rfwd": 6, "Rfwd_be": 6, "Rdemo": 4, "Rfinal": 6,
+        "Rfinal_fwd": 6,
+    }  # fmt: skip
+    assert all(e.alts == e.label.endswith("-alts") for e in experiments)
+    for experiment in experiments:  # every profile file is a valid configuration
+        directory = tmp_path / experiment.label
+        directory.mkdir()
+        config = load_strategy_config(ex.profiles_file(CONFIG, experiment, directory))
+        (profile,) = config.profiles.values()
+        if experiment.group in ("Rfinal", "Rfinal_fwd"):
+            assert experiment.overrides == {}  # the repository profiles as they are
+            continue
+        assert profile.protection.break_even_intrabar == (experiment.group in ("Rbe", "Rfwd_be"))
+        if experiment.group == "Rnobe":
+            assert profile.protection.break_even_after_r is None
+        if experiment.profile != "alt_atr" and experiment.group != "Rdemo":
+            assert profile.allocation.risk_per_trade_pct == 1.5  # the reviewed value (D-047)
+    forward = next(e for e in experiments if e.label == "Rfwd-momentum_alpha-alts")
+    assert forward.args[:6] == ex.FORWARD
+    assert forward.args[6] == "--pairs"
+    pairs = forward.args[7:]
+    assert "BTC/USDT" in pairs and "ATOM/USDT" in pairs and "STRK/USDT" in pairs
+    assert next(e for e in experiments if e.label == "Rfwd-momentum_alpha").args == ex.FORWARD
+    alt = next(e for e in experiments if e.label == "Rfwd-alt_atr-alts")
+    assert "BTC/USDT" not in alt.args  # alt_atr has no core tier
+    demo = next(e for e in experiments if e.label == "Rdemo-swing_trend")
+    swing = ex.merge(CONFIG["profiles"]["swing_trend"], demo.overrides)
+    assert swing["allocation"]["risk_per_trade_pct"] == 1.2
+    assert swing["protection"]["take_profit"]["activation_pct"] == 9.7
+    assert swing["protection"]["break_even_intrabar"] is False
+    assert swing["signals"]["min_stop_atr"] == 0.0
+    momentum = ex.merge(CONFIG["profiles"]["momentum_alpha"], ex.DEMO_ERA["momentum_alpha"])
+    assert momentum["allocation"]["risk_per_trade_pct"] == 1.5
+    assert momentum["protection"]["stop"]["max_pct"] == 5.0
+    assert ex.tier_pairs(CONFIG["profiles"]["alt_atr"])[0] == "SOL/USDT"
+
+
+def test_main_selects_the_review_matrix(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert ex.main(["--list", "--matrix", "review", "--only", "Rdemo"]) == 0
+    listed = capsys.readouterr().out.splitlines()
+    assert len(listed) == 4 and all(line.startswith("Rdemo ") for line in listed)
+
+
 def test_run_gives_each_experiment_its_own_user_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

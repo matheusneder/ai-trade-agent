@@ -137,9 +137,18 @@ class ProtectionConfig(_Strict):
     stop: StopConfig
     take_profit: TakeProfitConfig
     break_even_after_r: float | None = Field(default=None, gt=0)
+    break_even_intrabar: bool = False
+    """Check ``break_even_after_r`` between the candle closes too, on the bid at the risk
+    check's cadence (D-047); the lab checks it on each detail candle. Off: only at the close."""
     max_holding: timedelta | None = None
 
     _max_holding = field_validator("max_holding", mode="before")(parse_duration)
+
+    @model_validator(mode="after")
+    def _break_even(self) -> "ProtectionConfig":
+        if self.break_even_intrabar and self.break_even_after_r is None:
+            raise ValueError("break_even_intrabar exige break_even_after_r")
+        return self
 
     def policy(
         self,

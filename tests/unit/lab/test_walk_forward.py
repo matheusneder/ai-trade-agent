@@ -90,6 +90,15 @@ def test_strategy_params_pre_trade_from_stop_conditions() -> None:
     assert {"min_reward_risk", "round_trip_fee"} <= wf.RISK_PARAMS
 
 
+def test_strategy_params_intrabar_break_even() -> None:
+    data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
+    data["profiles"]["conservador"]["protection"]["break_even_intrabar"] = True
+    profile = StrategyConfig.model_validate(data).profiles["conservador"]
+    sell = wf.strategy_params(profile)["params"]["sell"]
+    assert sell["break_even_intrabar"] == 1 and sell["break_even_r"] == 1.0
+    assert "break_even_intrabar" in wf.RISK_PARAMS  # never optimized
+
+
 def test_strategy_params_min_stop_atr_and_universe_volume() -> None:
     data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
     data["profiles"]["conservador"]["signals"] = {"min_stop_atr": 1.5}
@@ -273,6 +282,7 @@ def test_strategy_params_fixed_and_trailing_stop() -> None:
     assert fixed["sell"]["tp_activation_max"] == 0.0
     assert fixed["sell"]["atr_stop_mult"] == 2.0
     assert fixed["sell"]["break_even_r"] == 1.0
+    assert fixed["sell"]["break_even_intrabar"] == 0  # only at the candle close
     assert fixed["sell"]["max_holding_hours"] == 21 * 24
     trailing = wf.strategy_params(CONFIG.profiles["agressivo"])["params"]["sell"]
     assert trailing["stop_max_pct"] == pytest.approx(0.08)

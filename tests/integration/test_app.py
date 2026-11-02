@@ -21,6 +21,7 @@ from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.errors import BinanceConfigurationError
 from trade_agent.persistence.db import AlreadyRunningError, Database
 from trade_agent.persistence.store import Store
+from trade_agent.runtime import job_name
 
 PROFILES = Path(__file__).parents[1] / "fixtures" / "profiles.yaml"
 
@@ -66,6 +67,19 @@ async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -
         assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h"]  # agressivo turned off
         assert len(runtime._periodic) == 2  # risk (with telemetry) and news
         assert runtime._heartbeat is None  # no TA_HEALTHCHECK_URL
+
+
+async def test_build_runtime_watches_the_break_even_between_closes(
+    postgres_url: str, tmp_path: Path
+) -> None:
+    data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
+    data["profiles"]["conservador"]["protection"]["break_even_intrabar"] = True
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(yaml.safe_dump(data), encoding="utf-8")
+    settings = _settings(postgres_url, strategy_config=profiles)
+    async with build_runtime(settings, user_stream=False) as runtime:
+        jobs = [(interval, job_name(action)) for interval, action in runtime._periodic]
+        assert jobs[2] == (app.BREAK_EVEN_INTERVAL_S, "watch_break_even")
 
 
 async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Database) -> None:

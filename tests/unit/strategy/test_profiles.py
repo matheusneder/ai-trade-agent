@@ -180,6 +180,22 @@ def test_fixed_stop_drives_signal_atr_multiple_and_cap() -> None:
     assert trailing.max_stop_pct == SignalParams().max_stop_pct
 
 
+def test_break_even_intrabar_needs_the_trigger() -> None:
+    data = _raw()
+    protection = data["profiles"]["conservador"]["protection"]
+
+    def loaded() -> bool:
+        profile = StrategyConfig.model_validate(data).profiles["conservador"]
+        return profile.protection.break_even_intrabar
+
+    assert loaded() is False
+    protection["break_even_intrabar"] = True
+    assert loaded() is True
+    protection["break_even_after_r"] = None
+    with pytest.raises(ValidationError, match="break_even_after_r"):
+        StrategyConfig.model_validate(data)
+
+
 def test_max_holding_formats() -> None:
     data = _raw()
     data["profiles"]["moderado"]["protection"]["max_holding"] = "36h"

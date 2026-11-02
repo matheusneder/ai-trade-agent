@@ -571,6 +571,88 @@ async def test_break_even_adjusts_protection(
     assert position.state is PositionState.PROTECTED
 
 
+def _intrabar_strategy() -> StrategyConfig:
+    data = _strategy_data()
+    data["profiles"]["conservador"]["protection"]["break_even_intrabar"] = True
+    return StrategyConfig.model_validate(data)
+
+
+async def test_break_even_watch_adjusts_once_between_cycles(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    engine, _ = _engine(api, service, store, strategy=_intrabar_strategy())
+    await engine.run_profile("conservador")
+    assert await engine.watch_break_even() == []  # below the trigger
+    fake.set_price("SOLUSDT", D(160))
+    with capture_logs() as logs:
+        assert await engine.watch_break_even() == ["SOLUSDT"]
+    assert [e["symbol"] for e in logs if e["event"] == "decision.break_even"] == ["SOLUSDT"]
+    (position,) = await store.active_positions()
+    assert position.protection_seq == 1 and position.state is PositionState.PROTECTED
+    assert await engine.watch_break_even() == []  # once per position: no repeated OCO swap
+    await engine.run_profile("conservador")  # nor at the cycle
+    (position,) = await store.active_positions()
+    assert position.protection_seq == 1
+    assert await store.get_checkpoint(f"break_even.{position.decision_id}") == {
+        "seq": 1, "bid": "160", "dry_run": False,
+    }  # fmt: skip
+
+
+async def test_break_even_watch_needs_the_flag_the_state_and_a_fill(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    engine, guard = _engine(api, service, store)  # break_even_intrabar off
+    await engine.run_profile("conservador")
+    fake.set_price("SOLUSDT", D(160))
+    assert await engine.watch_break_even() == []
+    (position,) = await store.active_positions()
+    assert position.protection_seq == 0
+    watched, guard = _engine(api, service, store, strategy=_intrabar_strategy())
+    await guard.halt(GLOBAL)
+    assert await watched.watch_break_even() == []  # halted: no rule-based adjustment
+    await guard.resume(GLOBAL)
+    pending = EntryOrder("BTCUSDT", D("0.001"), D(50000), EntryMode.LIMIT_MAKER_GTC)
+    await service.open_position(profile="con", entry=pending, policy=POLICY)  # no fill
+    assert await watched.watch_break_even() == ["SOLUSDT"]  # the unfilled one is skipped
+    assert sorted(p.protection_seq for p in await store.active_positions()) == [0, 1]
+
+
+async def test_break_even_watch_retries_an_unconfirmed_adjustment(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    engine, _ = _engine(api, service, store, strategy=_intrabar_strategy())
+    await engine.run_profile("conservador")
+    fake.set_price("SOLUSDT", D(160))
+    fake.inject(Fault("POST", "/api/v3/orderList/oco", "timeout_after"))
+    for _ in range(3):
+        fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))
+    assert await engine.watch_break_even() == []  # outcome unknown: not recorded as done
+    (position,) = await store.active_positions()
+    assert position.state is PositionState.ADJUSTING
+    assert await store.get_checkpoint(f"break_even.{position.decision_id}") is None
+    adopted = await service.sync(position)  # the reconciliation adopts the new list
+    assert adopted.state is PositionState.PROTECTED and adopted.protection_seq == 1
+    assert await engine.watch_break_even() == ["SOLUSDT"]  # one more swap, then never again
+    assert await engine.watch_break_even() == []
+
+
+async def test_break_even_watch_in_dry_run_records_without_orders(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    live, _ = _engine(api, service, store, strategy=_intrabar_strategy())
+    await live.run_profile("conservador")
+    fake.set_price("SOLUSDT", D(160))
+    dry, _ = _engine(api, service, store, strategy=_intrabar_strategy(), dry_run=True)
+    assert await dry.watch_break_even() == ["SOLUSDT"]
+    assert await dry.watch_break_even() == []
+    (position,) = await store.active_positions()
+    assert position.protection_seq == 0  # no order was sent
+
+
 async def test_analyst_veto_blocks_entry_and_exits_holding(
     db: Database, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
 ) -> None:

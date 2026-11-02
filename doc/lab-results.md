@@ -1,6 +1,6 @@
 # Lab — *walk-forward* results
 
-> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9; pair-local families and the lab's parity on 2026-10-28, section 2.10; the lab's stop at the agent's price on 2026-10-28, section 2.11). The full reports, window by window, are in `var/lab/` (not versioned).
+> Result of the calibration of the profiles in use (`swing_trend` and `momentum_alpha`, 2026-10-01; revised on 2026-10-16, section 2; `alt_atr` created on 2026-10-17, section 2.3; stop-noise filter on 2026-10-22, section 2.4; re-run on 999 candles on 2026-10-22, sections 2.5 and 2.6; stop-noise filter re-checked on 999 candles on 2026-10-23, section 2.7; sections 2 to 2.6 re-run on the corrected lab on 2026-10-25, section 2.8; risk and `swing_trend` activation adopted on 2026-10-25, section 2.9; pair-local families and the lab's parity on 2026-10-28, section 2.10; the lab's stop at the agent's price on 2026-10-28, section 2.11; the review after the first Demo month on 2026-11-02, section 2.12). The full reports, window by window, are in `var/lab/` (not versioned).
 > Past results do not guarantee future results. The numbers serve to **decide whether the agent should trade** and **are not investment advice**.
 
 ## 1. Method
@@ -496,6 +496,127 @@ Freqtrade still fills at the stop price, without the slippage of the agent's sto
 - **The lab was optimistic, and still is.** Over the 15 windows `swing_trend` loses 13 p.p. on the tier lists and 7 on `--alts`, `momentum_alpha` 2 and 7; `alt_atr`, whose stops are wider, hardly moves. Freqtrade still fills at the stop price and at the candle open with no slippage, so the agent's results should sit lower still.
 - **Drawdowns.** As one continuous run, `swing_trend` reaches 30.0% / 29.1% and `momentum_alpha` 15.1% / 21.1%. The worst windows marked to market reach 15.12% in `swing_trend`.
 - **Older sections.** Sections 2 to 2.8 compare variants run on the same biased lab, so the bias moves both sides of each comparison. Here the gap between two variants of one profile moved by up to ~6 p.p. over the 15 windows (`swing_trend`'s activation on `--alts`), and the worst windows by up to ~0.6 p.p. The choices of D-034, D-036 and D-039 in sections 2.7 and 2.8 rest on margins of about 8 p.p. or more on the period they were chosen by, or reject drawdowns 3 p.p. or more above the cap, so they were not re-run; only a re-run would settle them. Section 3 is superseded.
+
+### 2.12 Strategy review after the first month on the Demo (2026-11-02, D-047)
+
+**Question.** After 47 Demo trades and −74.83 USDT (−7.48%; −61.75 on the public tape, the Demo's own spikes explain the rest), which rules or parameters were behind the loss, and what does the lab say about the configuration in force now, which has made only 2 trades since D-039 to D-046 went live? The review ran on the lab of section 2.11 (999 candles, the startup trimmed by date, causal callbacks, the entry stop from the signal candle, the stop at the agent's price), with the candles downloaded to 2026-11-03.
+
+**Rules, fixed before the runs.** The 2025-01 → 2026-09 holdout has been used by every decision since D-034, so it confirms nothing on its own. Two new checks were added: a **forward window, 2026-09-01 → 2026-11-02**, after the data of every calibration (two months, the Demo's losing month included, so it is small and one regime); and a **walk-forward re-selection** among the variants already run, choosing on the previous 4 windows and applying to the next (the cost of choosing). A variant is adopted only if it wins the design windows (2023–2024) on both baskets, does not lose the holdout, keeps every worst window under 13% and keeps its gain on the forward window. Everything is after the lab's 0.1% fee per side; the forward runs on `--alts` take the tier lists, the 18 volatile alts and the 20 alts the Demo traded or saw in 2026-10 (`lab.experiments.REVIEW_ALTS`), each under the universe's 24h volume gate.
+
+```bash
+uv run python -m lab.experiments --matrix review --jobs 6   # 32 runs, var/lab/runs/R*
+```
+
+The matrix pins the values it reviewed (`lab.experiments.REVIEWED`: 1.5% of risk per trade, the break-even at the close), so a re-run reproduces this section after D-047 changed `config/profiles.yaml`.
+
+**What the Demo's loss was made of** (the production database, read only; the full accounting is in the P&L report of 2026-11-02):
+
+- 30 stops (−121.57) against 11 trailing take-profits (+50.91) and 3 break-even stops: a 25.5% hit rate where the payoff needs 40–45%. `swing_trend` −47.86 in 17 trades (8 losses in a row since 10-09), `momentum_alpha` −20.96 in 26, the old `con` −4.89 in 2, `pair_breakout_1h` −1.13 in 2.
+- **The loss is not where the stop-noise hypothesis put it.** On the 45 legacy trades: RSI ≥ 80 at the entry, 22 trades, 32% wins, −11.80; RSI < 70, 9 trades, 11%, −21.09. A 24h change below 15%, 12 trades, 8%, −34.73; above 60%, 10 trades, 30%, −13.94. ATR below 4%, 13 trades, **no win**, −38.34. A stop under 1 ATR, 26 trades, 38%, −15.05; between 1 and 1.5 ATR, 12 trades, no win, −42.45. Retroactively, D-039 keeps 2 of the 45 (both losers). Neither does a regime gate separate them: BTC above its EMA 200 on 39 entries (the filter did its job), ETH above its EMA 200 on 13 (−39.54) against 31 below (−31.08), BTC above its EMA 50 on 18 (−48.36) against 26 below (−22.26). October 2026 was a broad alt distribution under a flat BTC: the breakouts failed whatever the filter.
+- **The agent paid more than the lab's fill.** The entries went out a median 3.4 min after the close (the research runs first) at a limit up to 18–20 bps over the ask: a median +0.10% and a mean **+0.46%** over the entry candle's open, the price the lab fills at (+20.7% of notional over the 45 trades, about 21 USDT). The lab's 0.1% fee per side is therefore short by roughly the same again on these entries.
+- **The analyst cost US$ 61.37** between 2026-09-29 and 2026-10-29 (367 calls, 129 valid readings, 9 failed; 14.56, 24.26, 8.11, 13.67 and 0.76 a week): 6.1% of the managed capital in a month, next to the −74.83 of trading. Its measured effect: an exposure multiplier of 0.80 on average (110 neutral readings at 0.80, 14 risk-on at 0.90, 5 risk-off at 0.48), 5 readings with a veto, 3 entries refused for one. Nothing measures its edge (doc 04, §6.3). The 35/30/5 portfolio's lab expectancy, about +10–15% a year on 1,000 USDT, is below a year of the analyst at that rate (about 720 USDT).
+- **The production agent repeated the break-even OCO swap at every cycle** while the price stayed above the trigger (10 `protection.adjusted` events for about 5 positions, two for SPCXB): `break_even_protection` reads the original policy, never the current stop. Fixed with D-047 (once per position).
+
+**The lab against the Demo** (A_op of section 2.11, the current profiles 2023-01 → 2026-09, continuous, at the agent's stop): the same rules make 46–49% wins and a profit factor of 1.2–1.6 on the static baskets. Trades shorter than 4 h are 4–6% of the lab's trades and lose in every run (`swing_trend` −71 USDT, no win); on the Demo they were 62% of the trades. The pullback setup is 5% of `swing_trend`'s trades (+9.51 USDT) and 1 trade in `momentum_alpha`: the breakout is the strategy. Stops average −4.5% / −6.1%, trailing exits +8.1% / +8.4%, and the `max_holding` exits are positive (+2 to +4%).
+
+**The profiles behind the Demo's trades, on the forward window** (`Rdemo`: `swing_trend` risk 1.2%, activation 9.7%; `momentum_alpha` cap 5%, activation 9.5%; neither with `min_stop_atr`; 2026-09-01 → 2026-11-02):
+
+| Run (tier / `--alts`) | Trades | Return | Win % | PF | Expectancy R [p05; p95] | Worst DD MTM % | October alone |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `Rdemo-swing_trend` | 19 / 87 | +2.02% / −1.22% | 36.8 / 34.5 | 1.15 / 0.98 | 0.12 [−0.38; 0.75] / −0.00 [−0.23; 0.27] | 6.74 / 11.49 | −11.73 USDT (3 trades) / +0.10 (56) |
+| `Rdemo-momentum_alpha` | 23 / 67 | −0.55% / +2.72% | 43.5 / 38.8 | 0.97 / 1.05 | −0.00 [−0.37; 0.67] / 0.05 [−0.23; 0.40] | 8.89 / 14.70 | −16.22 (5) / +13.90 (41) |
+
+The lab does **not** reproduce the Demo's October with those profiles: on the basket that holds the Demo's alts it makes 56 and 41 trades in October for about zero and +13.90 USDT, where the Demo lost 47.86 and 20.96 on 17 and 26. The lab fills at the next open with no delay (the +0.46% above), reads the full history (D-040 came on 10-23: the Demo's 251-candle EMA 200 changed 17–19% of the signals, section 2.5), sizes without the analyst's 0.80 exposure and ranks no tiers. The Demo's result sits well below what the lab's execution model gives on the same month, and the gap is not explained by the Demo's own artifacts (−13.08).
+
+**The current profiles on the forward window** (`Rfwd`; `Rfwd_be` with the intrabar break-even):
+
+| Run (tier / `--alts`) | Trades | Return | Win % | PF | Expectancy R [p05; p95] | Worst DD MTM % | September / October (USDT) |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `Rfwd-swing_trend` | 10 / 18 | +1.35% / −3.14% | 40.0 / 38.9 | 1.18 / 0.78 | 0.10 [0.10; 1.04] / −0.15 [−0.63; 0.87] | 5.73 / 9.75 | +12.98, −8.24 / +10.87, −21.87 |
+| `Rfwd_be-swing_trend` | 15 / 19 | +0.57% / −3.09% | 46.7 / 42.1 | 1.05 / 0.78 | 0.03 [−0.47; 1.18] / −0.14 [−0.65; 0.88] | 6.47 / 8.89 | +15.00, −13.01 / +11.05, −21.88 |
+| `Rfwd-momentum_alpha` | 12 / 18 | −5.75% / −3.10% | 33.3 / 44.4 | 0.41 / 0.76 | −0.38 [−0.62; 0.21] / −0.13 [−0.43; 0.37] | 5.99 / 7.48 | −5.79, −11.46 / +6.14, −15.45 |
+| `Rfwd_be-momentum_alpha` | 14 / 20 | −6.97% / −5.14% | 35.7 / 45.0 | 0.36 / 0.64 | −0.40 [−0.63; 0.14] / −0.20 [−0.51; 0.22] | 7.22 / 8.89 | −9.61, −11.32 / −0.29, −15.13 |
+| `Rfwd-alt_atr` | 15 / 17 | +2.79% / +0.59% | 46.7 / 41.2 | 1.39 / 1.07 | 0.19 [−0.14; 1.14] / 0.00 [−0.41; 0.41] | 3.94 / 4.98 | +2.86, −1.47 / +0.37, −0.07 |
+| `Rfwd_be-alt_atr` | 15 / 17 | +1.36% / +1.06% | 46.7 / 47.1 | 1.19 / 1.14 | 0.08 [−0.18; 0.87] / 0.03 [−0.33; 0.42] | 3.94 / 4.52 | +2.13, −1.45 / — |
+
+- **October 2026 is negative for every configuration and basket** (and September positive): the loss month was a market the rules do not handle, not one rule. With the current profiles the 35/30/5 portfolio makes about −1.9% over the two months on `--alts` (−1.1% on the tier lists), where the Demo lost 7.5% in October alone with the profiles of the time at 65/30/5.
+- **D-039 did not turn the forward window around:** on `--alts`, `swing_trend` with the filter −3.14% (18 trades) against −1.22% without it (87 trades); `momentum_alpha` −3.10% against +2.72%. The filter trades far less, which is its purpose on the Demo's universe, and the two months do not show the gain the 2023–2026 windows show (section 2.7). n is small on both sides.
+- **The intrabar break-even** does not help on the forward window: `swing_trend` +1.35% → +0.57% / −3.14% → −3.09%, `momentum_alpha` −5.75% → −6.97% / −3.10% → −5.14%, `alt_atr` +2.79% → +1.36% / +0.59% → +1.06%. The stops it saves are matched by the winners it cuts at break-even.
+
+**The break-even on 15 windows** (`R`: the current profiles, break-even at the candle close; `Rbe`: also on each 5m detail candle; `Rnobe`: none; design 2023–2024 / holdout 2025–2026, tier / `--alts`; the baseline reproduces section 2.11 to the cent):
+
+| Profile, variant | Design | Holdout | Forward | Worst window DD, design | Worst window DD, holdout | Win %, design | PF, design |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `swing_trend`, at the close (current) | +48.76% / +56.80% | +29.91% / +16.25% | +1.35% / −3.14% | 15.12% / 15.08% | 8.63% / 8.96% | 45.0 / 41.7 | 1.60 / 1.50 |
+| `swing_trend`, intrabar | +55.22% / +56.33% | +25.03% / +15.55% | +0.57% / −3.09% | 12.13% / 11.84% | 8.65% / 8.77% | 52.2 / 49.3 | 1.74 / 1.54 |
+| `swing_trend`, none | +61.70% / +48.15% | +16.77% / +8.50% | — | 12.66% / 12.66% | 11.09% / 11.09% | 35.2 / 32.0 | 1.64 / 1.41 |
+| `momentum_alpha`, at the close (current) | +30.36% / +28.34% | +16.49% / +5.67% | −5.75% / −3.10% | 7.32% / 10.60% | 8.44% / 10.06% | 47.3 / 44.4 | 1.41 / 1.28 |
+| `momentum_alpha`, intrabar | **+33.58% / +46.69%** | **+17.94% / +10.90%** | −6.97% / −5.14% | 7.32% / 10.60% | 8.79% / 8.06% | 52.6 / 53.0 | 1.51 / 1.51 |
+| `momentum_alpha`, none | +35.53% / +27.10% | +12.17% / +3.73% | — | 8.42% / 12.75% | 8.44% / 10.06% | 43.8 / 40.6 | 1.44 / 1.25 |
+| `alt_atr`, at the close (current) | +16.56% / +17.04% | +5.82% / +3.17% | +2.79% / +0.59% | 6.99% / 7.01% | 5.85% / 5.87% | 46.6 / 47.7 | 1.39 / 1.39 |
+| `alt_atr`, intrabar | +8.37% / +10.93% | +5.95% / +6.24% | +1.36% / +1.06% | 6.99% / 7.01% | 5.51% / 5.84% | 48.6 / 49.5 | 1.21 / 1.27 |
+
+- **The break-even at the close stays:** without it, `swing_trend` and `momentum_alpha` win the design on the tier lists and lose it on `--alts` and lose the holdout on both.
+- **Intrabar, `swing_trend` and `alt_atr`: not adopted.** `swing_trend` wins the design on the tier lists (+6.5 p.p.), ties on `--alts` (−0.5) and loses the holdout on both (−4.9 / −0.7); `alt_atr` loses the design on both (−8.2 / −6.1).
+- **Intrabar, `momentum_alpha`: three of the four conditions.** It wins the design on both baskets (+3.2 / +18.4 p.p.) and the holdout on both (+1.5 / +5.2), with the same or lower worst windows (8.06% against 10.06% on the `--alts` holdout) and a 53% hit rate against 47% (the saved stops; the payoff falls from 1.6 to 1.3). On the forward window it loses by one or two trades (−5.75% → −6.97% on the tier lists, −3.10% → −5.14% on `--alts`, 12–20 trades): the window is too short to confirm or refute it. The option is in the code, off; the operator decides (D-047).
+
+**Walk-forward re-selection among the D-041 variants** (section 2.11's runs; the variant with the best compounded result over the previous 4 windows applied to each of windows 5–15):
+
+| Profile, basket | Re-selected | Current | Risk only | Activation only | Before D-041 |
+|---|--:|--:|--:|--:|--:|
+| `swing_trend`, tier | +73.20% | +78.24% | +79.55% | +63.57% | +63.68% |
+| `swing_trend`, `--alts` | +49.29% | +57.76% | +68.18% | +47.81% | +54.54% |
+| `momentum_alpha`, tier (risk 2.0 vs 1.5) | +32.33% | +29.90% (1.5) | +34.01% (2.0) | — | — |
+| `momentum_alpha`, `--alts` | +14.51% | +15.59% (1.5) | +15.45% (2.0) | — | — |
+
+The cost of choosing is 5–9 p.p. over 11 windows; on `--alts` the chooser alternates between the current set and "risk only", so the 13% activation is not a robust choice there (section 2.11 said the same). D-045's 1.5% in `momentum_alpha` holds.
+
+**The strategy's own path against the global stop conditions** (the A_op runs of section 2.11, marked to market and summed at the capital shares; the P&L scales with the risk per trade below the 42% position cap):
+
+| Shares, risk per trade | Tier: return, max DD, 15% halt, days with a 3% loss | `--alts`: the same |
+|---|---|---|
+| 65/30/5 (D-045), 1.5% | +71.07%, **23.35%**, halt on 2023-07-07, 6 | +62.73%, **25.79%**, halt on 2023-02-13, 8 |
+| 65/30/5, 1.2% | +56.85%, **19.06%**, halt on 2023-07-22, 3 | +50.19%, **21.05%**, halt on 2023-07-13, 5 |
+| 65/30/5, 1.0% | +47.38%, **16.10%**, halt on 2023-08-11, 1 | +41.82%, **17.79%**, halt on 2023-07-23, 1 |
+| 65/30/5, 0.75% | +35.53%, 12.29%, no halt, 0 | +31.37%, 13.57%, no halt, 0 |
+| 55/30/5 (10% to `pair_pullback_1h`), 1.0% | +41.91%, 14.14%, no halt, 0 | +36.65%, **15.89%**, halt on 2023-08-10, 0 |
+| 55/30/5, 0.75% | +31.43%, 10.78%, no halt, 0 | +27.48%, 12.11%, no halt, 0 |
+| 35/30/5 (D-046, 30% idle), 1.5% | +46.47%, 14.84%, no halt, 2 | +39.44%, **17.60%**, halt on 2023-07-24, 2 |
+| 35/30/5, 1.2% | +37.18%, 12.05%, no halt, 0 | +31.55%, 14.29%, no halt, 0 |
+| 35/30/5, 1.0% | +30.98%, 10.14%, no halt, 0 | +26.29%, 12.03%, no halt, 0 |
+
+The configuration that traded until 2026-10-30 would have been halted by its own 15% drawdown limit in 2023 on the lab's path (the halt is manual: the agent would have stopped there). The drawdown scales with the risk per trade times `swing_trend`'s share: with 65% of the capital in `swing_trend`, 0.75% a trade keeps both baskets under the halt; with 55%, 0.75%; with 35%, 1.2%. The lab's path is one path and its returns are an upper bound (below), so these are floors on the margin, not guarantees.
+
+**The pair-local profiles** (D-046, 3 days live): 2 trades, both by `pair_breakout_1h` (rejected in section 2.10 with the whole expectancy interval below zero), one on 牛来USDT, −1.13 USDT. `pair_range_1h` found no setup in 44 lab months and none live. `pair_pullback_1h` (inconclusive in the lab, ~1% of the time in position) found none either.
+
+**Costs.** The 0.1% lab fee is the Spot fee without the BNB discount; the Demo paid 7.53 USDT of fees on 47 trades (0.2% round trip) and about 21 USDT more than the lab's fills on the entries. On the continuous runs, +10 bps a side takes 12–14 p.p. off `swing_trend`'s 44-month return and 14–15 off `momentum_alpha`'s (section 2.11, A_op); `alt_atr` keeps 13% of its 20%.
+
+**Reading.**
+
+- The loss came from a configuration already replaced (D-039, D-041, D-045) in a month that is negative for every variant the lab can run, and from costs the lab does not carry (the analyst, the entry delay). The current configuration has no live record yet: on the forward window it is slightly negative on `--alts`, slightly positive on the tier lists, and not better than the one it replaced.
+- The lab remains optimistic against the Demo by more than its documented biases, so its returns are an upper bound: the decisions below use it to compare variants and to size the risk, not as a forecast.
+- No entry filter on the current features separates the Demo's winners from its losers; no new filter was adopted. The intrabar break-even is the one mechanism with a consistent gain, in `momentum_alpha` alone, and the forward window is too short to confirm it.
+- What the review changes is outside the signals: the costs the lab does not carry (the analyst, the entry delay), the risk per trade against the halt, the profiles the lab rejected, and a bug (the repeated break-even swap). The decisions are in D-047.
+
+**Adopted (D-047, the operator's choices among the options above):** risk per trade 1.5% → **0.75%** in `swing_trend` and `momentum_alpha` (at the D-046 shares the lab's path stays at 7.7–9.1% of drawdown, with about half the return: +23% / +20% over 44 months against +46% / +39%); **`break_even_intrabar` on the three legacy profiles**, the Demo being its validation; the analyst and the pair-local profiles unchanged. At the caps the lots fall to about 58 and 35 USDT, and the analyst's exposure still scales them.
+
+**Before and after** (`R`: the profiles as reviewed; `Rfinal`: `config/profiles.yaml` after D-047, no override; design 2023–2024 / holdout 2025–2026 / forward 2026-09 → 2026-11-02; tier lists / `--alts`; the Sharpe is the daily one of the windows' equity, annualized with √365; the expectancy in R and the profit factor do not depend on the risk per trade, the returns and the drawdowns do):
+
+| Profile | Period | Return, before → after | Worst window DD, before → after | Sharpe, before → after | PF, before → after | Win %, before → after | Expectancy R, before → after |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `swing_trend` | design | +48.8% / +56.8% → +26.8% / +27.4% | 15.1% / 15.1% → 6.4% / 6.2% | 1.32 / 1.35 → 1.56 / 1.51 | 1.60 / 1.50 → 1.74 / 1.55 | 45.0 / 41.7 → 52.2 / 49.3 | 0.32 / 0.29 → 0.34 / 0.27 |
+| `swing_trend` | holdout | +29.9% / +16.3% → +14.0% / +9.7% | 8.6% / 9.0% → 4.5% / 4.5% | 1.12 / 0.68 → 1.11 / 0.80 | 1.62 / 1.32 → 1.64 / 1.41 | 47.0 / 43.5 → 53.6 / 52.1 | 0.40 / 0.24 → 0.31 / 0.21 |
+| `swing_trend` | forward | +1.35% / −3.14% → +0.17% / −1.80% | 5.7% / 9.8% → 3.5% / 4.7% | 0.49 / −0.15 → 0.14 / −0.27 | 1.18 / 0.78 → 1.03 / 0.75 | 40.0 / 38.9 → 46.7 / 42.1 | 0.10 / −0.15 → 0.03 / −0.14 |
+| `momentum_alpha` | design | +30.4% / +28.3% → +17.3% / +23.1% | 7.3% / 10.6% → 3.8% / 5.4% | 1.04 / 0.88 → 1.24 / 1.39 | 1.41 / 1.28 → 1.54 / 1.54 | 47.3 / 44.4 → 52.6 / 53.0 | 0.22 / 0.16 → 0.23 / 0.23 |
+| `momentum_alpha` | holdout | +16.5% / +5.7% → +8.9% / +5.4% | 8.4% / 10.1% → 4.5% / 4.1% | 0.87 / 0.34 → 0.94 / 0.57 | 1.45 / 1.15 → 1.51 / 1.26 | 52.2 / 48.7 → 58.6 / 55.8 | 0.19 / 0.06 → 0.19 / 0.11 |
+| `momentum_alpha` | forward | −5.75% / −3.10% → −3.50% / −2.53% | 6.0% / 7.5% → 3.7% / 4.5% | −1.73 / −0.36 → −2.25 / −0.97 | 0.41 / 0.76 → 0.37 / 0.65 | 33.3 / 44.4 → 35.7 / 45.0 | −0.38 / −0.13 → −0.40 / −0.20 |
+| `alt_atr` | design | +16.6% / +17.0% → +8.4% / +10.9% | 7.0% / 7.0% → 7.0% / 7.0% | 0.87 / 0.89 → 0.50 / 0.62 | 1.39 / 1.39 → 1.21 / 1.27 | 46.6 / 47.7 → 48.6 / 49.5 | 0.18 / 0.17 → 0.09 / 0.11 |
+| `alt_atr` | holdout | +5.8% / +3.2% → +6.0% / +6.2% | 5.9% / 5.9% → 5.5% / 5.8% | 0.41 / 0.25 → 0.43 / 0.44 | 1.19 / 1.11 → 1.20 / 1.20 | 49.4 / 46.8 → 52.6 / 51.3 | 0.11 / 0.07 → 0.11 / 0.12 |
+| `alt_atr` | forward | +2.79% / +0.59% → +1.36% / +1.06% | 3.9% / 5.0% → 3.9% / 4.5% | 1.16 / 0.81 → 0.65 / 1.08 | 1.39 / 1.07 → 1.19 / 1.14 | 46.7 / 41.2 → 46.7 / 47.1 | 0.19 / 0.00 → 0.08 / 0.03 |
+
+Weighted by the D-046 shares (35 / 30 / 5, the pair-local 30% at zero), as a share of the managed capital: design +27.0% / +29.2% → +15.0% / +17.1%; holdout +15.7% / +7.5% → +7.9% / +5.3%; forward −1.1% / −2.0% → −0.9% / −1.3%. The risk per trade halves the return and the drawdown and raises the Sharpe where the intrabar break-even raises the hit rate; `alt_atr`, whose risk did not change, shows the break-even alone: less on the design, slightly more on the holdout. The forward window stays negative in both profiles that lost there.
+
+**Limitations.** Two months and one regime on the forward window (10–20 trades per run); the holdout is not out of sample; the static baskets with 20 hand-picked alts carry selection bias; the lab fills at the open and at the stop price with no delay or slippage; the global stop conditions, the tier ranking and the analyst are not simulated.
 
 ## 3. Out-of-sample results (2026-10-01)
 

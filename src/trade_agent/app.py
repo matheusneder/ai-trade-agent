@@ -58,6 +58,8 @@ from trade_agent.tracing import install as install_tracing
 
 RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
+BREAK_EVEN_INTERVAL_S = 60.0
+"""Break-even between the candle closes (D-047), at the risk check's cadence."""
 
 log = structlog.get_logger(__name__)
 
@@ -251,6 +253,12 @@ def assemble(
         tracing=settings.otlp_endpoint is not None,
         metrics=settings.otlp_metrics_endpoint is not None,
     )
+    periodic: list[tuple[float, Action]] = [
+        (RISK_INTERVAL_S, check_risk),
+        (INGEST_INTERVAL_S, ingest),
+    ]
+    if any(p.protection.break_even_intrabar for p in strategy.enabled_profiles().values()):
+        periodic.append((BREAK_EVEN_INTERVAL_S, engine.watch_break_even))
     return AgentParts(
         guard=guard,
         engine=engine,
@@ -260,7 +268,7 @@ def assemble(
         telemetry=telemetry,
         commands=commands,
         heartbeat=heartbeat,
-        periodic=[(RISK_INTERVAL_S, check_risk), (INGEST_INTERVAL_S, ingest)],
+        periodic=periodic,
         candle_jobs=[
             (profile.timeframe, decide(name))
             for name, profile in strategy.enabled_profiles().items()
