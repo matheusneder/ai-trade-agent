@@ -77,6 +77,7 @@ RISK_PARAMS = frozenset(
         "max_position_pct",
         "stop_max_pct",
         "break_even_r",
+        "break_even_intrabar",
         "max_holding_hours",
         "tp_activation_atr_mult",
         "tp_activation_max",
@@ -265,6 +266,7 @@ def strategy_params(
                 "tp_activation_max": float(take_profit.activation_max_pct or 0) / 100,
                 "exit_score": profile.exits.exit_score,
                 "break_even_r": protection.break_even_after_r or 0.0,
+                "break_even_intrabar": int(protection.break_even_intrabar),
                 "max_holding_hours": (
                     protection.max_holding.total_seconds() / 3600 if protection.max_holding else 0.0
                 ),
