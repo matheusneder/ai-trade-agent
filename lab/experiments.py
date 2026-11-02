@@ -21,10 +21,13 @@ Groups (doc/lab-results.md, section 2.10):
   good (the drawdown review never expires), so the components are compared on the strategy's
   own edge.
 
-The ``review`` matrix (2026-11-02, D-047) runs the legacy profiles on the same lab:
+The ``review`` matrix (2026-11-02, D-047) runs the legacy profiles on the same lab, pinned to
+the values it reviewed (``REVIEWED``: 1.5% of risk per trade in ``swing_trend`` and
+``momentum_alpha``, the break-even at the candle close), whatever ``config/profiles.yaml``
+carries after D-047:
 
-* ``R``: the three current profiles, unchanged (15 quarterly windows: the baseline of the
-  others on the candles downloaded for the review);
+* ``R``: the three profiles as reviewed (15 quarterly windows: the baseline of the others on the
+  candles downloaded for the review);
 * ``Rbe``: ``R`` with the break-even checked between the candle closes
   (``protection.break_even_intrabar``), and ``Rnobe``: ``R`` without the break-even;
 * ``Rfwd``: the current profiles on the forward window 2026-09-01 → 2026-11-02, never used by
@@ -87,21 +90,35 @@ REVIEW_ALTS: tuple[str, ...] = (
 )  # fmt: skip
 """Alts the Demo traded or saw in 2026-10, besides ``lab.walk_forward.ALTS``."""
 REVIEW_GROUPS = ("R", "Rbe", "Rnobe", "Rfwd", "Rfwd_be", "Rdemo")
+AT_CLOSE: dict[str, Any] = {"protection": {"break_even_intrabar": False}}
 INTRABAR: dict[str, Any] = {"protection": {"break_even_intrabar": True}}
-NO_BREAK_EVEN: dict[str, Any] = {"protection": {"break_even_after_r": None}}
+NO_BREAK_EVEN: dict[str, Any] = {
+    "protection": {"break_even_after_r": None, "break_even_intrabar": False}
+}
+REVIEWED: dict[str, dict[str, Any]] = {
+    "swing_trend": {"allocation": {"risk_per_trade_pct": 1.5}, **AT_CLOSE},
+    "momentum_alpha": {"allocation": {"risk_per_trade_pct": 1.5}, **AT_CLOSE},
+    "alt_atr": AT_CLOSE,
+}
+"""The values the review ran on (before D-047 changed them in ``config/profiles.yaml``)."""
 DEMO_ERA: dict[str, dict[str, Any]] = {
     "swing_trend": {
         "allocation": {"risk_per_trade_pct": 1.2},
-        "protection": {"take_profit": {"activation_pct": 9.7}},
+        "protection": {"take_profit": {"activation_pct": 9.7}, "break_even_intrabar": False},
         "signals": {"min_stop_atr": 0.0},
     },
     "momentum_alpha": {
-        "protection": {"stop": {"max_pct": 5.0}, "take_profit": {"activation_pct": 9.5}},
+        "allocation": {"risk_per_trade_pct": 1.5},
+        "protection": {
+            "stop": {"max_pct": 5.0},
+            "take_profit": {"activation_pct": 9.5},
+            "break_even_intrabar": False,
+        },
         "signals": {"min_stop_atr": 0.0},
     },
 }
 """The profiles behind the Demo's 2026-10 trades: before D-034 (``momentum_alpha``), D-039
-(both: ``min_stop_atr`` 0 never skips a setup) and D-041 (``swing_trend``)."""
+(both: ``min_stop_atr`` 0 never skips a setup), D-041 (``swing_trend``) and D-047."""
 
 
 @dataclass(frozen=True)
@@ -216,19 +233,19 @@ def review_matrix(profiles: dict[str, Any]) -> list[Experiment]:
     experiments: list[Experiment] = []
     for name in LEGACY:
         basket = ("--pairs", *tier_pairs(profiles[name]), *REVIEW_ALTS)
+        reviewed, intrabar = REVIEWED[name], merge(REVIEWED[name], INTRABAR)
         experiments += [
-            Experiment(f"R-{name}", "R", name),
-            Experiment(f"Rbe-{name}", "Rbe", name, INTRABAR),
-            Experiment(f"Rfwd-{name}", "Rfwd", name, args=FORWARD),
-            Experiment(f"Rfwd-{name}", "Rfwd", name, args=(*FORWARD, *basket), alts=True),
-            Experiment(f"Rfwd_be-{name}", "Rfwd_be", name, INTRABAR, args=FORWARD),
-            Experiment(
-                f"Rfwd_be-{name}", "Rfwd_be", name, INTRABAR, args=(*FORWARD, *basket), alts=True
-            ),
+            Experiment(f"R-{name}", "R", name, reviewed),
+            Experiment(f"Rbe-{name}", "Rbe", name, intrabar),
+            Experiment(f"Rfwd-{name}", "Rfwd", name, reviewed, args=FORWARD),
+            Experiment(f"Rfwd-{name}", "Rfwd", name, reviewed, (*FORWARD, *basket), True),
+            Experiment(f"Rfwd_be-{name}", "Rfwd_be", name, intrabar, args=FORWARD),
+            Experiment(f"Rfwd_be-{name}", "Rfwd_be", name, intrabar, (*FORWARD, *basket), True),
         ]
         if name in DEMO_ERA:
+            no_break_even = merge(reviewed, NO_BREAK_EVEN)
             experiments += [
-                Experiment(f"Rnobe-{name}", "Rnobe", name, NO_BREAK_EVEN),
+                Experiment(f"Rnobe-{name}", "Rnobe", name, no_break_even),
                 Experiment(f"Rdemo-{name}", "Rdemo", name, DEMO_ERA[name], args=FORWARD),
                 Experiment(
                     f"Rdemo-{name}", "Rdemo", name, DEMO_ERA[name], (*FORWARD, *basket), True

@@ -507,6 +507,8 @@ Freqtrade still fills at the stop price, without the slippage of the agent's sto
 uv run python -m lab.experiments --matrix review --jobs 6   # 32 runs, var/lab/runs/R*
 ```
 
+The matrix pins the values it reviewed (`lab.experiments.REVIEWED`: 1.5% of risk per trade, the break-even at the close), so a re-run reproduces this section after D-047 changed `config/profiles.yaml`.
+
 **What the Demo's loss was made of** (the production database, read only; the full accounting is in the P&L report of 2026-11-02):
 
 - 30 stops (−121.57) against 11 trailing take-profits (+50.91) and 3 break-even stops: a 25.5% hit rate where the payoff needs 40–45%. `swing_trend` −47.86 in 17 trades (8 losses in a row since 10-09), `momentum_alpha` −20.96 in 26, the old `con` −4.89 in 2, `pair_breakout_1h` −1.13 in 2.
@@ -595,6 +597,8 @@ The configuration that traded until 2026-10-30 would have been halted by its own
 - The lab remains optimistic against the Demo by more than its documented biases, so its returns are an upper bound: the decisions below use it to compare variants and to size the risk, not as a forecast.
 - No entry filter on the current features separates the Demo's winners from its losers; no new filter was adopted. The intrabar break-even is the one mechanism with a consistent gain, in `momentum_alpha` alone, and the forward window is too short to confirm it.
 - What the review changes is outside the signals: the costs the lab does not carry (the analyst, the entry delay), the risk per trade against the halt, the profiles the lab rejected, and a bug (the repeated break-even swap). The decisions are in D-047.
+
+**Adopted (D-047, the operator's choices among the options above):** risk per trade 1.5% → **0.75%** in `swing_trend` and `momentum_alpha` (at the D-046 shares the lab's path stays at 7.7–9.1% of drawdown, with about half the return: +23% / +20% over 44 months against +46% / +39%); **`break_even_intrabar` on the three legacy profiles**, the Demo being its validation; the analyst and the pair-local profiles unchanged. At the caps the lots fall to about 58 and 35 USDT, and the analyst's exposure still scales them.
 
 **Limitations.** Two months and one regime on the forward window (10–20 trades per run); the holdout is not out of sample; the static baskets with 20 hand-picked alts carry selection bias; the lab fills at the open and at the stop price with no delay or slippage; the global stop conditions, the tier ranking and the analyst are not simulated.
 

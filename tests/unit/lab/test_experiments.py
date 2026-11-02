@@ -69,10 +69,11 @@ def test_the_review_matrix_runs_the_forward_window_and_the_break_even_variants(
         directory.mkdir()
         config = load_strategy_config(ex.profiles_file(CONFIG, experiment, directory))
         (profile,) = config.profiles.values()
-        if experiment.group in ("Rbe", "Rfwd_be"):
-            assert profile.protection.break_even_intrabar
+        assert profile.protection.break_even_intrabar == (experiment.group in ("Rbe", "Rfwd_be"))
         if experiment.group == "Rnobe":
             assert profile.protection.break_even_after_r is None
+        if experiment.profile != "alt_atr" and experiment.group != "Rdemo":
+            assert profile.allocation.risk_per_trade_pct == 1.5  # the reviewed value (D-047)
     forward = next(e for e in experiments if e.label == "Rfwd-momentum_alpha-alts")
     assert forward.args[:6] == ex.FORWARD
     assert forward.args[6] == "--pairs"
@@ -85,7 +86,11 @@ def test_the_review_matrix_runs_the_forward_window_and_the_break_even_variants(
     swing = ex.merge(CONFIG["profiles"]["swing_trend"], demo.overrides)
     assert swing["allocation"]["risk_per_trade_pct"] == 1.2
     assert swing["protection"]["take_profit"]["activation_pct"] == 9.7
+    assert swing["protection"]["break_even_intrabar"] is False
     assert swing["signals"]["min_stop_atr"] == 0.0
+    momentum = ex.merge(CONFIG["profiles"]["momentum_alpha"], ex.DEMO_ERA["momentum_alpha"])
+    assert momentum["allocation"]["risk_per_trade_pct"] == 1.5
+    assert momentum["protection"]["stop"]["max_pct"] == 5.0
     assert ex.tier_pairs(CONFIG["profiles"]["alt_atr"])[0] == "SOL/USDT"
 
 
