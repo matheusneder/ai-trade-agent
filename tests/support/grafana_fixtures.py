@@ -97,4 +97,5 @@ def grafana(page: Page, stack: Stack, seeded: Dataset) -> Iterator[tuple[Page, W
     watch = Watch(stack.grafana_url)
     watch.attach(page)
     yield page, watch
-    assert watch.problems() == []
+    problems = watch.problems()
+    assert not problems, problems  # this module is not rewritten: pytest would not show them

@@ -96,6 +96,15 @@ def test_datasource_and_telegram_placeholder_match_compose() -> None:
     assert json.loads(render(build()["overview.json"]))["refresh"] == "1m"
 
 
+def test_grafana_runs_only_the_bundled_plugins() -> None:
+    """Production and the smoke stack both skip the plugin downloads at startup (D-049)."""
+    smoke = DEPLOY.parent / "tests" / "grafana-dashboard-smoke-tests" / "compose.yaml"
+    for path in (DEPLOY / "stack.yml", smoke):
+        compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+        environment = compose["services"]["grafana"]["environment"]
+        assert environment["GF_PLUGINS_PREINSTALL_DISABLED"] == "true", path
+
+
 def test_compose_always_reads_the_root_env_file() -> None:
     """Without the include, ``docker compose -f deploy/docker-compose.yml`` (no ``--env-file``)
     looked for the .env in deploy/ and started Grafana with grafana_ro's default password."""
