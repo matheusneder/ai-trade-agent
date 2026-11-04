@@ -85,6 +85,11 @@ SAMPLES = {
             '{"level":"error","ts":"2026-10-01T17:05:41.120Z","caller":"docker@v0.161.0/'
             'docker.go:417","msg":"Could not inspect updated container","error":"Error '
             'response from daemon: No such container: 5f10dc58071"}',
+            # the startup warning about plain TCP: the endpoint is the internal proxy, left out
+            '{"level":"warn","ts":"2026-11-04T20:11:04.575Z","caller":"docker@v0.163.0/'
+            'docker.go:81","msg":"Unauthenticated TCP connection to Docker daemon is deprecated '
+            "since Docker v26.0. Configure the 'tls' option to use a secure connection.\","
+            '"endpoint":"tcp://docker-proxy:2375"}',
             '{"level":"error","ts":"2026-10-01T17:06:02.300Z","msg":"Exporting failed. '
             'Dropping data.","error":"connection refused"}',
         ],
@@ -204,6 +209,14 @@ def test_vanished_container_noise_is_dropped(loki: str) -> None:
     assert query(loki, '{service_name="container-metrics"} |= "No such container"') == []
     (kept,) = query(loki, '{service="container-metrics"}')
     assert "connection refused" in kept["values"][0][1]  # the real errors remain
+
+
+def test_proxy_plain_tcp_warning_is_dropped(loki: str) -> None:
+    """``docker_stats`` warns at each start about plain TCP to the Docker daemon, but the endpoint
+    is the read-only proxy on an internal network: noise, kept out of Loki and the SigNoz copy."""
+    assert query(loki, '{service="container-metrics"} |= "Unauthenticated TCP"') == []
+    assert query(loki, '{service_name="container-metrics"} |= "Unauthenticated TCP"') == []
+    assert query(loki, '{service="container-metrics", level="warn"}') == []
 
 
 def test_python_traceback_becomes_one_error_entry(loki: str) -> None:
