@@ -1,14 +1,14 @@
 """Agent repository: positions, intents, order mirror, fills and events."""
 
 import dataclasses
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum, StrEnum
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import ColumnElement, case, func, select
+from sqlalchemy import ColumnElement, CursorResult, case, delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from trade_agent.exchange.models import Order, Trade
@@ -30,6 +30,17 @@ from trade_agent.persistence.models import (
     FillRecord,
     IntentRecord,
     PositionRecord,
+    TapeDecisionRecord,
+    TapeQuoteRecord,
+)
+
+_TAPE_SETUPS = text(
+    """
+    SELECT c -> 'member' ->> 'symbol' AS symbol, max(d.at) AS last_setup
+    FROM tape_decisions AS d CROSS JOIN LATERAL jsonb_array_elements(d.candidates) AS c
+    WHERE d.at >= :since AND c -> 'signal' ->> 'setup' IS NOT NULL
+    GROUP BY 1
+    """
 )
 
 
@@ -510,3 +521,76 @@ class Store:
         )
         async with self.db.session() as session:
             await session.execute(statement)
+
+    # ================================================================== A/B tape (D-050)
+    async def add_tape_decision(
+        self,
+        *,
+        at: datetime,
+        profile: str,
+        state: str,
+        research: str,
+        exposure_multiplier: Decimal,
+        candidates: list[dict[str, Any]],
+    ) -> None:
+        async with self.db.session() as session:
+            session.add(
+                TapeDecisionRecord(
+                    at=at,
+                    profile=profile,
+                    state=state,
+                    research=research,
+                    exposure_multiplier=exposure_multiplier,
+                    candidates=candidates,
+                )
+            )
+
+    async def add_tape_quotes(
+        self, at: datetime, quotes: Iterable[tuple[str, Decimal, Decimal]]
+    ) -> int:
+        """Appends ``(symbol, bid, ask)`` rows in one statement; returns how many."""
+        rows = [{"at": at, "symbol": symbol, "bid": bid, "ask": ask} for symbol, bid, ask in quotes]
+        if not rows:
+            return 0
+        async with self.db.session() as session:
+            await session.execute(insert(TapeQuoteRecord).values(rows))
+        return len(rows)
+
+    async def tape_decisions(
+        self, since: datetime, until: datetime, *, profiles: Sequence[str] | None = None
+    ) -> list[TapeDecisionRecord]:
+        """Decisions of the half-open interval ``[since, until)``, in chronological order."""
+        d = TapeDecisionRecord
+        async with self.db.session() as session:
+            records = await session.scalars(
+                select(d)
+                .where(
+                    d.at >= since,
+                    d.at < until,
+                    *([d.profile.in_(profiles)] if profiles is not None else []),
+                )
+                .order_by(d.at, d.id)
+            )
+            return list(records)
+
+    async def tape_quotes(self, since: datetime, until: datetime) -> list[TapeQuoteRecord]:
+        """Quotes of the half-open interval ``[since, until)``, in chronological order."""
+        q = TapeQuoteRecord
+        async with self.db.session() as session:
+            records = await session.scalars(
+                select(q).where(q.at >= since, q.at < until).order_by(q.at, q.id)
+            )
+            return list(records)
+
+    async def tape_setup_symbols(self, since: datetime) -> dict[str, datetime]:
+        """The symbols with a setup in a decision since ``since``, and when the last one was."""
+        async with self.db.session() as session:
+            rows = await session.execute(_TAPE_SETUPS, {"since": since})
+            return {row.symbol: row.last_setup for row in rows}
+
+    async def prune_tape_quotes(self, before: datetime) -> int:
+        """Deletes the quotes older than ``before``; returns how many."""
+        statement = delete(TapeQuoteRecord).where(TapeQuoteRecord.at < before)
+        async with self.db.session() as session:
+            result = await session.execute(statement)
+            return cast(CursorResult[Any], result).rowcount

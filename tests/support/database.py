@@ -14,7 +14,7 @@ from trade_agent.persistence.migrate import upgrade_to_head
 
 TABLES = (
     "positions, intents, exchange_orders, fills, events, checkpoints, "
-    "news_items, research_reports, llm_usage"
+    "news_items, research_reports, llm_usage, tape_decisions, tape_quotes"
 )
 
 

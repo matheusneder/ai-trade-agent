@@ -123,8 +123,9 @@ async def test_assemble_without_telegram(
         assert isinstance(parts.notifier, LogNotifier) and parts.commands is None
         assert parts.services == []
         assert [tf for tf, _ in parts.candle_jobs] == ["4h", "1h"]  # enabled profiles
-        (risk_s, check_risk), (ingest_s, ingest) = parts.periodic
-        assert (risk_s, ingest_s) == (60.0, 900.0)
+        (risk_s, check_risk), (ingest_s, ingest), (tape_s, record_quotes) = parts.periodic
+        assert (risk_s, ingest_s, tape_s) == (60.0, 900.0, 60.0)
+        assert await record_quotes() == 0  # the A/B tape: nothing to watch yet
         assert parts.heartbeat is None
         assert await parts.telemetry.record() is False  # nothing observed yet
         fake.candles[("BTCUSDT", "1m")] = [[0, "0", "0", "0", "100", "1", 0, "1", 1, "0", "0", "0"]]
