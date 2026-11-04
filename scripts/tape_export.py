@@ -1,4 +1,4 @@
-"""Read-only export of the recorded A/B tape (D-048) as the JSONL that ``lab.paper`` replays."""
+"""Read-only export of the recorded A/B tape (D-050) as the JSONL that ``lab.paper`` replays."""
 
 import argparse
 import asyncio

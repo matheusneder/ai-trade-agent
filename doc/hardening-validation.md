@@ -115,7 +115,7 @@ Paper replay is an offline tool with independent cash and positions for `pure_ta
   `lab.paper.CANDIDATES.dump_python(candidates, mode="json")` produces the candidate payload.
 
 The tape must be collected independently of the selected strategy, including held assets,
-with quotes frequent enough to evaluate stops. The agent records it since D-048, on by
+with quotes frequent enough to evaluate stops. The agent records it since D-050, on by
 default (`TA_TAPE_ENABLED=false` turns it off). `tape_decisions` keeps one row per profile
 per decision cycle, whatever the live state, with every candidate the entry planner
 received. `tape_quotes` keeps bid/ask once a minute for the symbols with a setup within the
@@ -182,7 +182,7 @@ Create the empty restore database in an isolated test PostgreSQL beforehand. Res
 refuses nonempty targets and database names without `_restore_test`; it never drops a
 database. Archives are authenticated/encrypted and cannot overwrite an existing file.
 The implementation buffers dumps in memory and is intended for a small database. The A/B
-tape (D-048) stretches that: at 120 days of quotes with 30 watched symbols the dump measures
+tape (D-050) stretches that: at 120 days of quotes with 30 watched symbols the dump measures
 about 100 MB (synthetic rows), and encrypting 100 MB here peaks at about 640 MB of memory.
 Lower `TA_TAPE_QUOTE_RETENTION_DAYS` if that does not fit the host; the runbook's
 `pg_dump | gzip` backup streams and is not affected.

@@ -62,7 +62,7 @@ INGEST_INTERVAL_S = 900.0
 BREAK_EVEN_INTERVAL_S = 60.0
 """Break-even between the candle closes (D-047), at the risk check's cadence."""
 TAPE_INTERVAL_S = 60.0
-"""Quotes of the A/B tape (D-048), at the risk check's cadence."""
+"""Quotes of the A/B tape (D-050), at the risk check's cadence."""
 
 log = structlog.get_logger(__name__)
 
@@ -85,7 +85,7 @@ def scope_specs(strategy: StrategyConfig) -> dict[str, ScopeSpec]:
 def build_tape(
     settings: Settings, api: BinanceSpotApi, store: Store, strategy: StrategyConfig
 ) -> DecisionTape | None:
-    """The A/B tape (D-048); ``None`` with the setting off, which registers nothing."""
+    """The A/B tape (D-050); ``None`` with the setting off, which registers nothing."""
     if not settings.tape_enabled:
         return None
     retention = timedelta(days=settings.tape_quote_retention_days)

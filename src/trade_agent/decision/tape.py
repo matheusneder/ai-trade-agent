@@ -1,4 +1,4 @@
-"""The A/B tape (D-048): what ``lab.paper`` replays for the pure-TA and TA + LLM accounts.
+"""The A/B tape (D-050): what ``lab.paper`` replays for the pure-TA and TA + LLM accounts.
 
 Two records, both in PostgreSQL. A decision row per profile per cycle, with every candidate
 the entry planner received, written whatever the live state, because the paper accounts apply

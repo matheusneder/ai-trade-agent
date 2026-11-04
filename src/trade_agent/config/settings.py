@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     log_format: LogFormat = LogFormat.CONSOLE
 
     tape_enabled: bool = True
-    """Records the A/B tape (D-048): the decisions and the quotes ``lab.paper`` replays. With
+    """Records the A/B tape (D-050): the decisions and the quotes ``lab.paper`` replays. With
     ``false``, nothing is registered: no table is written and no request is added."""
     tape_quote_retention_days: int = Field(default=120, gt=0)
     """Quotes older than this are pruned once per UTC day."""

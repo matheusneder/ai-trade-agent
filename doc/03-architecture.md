@@ -140,7 +140,7 @@ deploy/
 | `research_cycle` | inside the `decision_cycle`, only with setups or positions; one per candle close for the profiles of the same timeframe (D-032) | LLM analyst → `MarketView` (without candidates, the last valid reading holds) |
 | `decision_cycle` | the profile's candle close + 20 s (e.g. 4h) | Signals → analyst → rule-based exits and *break-even* → entries (pre-trade checks) → OPOCO. With `TA_TRADING_ENABLED=false`, it runs in **simulation** (D-023) |
 | `watch_break_even` | 1 min, only with a profile that has `break_even_intrabar` | The *break-even* of the protected positions between the candle closes, on the bid (D-047); each position's stop moves once |
-| `record_quotes` | 1 min, unless `TA_TAPE_ENABLED=false` | The A/B tape's quotes: bid/ask of its watch-list in `tape_quotes`, from one `book_tickers()` (weight 4; none with an empty watch-list), and the prune of the quotes past their retention once per UTC day (D-048) |
+| `record_quotes` | 1 min, unless `TA_TAPE_ENABLED=false` | The A/B tape's quotes: bid/ask of its watch-list in `tape_quotes`, from one `book_tickers()` (weight 4; none with an empty watch-list), and the prune of the quotes past their retention once per UTC day (D-050) |
 | `telegram` | continuous (*long polling*) | Operator commands (§12.3, D-022) |
 
 The periodic tasks already run at startup, after the initial reconciliation. There is no automatic daily report or scheduled backup yet: the backup is manual (runbook, §4).
@@ -186,7 +186,7 @@ sequenceDiagram
   B-->>X: events (fill, OCO armed) through the user data stream
 ```
 
-**A/B tape (D-048):** after the analyst's reading, the cycle prices every candidate from one `book_tickers()` and writes a `tape_decisions` row with exactly what the entry planner receives. In `paused`, `halted` and `flattening` no entry goes out, but the row is still written, because the accounts of `lab.paper` apply their own risk checks: that is the one request of weight 4 those cycles now make, and a failure to read it costs them nothing else. With entries allowed, the books are still read inside the entry lock, so a purchase never prices on a stale book. A failure to write the tape logs `decision.tape_failed`, and the cycle goes on to its entries.
+**A/B tape (D-050):** after the analyst's reading, the cycle prices every candidate from one `book_tickers()` and writes a `tape_decisions` row with exactly what the entry planner receives. In `paused`, `halted` and `flattening` no entry goes out, but the row is still written, because the accounts of `lab.paper` apply their own risk checks: that is the one request of weight 4 those cycles now make, and a failure to read it costs them nothing else. With entries allowed, the books are still read inside the entry lock, so a purchase never prices on a stale book. A failure to write the tape logs `decision.tape_failed`, and the cycle goes on to its entries.
 
 ### 6.1 Universe
 
@@ -277,7 +277,7 @@ The universe is built every cycle, with the volume ranking of the moment (D-027)
 ### 7.5 LLM evaluation
 
 - **Labeled cases** (`evals/analyst/cases.yaml`, D-021): 31 situations, 19 historical and 12 synthetic (including *prompt* injection), with step (b) only. The last run (`trade-agent research eval`, 2026-09-28) passed all 31 cases, with 100% of the outputs valid against the schema.
-- **A/B on Demo (D-048):** the agent records the tape, and `lab.paper` replays it with independent pure-TA and TA + LLM accounts (runbook, §4). Running that comparison is still to be done: until then, there is no measure of how much the LLM improves the result (doc 04).
+- **A/B on Demo (D-050):** the agent records the tape, and `lab.paper` replays it with independent pure-TA and TA + LLM accounts (runbook, §4). Running that comparison is still to be done: until then, there is no measure of how much the LLM improves the result (doc 04).
 - **Not implemented yet:** the correlation between `sentiment` and the return of the following days.
 
 ## 8. Allocation profiles (R2)
@@ -489,7 +489,7 @@ The cap on LLM spending lives in `config/research.yaml` (`budget.daily_usd`, D-0
 | `checkpoints` | Key-value state: risk states per scope (`risk.state.*`), triggers already fired (`risk.fired`), the day open and the equity peak (`risk.equity`), the Telegram *offset* |
 | `telemetry_snapshots` | Snapshot of equity, PnL, exposure and API health every 5 min |
 | `news_items`, `research_reports`, `llm_usage` | Collected and triaged news, the analyst's readings, tokens and cost of each call |
-| `tape_decisions`, `tape_quotes` | The A/B tape (D-048): per profile and cycle, the candidates the entry planner received (JSONB), the exposure multiplier, the live state and the research status; once a minute, the bid/ask of the symbols a paper account could hold. Quotes are pruned after `TA_TAPE_QUOTE_RETENTION_DAYS` (120); decisions are kept |
+| `tape_decisions`, `tape_quotes` | The A/B tape (D-050): per profile and cycle, the candidates the entry planner received (JSONB), the exposure multiplier, the live state and the research status; once a minute, the bid/ask of the symbols a paper account could hold. Quotes are pruned after `TA_TAPE_QUOTE_RETENTION_DAYS` (120); decisions are kept |
 
 The decisions of each cycle are in the `decision.cycle` events (evaluated, entries, exits and rejections, the setups found, the setups the stop-noise filter removed in `stop_noise` and the market regime in `regime`) and, in detail, in the logs and traces (§12.1). Each flip of the regime is a `market.regime_changed` event (D-043).
 

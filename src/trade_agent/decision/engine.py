@@ -9,7 +9,7 @@
 4. rule-based exits for the profile's positions (rotation, time, veto) and break-even, which
    the profiles with ``break_even_intrabar`` also check between the closes
    (:meth:`DecisionEngine.watch_break_even`, D-047);
-5. the cycle's priced candidates go to the A/B tape (D-048, whatever the live state) and,
+5. the cycle's priced candidates go to the A/B tape (D-050, whatever the live state) and,
    when the state allows it, to the entries: portfolio (``plan_entries``) → pre-trade checks
    → OPOCO.
 

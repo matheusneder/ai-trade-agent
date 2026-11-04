@@ -25,7 +25,7 @@ The agent has been **paper trading in Demo Mode** since 2026-09-29, with the ord
 - [ ] **4 weeks of Demo** (until about 2026-10-27) with **no** duplicate order and no `unprotected` position for more than 30 s.
 - [ ] Reconciliation without unexplained mismatches.
 - [ ] Maximum *drawdown* and daily loss within each profile's limits.
-- [ ] Risk-adjusted result, after fees, compared with BTC *buy & hold* and with a "pure TA" clone of each profile (`llm.weight = 0`), with an explicit decision on the LLM's weight. The comparison has its data source since D-048: the agent records the A/B tape, and `lab.paper` replays it with a pure-TA and a TA + LLM account (runbook, §4). **The comparison has not been run yet.**
+- [ ] Risk-adjusted result, after fees, compared with BTC *buy & hold* and with a "pure TA" clone of each profile (`llm.weight = 0`), with an explicit decision on the LLM's weight. The comparison has its data source since D-050: the agent records the A/B tape, and `lab.paper` replays it with a pure-TA and a TA + LLM account (runbook, §4). **The comparison has not been run yet.**
 - [ ] Every circuit breaker tested; `/halt` and `/flatten` tested from the phone.
 - [ ] External heartbeat configured (`TA_HEALTHCHECK_URL`, empty today) and tested with the machine off.
 - [ ] Agent on a VPS in an allowed region, with at least one restart with open positions.
@@ -76,7 +76,7 @@ After the *go-live*: start with one profile and small capital (an amount you acc
 
 1. **VPS:** provider and region.
 2. **Production account:** dedicated account and initial capital.
-3. **LLM weight:** depends on the "pure TA" × "TA + LLM" A/B. Its data source exists since D-048 (the tape the agent records, replayed by `lab.paper`); the comparison still has to be run on it.
+3. **LLM weight:** depends on the "pure TA" × "TA + LLM" A/B. Its data source exists since D-050 (the tape the agent records, replayed by `lab.paper`); the comparison still has to be run on it.
 4. **Alert channel:** only Telegram, or e-mail too (through Healthchecks.io)?
 5. **Observability in production:** keep Jaeger, Loki and SigNoz side by side, or keep just one (SigNoz is the heaviest)?
 

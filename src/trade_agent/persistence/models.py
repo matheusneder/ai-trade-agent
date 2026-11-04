@@ -246,7 +246,7 @@ class LlmUsageRecord(Base):
     cost_usd: Mapped[Decimal]
 
 
-# ============================================================================ A/B tape (D-048)
+# ============================================================================ A/B tape (D-050)
 class TapeDecisionRecord(Base):
     """A decision cycle as the entry planner received it, whatever the live state."""
 

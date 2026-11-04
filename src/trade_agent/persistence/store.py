@@ -522,7 +522,7 @@ class Store:
         async with self.db.session() as session:
             await session.execute(statement)
 
-    # ================================================================== A/B tape (D-048)
+    # ================================================================== A/B tape (D-050)
     async def add_tape_decision(
         self,
         *,
