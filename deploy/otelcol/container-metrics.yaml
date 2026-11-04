@@ -1,6 +1,7 @@
 # CPU, memory, network and disk of each project container (docker_stats) → SigNoz.
 # Reads the Docker API through the read-only proxy (docker-proxy), like Alloy. The startup
-# warning about a "TCP connection to Docker without TLS" refers to that proxy, on an internal network.
+# warning about a "TCP connection to Docker without TLS" refers to that proxy, on an internal
+# network; Alloy drops it, so it only shows in docker logs.
 receivers:
   docker_stats:
     endpoint: tcp://docker-proxy:2375

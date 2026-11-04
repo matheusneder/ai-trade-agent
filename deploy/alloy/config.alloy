@@ -94,6 +94,15 @@ loki.process "trade_agent" {
 		drop_counter_reason = "container_gone"
 	}
 
+	// container-metrics: at each start docker_stats warns about "unauthenticated TCP" to the Docker
+	// daemon. The endpoint is the read-only proxy on the internal docker-api network, not the
+	// daemon, so the deprecation does not apply. Left out.
+	stage.match {
+		selector            = "{service=\"container-metrics\"} |= \"Unauthenticated TCP connection to Docker daemon\""
+		action              = "drop"
+		drop_counter_reason = "proxy_plain_tcp"
+	}
+
 	// Jaeger and container-metrics (OpenTelemetry Collector): JSON with "level".
 	stage.match {
 		selector = "{service=~\"jaeger|container-metrics\"}"
