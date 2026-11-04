@@ -267,7 +267,6 @@ class TapeQuoteRecord(Base):
     """Best bid/ask of a symbol a paper account could hold, once per quote tick."""
 
     __tablename__ = "tape_quotes"
-    __table_args__ = (Index("ix_tape_quotes_symbol_at", "symbol", "at"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     at: Mapped[datetime] = mapped_column(index=True)

@@ -40,11 +40,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_tape_quotes")),
     )
     op.create_index(op.f("ix_tape_quotes_at"), "tape_quotes", ["at"], unique=False)
-    op.create_index("ix_tape_quotes_symbol_at", "tape_quotes", ["symbol", "at"], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_tape_quotes_symbol_at", table_name="tape_quotes")
     op.drop_index(op.f("ix_tape_quotes_at"), table_name="tape_quotes")
     op.drop_table("tape_quotes")
     op.drop_index(op.f("ix_tape_decisions_at"), table_name="tape_decisions")
