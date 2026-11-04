@@ -70,7 +70,10 @@ bare file name. The test files carry the `grafana` prefix and the fixtures live 
   are read from `deploy/stack.yml`; Grafana mounts `deploy/grafana/provisioning` and
   `deploy/grafana/dashboards` with the same startup command; PostgreSQL runs
   `deploy/postgres/init` (the `grafana_ro` read-only user the data source uses); Loki uses
-  `deploy/loki/loki.yaml`.
+  `deploy/loki/loki.yaml`. One difference, `GF_PLUGINS_PREINSTALL_DISABLED`: at startup Grafana
+  reinstalls its preinstalled plugins from grafana.com in the background, the data sources'
+  included, and any dashboard that loaded while its plugin was being replaced failed with
+  `Datasource ... was not found` or a 404 from `/api/ds/query`, a different one each run.
 - **Generated credentials**: the Grafana admin, PostgreSQL and `grafana_ro` passwords are new
   random values each run, passed only through the environment of `docker compose`.
 - **Schema from the project's migrations**: `upgrade_to_head` (Alembic, `src/trade_agent/persistence/migrations`).
