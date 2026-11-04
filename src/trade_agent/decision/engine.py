@@ -789,6 +789,7 @@ class DecisionEngine:
                 opinion=reading.opinions.get(by_symbol[symbol].base_asset),
             )
             for symbol, signal in signals.items()
+            if symbol in by_symbol  # a held pair that left the universe only has its exits
             if symbol in books
         ]
         capital = self._strategy.profile_capital(name)
