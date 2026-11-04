@@ -80,6 +80,10 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # SQLite: readers survive a writer and a short lock is retried. Otherwise the lookup of the
+      # data source fails with SQLITE_BUSY and execErrState turns it into a critical alert.
+      GF_DATABASE_WAL: "true"
+      GF_DATABASE_QUERY_RETRIES: "5"
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_ro_dev}
       # Grafana alerts in the agent's chat (the placeholder keeps the provisioning valid)
       TELEGRAM_BOT_TOKEN: ${TA_TELEGRAM_BOT_TOKEN:-nao-configurado}
