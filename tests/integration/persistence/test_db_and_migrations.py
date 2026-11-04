@@ -105,6 +105,33 @@ async def test_downgrade_and_upgrade_roundtrip(postgres_url: str) -> None:
         await engine.dispose()
 
 
+def test_the_tape_migration_goes_down_one_step_and_back(
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TA_DATABASE_URL", postgres_url)
+
+    async def tables() -> tuple[str | None, str | None, str | None]:
+        engine = create_async_engine(postgres_url)
+        async with engine.connect() as conn:
+            found = await conn.execute(
+                text(
+                    "SELECT to_regclass('public.tape_decisions')::text,"
+                    " to_regclass('public.tape_quotes')::text,"
+                    " to_regclass('public.positions')::text"
+                )
+            )
+            row = found.one()
+        await engine.dispose()
+        return row[0], row[1], row[2]
+
+    command.downgrade(alembic_config(), "-1")
+    try:
+        assert asyncio.run(tables()) == (None, None, "positions")
+    finally:
+        command.upgrade(alembic_config(), "head")
+    assert asyncio.run(tables()) == ("tape_decisions", "tape_quotes", "positions")
+
+
 def test_offline_sql_generation(postgres_url: str) -> None:
     config = alembic_config()
     config.cmd_opts = type("Opts", (), {"x": [f"url={postgres_url}"]})()
