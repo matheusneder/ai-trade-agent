@@ -236,6 +236,24 @@ Scope: `global` (default) or the profile name. Only the configured `TA_TELEGRAM_
   ```
 
   For each position it shows the Demo exit, the exit the same legs would have had on `api.binance.com` (positions marked **(diverged)** left differently), each fill against its trigger, and the Demo PnL repriced at the production fill. A fill with no print at the bid within 60 s of its trigger is estimated at the 250 ms low and listed apart. The repriced PnL keeps the Demo's entry, quantity, fees and later adjustments: it diagnoses the exits, and it is neither an independently executed production portfolio nor proof that those fills were achievable. `--json` gives the same data as JSON. `--horizon-hours` (72) is how long the legs keep working after a Demo exit that production does not confirm. The model and its limits are in `src/trade_agent/demo_audit.py`. A `TAKE_PROFIT_LIMIT` is not a fix: its limit price does not trail, and when it triggers the OCO cancels the stop, so an unfilled limit leaves the position without a stop.
+- **A/B tape (D-048):** the agent records what `lab.paper` replays, with independent pure-TA and TA + LLM accounts: one `tape_decisions` row per profile per cycle and, once a minute, the bid/ask of the symbols a paper account could hold (`tape_quotes`). The tables come with migration 0006, applied at the agent's next start, and the recording starts there: nothing before it can be replayed. To replay an interval:
+
+  ```
+  uv run python -m scripts.tape_export --since 2026-11-05T00:00:00Z --until 2026-12-05T00:00:00Z --output var/tape-2026-11.jsonl
+  uv run python -m lab.paper var/tape-2026-11.jsonl --slippage-bps 5
+  ```
+
+  The export is read-only, needs only `TA_DATABASE_URL` and prints a summary (decisions per profile, quotes, distinct symbols, first and last instant, `dropped_candidates`). `--profiles name ...` narrows it, and is needed when a profile recorded in the interval no longer exists in `config/profiles.yaml`: `lab.paper` stops at its decisions otherwise. The replay is not a profitability approval, and research and infrastructure costs come off separately (`scripts.economic_report`).
+  - **Settings:** `TA_TAPE_ENABLED=false` registers nothing (no table written, no request added). `TA_TAPE_QUOTE_RETENTION_DAYS` (120) prunes the quotes once per UTC day; decisions are not pruned. `TA_TAPE_WATCH_WINDOW_DAYS` overrides how long a symbol stays watched after its last setup (default: the longest enabled `max_holding` plus one day). Recreate the agent after changing them (`restart` does not read the `.env` again).
+  - **Expected growth:** quotes are 1,440 rows per day per watched symbol, so 30 symbols give 43,200 rows per day, 5.2 million at 120 days. Measured with synthetic rows at the Demo's rate of 90 cycles a day with 46 candidates each: quotes 6.1 MB per day on disk and 0.46 MB in the dump, which stop growing at the retention (732 MB and 55 MB); decisions 0.73 MB per day on disk and 0.39 MB in the dump, which do not stop (88 MB and 46 MB at 120 days, about 270 MB and 140 MB per year). The database had 20 MB before the tape. `scripts.backup` keeps the whole dump in memory and peaks at about six times its size (640 MB for 100 MB); `pg_dump | gzip` below streams. Lower the retention if that does not fit the host.
+  - **Checking it:** the size of the tables and the symbols watched in the last hour:
+
+    ```
+    docker compose -f deploy/docker-compose.yml exec postgres psql -U trade_agent -d trade_agent -c "SELECT relname, n_live_tup, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_stat_user_tables WHERE relname LIKE 'tape_%'" -c "SELECT count(DISTINCT symbol) FROM tape_quotes WHERE at > now() - interval '1 hour'"
+    ```
+
+    The warnings `decision.tape_failed` and `tape.quotes_failed` in the logs mean a gap in the tape, with no effect on trading.
+  - **Size of a tape:** about 22 MB of JSONL per day at those rates, 80% of it decisions, and `lab.paper` reads the file into memory: 30 days (670 MB) took 22 s and 1.5 GB. Prefer shorter intervals; two exports do not add up, because each replay starts from empty accounts.
 - **Backup:** `docker compose ... exec postgres pg_dump -U trade_agent trade_agent | gzip > backup.sql.gz`, kept off the VPS.
 - **Deprecated APIs:** the suite's `filterwarnings = ["error"]` already fails on any warning a test triggers. After upgrading a dependency or Python, also list what the type stubs mark as deprecated and the warnings shown without failing:
 

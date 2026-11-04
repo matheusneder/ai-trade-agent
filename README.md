@@ -110,6 +110,8 @@ The default is now `--detail 5m`. Use `--exploratory-no-detail` only for explora
 
 To compare another version of the code (A/B), point `TA_LAB_SRC` to that version's `src/` folder (e.g. a `git worktree`).
 
+The running agent records the tape of the pure-TA × TA + LLM comparison: `scripts.tape_export` writes an interval as the JSONL that `lab.paper` replays ([runbook](doc/runbook.md), §4; D-048).
+
 The windows go from 2023-01-01 to 2026-09-01 by default (`--start`, `--end`). The reports go to `var/lab/`, and the annotated summary of the calibration in use is in [`doc/lab-results.md`](doc/lab-results.md).
 
 ## Market analyst

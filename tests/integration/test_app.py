@@ -2,7 +2,9 @@
 
 import asyncio
 import io
+from datetime import timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -18,10 +20,12 @@ from tests.support.tracing import Recorded
 from trade_agent import app, cli, metrics, tracing
 from trade_agent.app import build_runtime, install_signal_handlers, run_agent
 from trade_agent.config.settings import Settings, load_settings
+from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.errors import BinanceConfigurationError
 from trade_agent.persistence.db import AlreadyRunningError, Database
 from trade_agent.persistence.store import Store
 from trade_agent.runtime import job_name
+from trade_agent.strategy.profiles import load_strategy_config
 
 PROFILES = Path(__file__).parents[1] / "fixtures" / "profiles.yaml"
 
@@ -65,8 +69,31 @@ async def test_build_runtime_with_llm_key_and_injected_http(postgres_url: str) -
         build_runtime(settings, aux_http=aux, user_stream=False) as runtime,
     ):
         assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h"]  # agressivo turned off
-        assert len(runtime._periodic) == 2  # risk (with telemetry) and news
+        assert len(runtime._periodic) == 3  # risk (with telemetry), news and the A/B tape
         assert runtime._heartbeat is None  # no TA_HEALTHCHECK_URL
+
+
+async def test_build_runtime_registers_the_tape_unless_it_is_off(postgres_url: str) -> None:
+    async with build_runtime(_settings(postgres_url), user_stream=False) as runtime:
+        jobs = [(interval, job_name(action)) for interval, action in runtime._periodic]
+        assert (app.TAPE_INTERVAL_S, "record_quotes") in jobs
+    settings = _settings(postgres_url, tape_enabled=False)
+    async with build_runtime(settings, user_stream=False) as runtime:
+        assert "record_quotes" not in [job_name(action) for _, action in runtime._periodic]
+
+
+def test_build_tape_derives_the_window_from_the_profiles_unless_overridden() -> None:
+    strategy = load_strategy_config(PROFILES)
+    api, store = AsyncMock(spec=BinanceSpotApi), AsyncMock(spec=Store)
+    assert app.build_tape(_settings(None, tape_enabled=False), api, store, strategy) is None
+    derived = app.build_tape(_settings(None), api, store, strategy)
+    assert derived is not None
+    assert derived._window == timedelta(days=21 + 1)  # conservador's 21d, the longest enabled
+    assert derived._retention == timedelta(days=120)
+    settings = _settings(None, tape_watch_window_days=3, tape_quote_retention_days=30)
+    overridden = app.build_tape(settings, api, store, strategy)
+    assert overridden is not None
+    assert (overridden._window, overridden._retention) == (timedelta(days=3), timedelta(days=30))
 
 
 async def test_build_runtime_watches_the_break_even_between_closes(

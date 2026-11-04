@@ -14,6 +14,7 @@ import structlog
 
 from trade_agent.config.settings import Settings
 from trade_agent.decision.engine import DecisionEngine, UniverseCache
+from trade_agent.decision.tape import DecisionTape, watch_window
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.environments import endpoints_for
 from trade_agent.exchange.errors import BinanceConfigurationError
@@ -60,6 +61,8 @@ RISK_INTERVAL_S = 60.0
 INGEST_INTERVAL_S = 900.0
 BREAK_EVEN_INTERVAL_S = 60.0
 """Break-even between the candle closes (D-047), at the risk check's cadence."""
+TAPE_INTERVAL_S = 60.0
+"""Quotes of the A/B tape (D-048), at the risk check's cadence."""
 
 log = structlog.get_logger(__name__)
 
@@ -77,6 +80,21 @@ def scope_specs(strategy: StrategyConfig) -> dict[str, ScopeSpec]:
         for name, profile in strategy.enabled_profiles().items()
         if profile.risk is not None
     }
+
+
+def build_tape(
+    settings: Settings, api: BinanceSpotApi, store: Store, strategy: StrategyConfig
+) -> DecisionTape | None:
+    """The A/B tape (D-048); ``None`` with the setting off, which registers nothing."""
+    if not settings.tape_enabled:
+        return None
+    retention = timedelta(days=settings.tape_quote_retention_days)
+    window = (
+        watch_window(strategy, retention=retention)
+        if settings.tape_watch_window_days is None
+        else timedelta(days=settings.tape_watch_window_days)
+    )
+    return DecisionTape(api=api, store=store, window=window, retention=retention)
 
 
 @dataclass
@@ -133,6 +151,7 @@ def assemble(
         config=research_config,
         notify=notifier.notify,
     )
+    tape = build_tape(settings, api, store, strategy)
     engine = DecisionEngine(
         api=api,
         positions=positions,
@@ -150,6 +169,7 @@ def assemble(
         view_max_age=timedelta(hours=research_config.safety.max_view_age_hours),
         dry_run=not settings.trading_enabled,
         notify=notifier.notify,
+        tape=tape,
     )
     guard.set_flattener(engine.flatten)
 
@@ -252,6 +272,7 @@ def assemble(
         llm_budget_usd=str(research_config.budget.daily_usd),
         tracing=settings.otlp_endpoint is not None,
         metrics=settings.otlp_metrics_endpoint is not None,
+        tape=tape is not None,
     )
     periodic: list[tuple[float, Action]] = [
         (RISK_INTERVAL_S, check_risk),
@@ -259,6 +280,8 @@ def assemble(
     ]
     if any(p.protection.break_even_intrabar for p in strategy.enabled_profiles().values()):
         periodic.append((BREAK_EVEN_INTERVAL_S, engine.watch_break_even))
+    if tape is not None:
+        periodic.append((TAPE_INTERVAL_S, tape.record_quotes))
     return AgentParts(
         guard=guard,
         engine=engine,

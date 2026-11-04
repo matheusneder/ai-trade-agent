@@ -115,8 +115,28 @@ Paper replay is an offline tool with independent cash and positions for `pure_ta
   `lab.paper.CANDIDATES.dump_python(candidates, mode="json")` produces the candidate payload.
 
 The tape must be collected independently of the selected strategy, including held assets,
-with quotes frequent enough to evaluate stops. Automatic production tape collection is
-not activated. The replay supports FOK entries, fixed stops and trailing take-profit only.
+with quotes frequent enough to evaluate stops. The agent records it since D-048, on by
+default (`TA_TAPE_ENABLED=false` turns it off). `tape_decisions` keeps one row per profile
+per decision cycle, whatever the live state, with every candidate the entry planner
+received. `tape_quotes` keeps bid/ask once a minute for the symbols with a setup within the
+watch window (the longest enabled `max_holding` plus one day, or
+`TA_TAPE_WATCH_WINDOW_DAYS`) and for the active positions, pruned after
+`TA_TAPE_QUOTE_RETENTION_DAYS` (120). Export an interval and replay it:
+
+```bash
+uv run python -m scripts.tape_export --since 2026-11-05T00:00:00Z --until 2026-12-05T00:00:00Z --output var/tape-2026-11.jsonl
+uv run python -m lab.paper var/tape-2026-11.jsonl --slippage-bps 5
+```
+
+The export is read-only and needs no exchange credentials. It orders events by `at`, with
+quotes before decisions at the same instant, and leaves out candidates with an empty side
+or a crossed book (counted in `dropped_candidates`), on which the replay would refuse the
+whole tape; the table keeps them. Limits of what it records: both accounts see the universe,
+signals and analyst reading the live agent computed, so setups it never evaluated do not
+appear. A symbol's quotes start at its first setup. One-minute quotes approximate the native
+OCO and do not reproduce intra-minute triggers. Sizes and growth are in the runbook (§4).
+
+The replay supports FOK entries, fixed stops and trailing take-profit only.
 It models gap fills at observed bids, fees/slippage, decision exits and aggregate caps.
 It does not reproduce queue depth, global circuit breakers, exchange rounding on every
 protection replacement or continuous execution between quotes. Time exits without a fresh
@@ -161,7 +181,11 @@ uv run python -m scripts.backup restore-drill --container ISOLATED_POSTGRES --da
 Create the empty restore database in an isolated test PostgreSQL beforehand. Restore
 refuses nonempty targets and database names without `_restore_test`; it never drops a
 database. Archives are authenticated/encrypted and cannot overwrite an existing file.
-The implementation buffers dumps in memory and is intended for the current small database.
+The implementation buffers dumps in memory and is intended for a small database. The A/B
+tape (D-048) stretches that: at 120 days of quotes with 30 watched symbols the dump measures
+about 100 MB (synthetic rows), and encrypting 100 MB here peaks at about 640 MB of memory.
+Lower `TA_TAPE_QUOTE_RETENTION_DAYS` if that does not fit the host; the runbook's
+`pg_dump | gzip` backup streams and is not affected.
 External upload, scheduling, retention and key recovery arrangements remain pending.
 Existing heartbeat code and its local tests are retained; `TA_HEALTHCHECK_URL` remains
 unset until the operator selects the external service.

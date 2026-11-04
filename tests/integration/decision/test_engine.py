@@ -30,6 +30,7 @@ from tests.support.risk import CONDITIONS, POLICY
 from tests.support.tracing import Recorded
 from trade_agent.decision import engine as engine_module
 from trade_agent.decision.engine import UNIVERSE_TTL, DecisionEngine, UniverseCache
+from trade_agent.decision.tape import DecisionTape
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.orders import EntryMode, EntryOrder
 from trade_agent.execution.positions import Position, PositionState
@@ -114,6 +115,7 @@ def _engine(
     alerts: list[str] | None = None,
     research_wait: timedelta = engine_module.SHARED_RESEARCH_WAIT,
     scopes: Mapping[str, ScopeSpec] | None = None,
+    tape: DecisionTape | None = None,
 ) -> tuple[DecisionEngine, RiskGuard]:
     async def notify(severity: Severity, text: str) -> None:
         if alerts is not None:
@@ -140,6 +142,7 @@ def _engine(
         notify=notify,
         clock=clock,
         research_wait=research_wait,
+        tape=tape,
     )
     guard.set_flattener(engine.flatten)
     return engine, guard

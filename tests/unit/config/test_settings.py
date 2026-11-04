@@ -69,6 +69,34 @@ def test_recv_window_bounds(value: int) -> None:
         Settings(_env_file=None, binance_recv_window_ms=value)
 
 
+def test_the_tape_is_on_by_default_with_its_retention_and_a_derived_window() -> None:
+    settings = load_settings(env_file=None)
+    assert settings.tape_enabled is True
+    assert settings.tape_quote_retention_days == 120
+    assert settings.tape_watch_window_days is None
+
+
+def test_the_tape_settings_read_the_env_file(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    lines = [
+        "TA_TAPE_ENABLED=false",
+        "TA_TAPE_QUOTE_RETENTION_DAYS=30",
+        "TA_TAPE_WATCH_WINDOW_DAYS=",
+    ]
+    env_file.write_text("\n".join(lines), encoding="utf-8")
+    settings = load_settings(env_file=env_file)
+    assert settings.tape_enabled is False
+    assert settings.tape_quote_retention_days == 30
+    assert settings.tape_watch_window_days is None  # blank: derived from the profiles
+    assert load_settings(env_file=None, tape_watch_window_days=7).tape_watch_window_days == 7
+
+
+@pytest.mark.parametrize("bad", [{"tape_quote_retention_days": 0}, {"tape_watch_window_days": 0}])
+def test_the_tape_settings_refuse_a_window_that_keeps_nothing(bad: dict[str, int]) -> None:
+    with pytest.raises(ValidationError):
+        load_settings(env_file=None, **bad)
+
+
 def test_invalid_log_level() -> None:
     with pytest.raises(ValidationError):
         load_settings(env_file=None, log_level=10)

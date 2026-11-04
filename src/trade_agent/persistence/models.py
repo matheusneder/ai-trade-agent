@@ -244,3 +244,33 @@ class LlmUsageRecord(Base):
     web_search_requests: Mapped[int] = mapped_column(Integer)
     web_fetch_requests: Mapped[int] = mapped_column(Integer)
     cost_usd: Mapped[Decimal]
+
+
+# ============================================================================ A/B tape (D-048)
+class TapeDecisionRecord(Base):
+    """A decision cycle as the entry planner received it, whatever the live state."""
+
+    __tablename__ = "tape_decisions"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    at: Mapped[datetime] = mapped_column(index=True)
+    profile: Mapped[str] = mapped_column(String(48))
+    state: Mapped[str] = mapped_column(String(16))
+    research: Mapped[str] = mapped_column(Text)
+    """The status the cycle reports; a failure carries the error's text, of any length."""
+    exposure_multiplier: Mapped[Decimal]
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    """Serialized ``strategy.portfolio.Candidate`` values, as ``lab.paper`` validates them."""
+
+
+class TapeQuoteRecord(Base):
+    """Best bid/ask of a symbol a paper account could hold, once per quote tick."""
+
+    __tablename__ = "tape_quotes"
+    __table_args__ = (Index("ix_tape_quotes_symbol_at", "symbol", "at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    at: Mapped[datetime] = mapped_column(index=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    bid: Mapped[Decimal]
+    ask: Mapped[Decimal]

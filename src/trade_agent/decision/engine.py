@@ -9,7 +9,9 @@
 4. rule-based exits for the profile's positions (rotation, time, veto) and break-even, which
    the profiles with ``break_even_intrabar`` also check between the closes
    (:meth:`DecisionEngine.watch_break_even`, D-047);
-5. entries: portfolio (``plan_entries``) → pre-trade checks → OPOCO.
+5. the cycle's priced candidates go to the A/B tape (D-048, whatever the live state) and,
+   when the state allows it, to the entries: portfolio (``plan_entries``) → pre-trade checks
+   → OPOCO.
 
 With ``dry_run`` (the ``TA_TRADING_ENABLED`` lock off), decisions are recorded as events
 and no order is sent.
@@ -30,6 +32,7 @@ import pandas as pd
 import structlog
 
 from trade_agent import metrics, tracing
+from trade_agent.decision.tape import DecisionTape
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService
@@ -368,8 +371,10 @@ class DecisionEngine:
         notify: Callable[[Severity, str], Awaitable[None]] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         research_wait: timedelta = SHARED_RESEARCH_WAIT,
+        tape: DecisionTape | None = None,
     ) -> None:
         self._api = api
+        self._tape = tape
         self._positions = positions
         self._store = store
         self._guard = guard
@@ -594,22 +599,15 @@ class DecisionEngine:
                     if not self._dry_run:
                         await self._positions.close_position(position, ExitReason.DECISION)
         state = await self._guard.effective(name)
-        opened: list[str] = []
-        rejected: list[tuple[str, str]] = []
-        if state.allows_entries:
-            # Profiles of the same timeframe run together, and the research (minutes) separates
-            # the reading at the start of the cycle from the purchase: one profile buys at a time,
-            # with the positions read again, or both buy the same asset (one_position_per_asset).
-            async with self._entry_lock:
-                opened, rejected = await self._entries(
-                    name,
-                    profile=profile,
-                    universe=universe,
-                    signals=signals,
-                    active=await self._store.active_positions(),
-                    reading=reading,
-                    state=state,
-                )
+        opened, rejected = await self._entry_stage(
+            name,
+            profile=profile,
+            universe=universe,
+            signals=signals,
+            reading=reading,
+            research=research_status,
+            state=state,
+        )
         state = await self._guard.effective(name)
         report = CycleReport(
             profile=name,
@@ -767,20 +765,15 @@ class DecisionEngine:
         tracing.annotate(adjusted=adjusted)
         return adjusted
 
-    async def _entries(
-        self,
-        name: str,
-        *,
-        profile: ProfileConfig,
-        universe: Universe,
-        signals: dict[str, Signal],
-        active: list[Position],
-        reading: MarketReading,
-        state: OpState,
-    ) -> tuple[list[str], list[tuple[str, str]]]:
+    async def _candidates(
+        self, universe: Universe, signals: dict[str, Signal], reading: MarketReading
+    ) -> tuple[list[Candidate], datetime]:
+        """The cycle's priced candidates, from one ``book_tickers()`` (weight 4), and when the
+        books were read."""
         by_symbol = universe.by_symbol()
         books = {b.symbol: b for b in await self._api.book_tickers() if b.symbol in signals}
-        candidates = [
+        at = self._clock()
+        return [
             Candidate(
                 member=by_symbol[symbol],
                 signal=signal,
@@ -791,7 +784,98 @@ class DecisionEngine:
             for symbol, signal in signals.items()
             if symbol in by_symbol  # a held pair that left the universe only has its exits
             if symbol in books
-        ]
+        ], at
+
+    async def _entry_stage(
+        self,
+        name: str,
+        *,
+        profile: ProfileConfig,
+        universe: Universe,
+        signals: dict[str, Signal],
+        reading: MarketReading,
+        research: str,
+        state: OpState,
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        """Prices the candidates, puts them on the A/B tape and, if the state allows it, buys."""
+        if state.allows_entries:
+            # Profiles of the same timeframe run together, and the research (minutes) separates
+            # the reading at the start of the cycle from the purchase: one profile buys at a time,
+            # with the positions read again, or both buy the same asset (one_position_per_asset).
+            # The books are read inside the lock too: a purchase never prices on a stale book.
+            async with self._entry_lock:
+                candidates, at = await self._candidates(universe, signals, reading)
+                await self._record_decision(
+                    name,
+                    at=at,
+                    state=state,
+                    research=research,
+                    reading=reading,
+                    candidates=candidates,
+                )
+                return await self._entries(
+                    name,
+                    profile=profile,
+                    universe=universe,
+                    candidates=candidates,
+                    active=await self._store.active_positions(),
+                    reading=reading,
+                    state=state,
+                )
+        if self._tape is not None:
+            # No entry, but the paper accounts apply their own risk checks: the tape keeps the
+            # cycle. Only the tape needs these books, so failing to read them costs nothing else.
+            try:
+                candidates, at = await self._candidates(universe, signals, reading)
+            except Exception as exc:
+                log.warning("decision.tape_failed", profile=name, error=repr(exc))
+            else:
+                await self._record_decision(
+                    name,
+                    at=at,
+                    state=state,
+                    research=research,
+                    reading=reading,
+                    candidates=candidates,
+                )
+        return [], []
+
+    async def _record_decision(
+        self,
+        name: str,
+        *,
+        at: datetime,
+        state: OpState,
+        research: str,
+        reading: MarketReading,
+        candidates: list[Candidate],
+    ) -> None:
+        if self._tape is None:
+            return
+        try:
+            await self._tape.record_decision(
+                profile=name,
+                at=at,
+                state=state,
+                research=research,
+                exposure_multiplier=reading.exposure_multiplier,
+                candidates=candidates,
+            )
+        except Exception as exc:  # the tape must never cost the cycle
+            log.warning("decision.tape_failed", profile=name, error=repr(exc))
+
+    async def _entries(
+        self,
+        name: str,
+        *,
+        profile: ProfileConfig,
+        universe: Universe,
+        candidates: list[Candidate],
+        active: list[Position],
+        reading: MarketReading,
+        state: OpState,
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        by_symbol = universe.by_symbol()
         capital = self._strategy.profile_capital(name)
         risk_config = self._guard.conditions.pre_trade
         cost_pct = (

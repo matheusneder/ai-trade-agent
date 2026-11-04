@@ -75,6 +75,15 @@ class Settings(BaseSettings):
     log_level: LogLevel = "INFO"
     log_format: LogFormat = LogFormat.CONSOLE
 
+    tape_enabled: bool = True
+    """Records the A/B tape (D-048): the decisions and the quotes ``lab.paper`` replays. With
+    ``false``, nothing is registered: no table is written and no request is added."""
+    tape_quote_retention_days: int = Field(default=120, gt=0)
+    """Quotes older than this are pruned once per UTC day."""
+    tape_watch_window_days: int | None = Field(default=None, gt=0)
+    """How long a symbol stays in the quote watch-list after its last setup. Empty: the longest
+    ``protection.max_holding`` among the enabled profiles plus one day."""
+
     @field_validator(
         "binance_api_key",
         "binance_private_key_path",
@@ -87,6 +96,7 @@ class Settings(BaseSettings):
         "healthcheck_url",
         "otlp_endpoint",
         "otlp_metrics_endpoint",
+        "tape_watch_window_days",
         mode="before",
     )
     @classmethod

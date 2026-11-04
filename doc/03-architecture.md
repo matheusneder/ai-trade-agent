@@ -104,7 +104,7 @@ src/trade_agent/
   signals/                # PURE FUNCTIONS: technical features, score and setups (also used in the lab)
   research/               # news and metrics collection, triage and the LLM analyst (MarketView)
   strategy/               # profiles (YAML), portfolio and sizing, exits and break-even
-  decision/               # decision cycle per profile and the candle-close schedule
+  decision/               # decision cycle per profile, the candle-close schedule and the A/B tape
   risk/                   # stop conditions, states, equity monitor, pre-trade
   execution/              # IDs, OPOCO/OCO building, idempotent gateway, position service
   reconcile/              # assessment of each position against the exchange and reconciliation
@@ -114,7 +114,7 @@ src/trade_agent/
 lab/
   walk_forward.py         # per-window backtests in Freqtrade (Docker), with hyperopt in training
   freqtrade/              # docker-compose and the "shell" strategy that imports trade_agent.signals
-scripts/                  # spike_opoco.py, grafana_dashboards.py, signoz_dashboards.py
+scripts/                  # spike_opoco.py, grafana_dashboards.py, signoz_dashboards.py, tape_export.py
 evals/analyst/            # labeled cases to evaluate the analyst (D-021)
 config/
   profiles.yaml           # profiles (§8)
@@ -140,6 +140,7 @@ deploy/
 | `research_cycle` | inside the `decision_cycle`, only with setups or positions; one per candle close for the profiles of the same timeframe (D-032) | LLM analyst → `MarketView` (without candidates, the last valid reading holds) |
 | `decision_cycle` | the profile's candle close + 20 s (e.g. 4h) | Signals → analyst → rule-based exits and *break-even* → entries (pre-trade checks) → OPOCO. With `TA_TRADING_ENABLED=false`, it runs in **simulation** (D-023) |
 | `watch_break_even` | 1 min, only with a profile that has `break_even_intrabar` | The *break-even* of the protected positions between the candle closes, on the bid (D-047); each position's stop moves once |
+| `record_quotes` | 1 min, unless `TA_TAPE_ENABLED=false` | The A/B tape's quotes: bid/ask of its watch-list in `tape_quotes`, from one `book_tickers()` (weight 4; none with an empty watch-list), and the prune of the quotes past their retention once per UTC day (D-048) |
 | `telegram` | continuous (*long polling*) | Operator commands (§12.3, D-022) |
 
 The periodic tasks already run at startup, after the initial reconciliation. There is no automatic daily report or scheduled backup yet: the backup is manual (runbook, §4).
@@ -172,6 +173,8 @@ sequenceDiagram
   T-->>E: TA score, setup, suggested stop (ATR)
   E->>R: candidates with a setup and open positions
   R-->>E: the cycle's MarketView, or the last valid one (no candidates)
+  E->>B: best bid/ask of every symbol (one request)
+  E->>D: A/B tape: the priced candidates and the exposure, whatever the state
   E->>E: final score, ranking, selection, size
   E->>G: order proposals
   G->>G: circuit breakers, limits, filters, R:R, slippage
@@ -182,6 +185,8 @@ sequenceDiagram
   X->>D: updates intent/position
   B-->>X: events (fill, OCO armed) through the user data stream
 ```
+
+**A/B tape (D-048):** after the analyst's reading, the cycle prices every candidate from one `book_tickers()` and writes a `tape_decisions` row with exactly what the entry planner receives. In `paused`, `halted` and `flattening` no entry goes out, but the row is still written, because the accounts of `lab.paper` apply their own risk checks: that is the one request of weight 4 those cycles now make, and a failure to read it costs them nothing else. With entries allowed, the books are still read inside the entry lock, so a purchase never prices on a stale book. A failure to write the tape logs `decision.tape_failed`, and the cycle goes on to its entries.
 
 ### 6.1 Universe
 
@@ -272,7 +277,8 @@ The universe is built every cycle, with the volume ranking of the moment (D-027)
 ### 7.5 LLM evaluation
 
 - **Labeled cases** (`evals/analyst/cases.yaml`, D-021): 31 situations, 19 historical and 12 synthetic (including *prompt* injection), with step (b) only. The last run (`trade-agent research eval`, 2026-09-28) passed all 31 cases, with 100% of the outputs valid against the schema.
-- **Not implemented yet:** the A/B on Demo (a clone of each profile with `llm.weight = 0`) and the correlation between `sentiment` and the return of the following days. Without them, there is no measure of how much the LLM improves the result (doc 04).
+- **A/B on Demo (D-048):** the agent records the tape, and `lab.paper` replays it with independent pure-TA and TA + LLM accounts (runbook, §4). Running that comparison is still to be done: until then, there is no measure of how much the LLM improves the result (doc 04).
+- **Not implemented yet:** the correlation between `sentiment` and the return of the following days.
 
 ## 8. Allocation profiles (R2)
 
@@ -483,6 +489,7 @@ The cap on LLM spending lives in `config/research.yaml` (`budget.daily_usd`, D-0
 | `checkpoints` | Key-value state: risk states per scope (`risk.state.*`), triggers already fired (`risk.fired`), the day open and the equity peak (`risk.equity`), the Telegram *offset* |
 | `telemetry_snapshots` | Snapshot of equity, PnL, exposure and API health every 5 min |
 | `news_items`, `research_reports`, `llm_usage` | Collected and triaged news, the analyst's readings, tokens and cost of each call |
+| `tape_decisions`, `tape_quotes` | The A/B tape (D-048): per profile and cycle, the candidates the entry planner received (JSONB), the exposure multiplier, the live state and the research status; once a minute, the bid/ask of the symbols a paper account could hold. Quotes are pruned after `TA_TAPE_QUOTE_RETENTION_DAYS` (120); decisions are kept |
 
 The decisions of each cycle are in the `decision.cycle` events (evaluated, entries, exits and rejections, the setups found, the setups the stop-noise filter removed in `stop_noise` and the market regime in `regime`) and, in detail, in the logs and traces (§12.1). Each flip of the regime is a `market.regime_changed` event (D-043).
 
@@ -641,3 +648,4 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 | D-047 | 2026-11-02 | **Strategy review after the first Demo month:** risk per trade 1.5% → **0.75%** in `swing_trend` and `momentum_alpha`; **`break_even_intrabar`** on the three legacy profiles: the *break-even* is checked on the bid every minute (`watch_break_even`), once per position, which also stops the cycle from repeating the OCO swap while the price stays above the trigger; the analyst and the pair-local profiles (D-046) unchanged. The lab gains the review's matrix (`lab.experiments --matrix review`) and a forward window, 2026-09-01 → 2026-11-02, after every calibration's data | 47 Demo trades, −74.83 USDT, made by the profiles D-039, D-041 and D-045 replaced, in a month negative for every variant the lab can run (`lab-results.md` §2.12), plus costs the lab does not carry (the analyst, US$ 61.37 in a month; the entries +0.46% over the open after the research's 3.4 min). No filter on the current features separates the Demo's winners from its losers. The strategy's own lab path at 65/30/5 and 1.5% reached a 23–26% drawdown, above the 15% halt; at the D-046 shares, 0.75% keeps it at 7.7–9.1% (1.5%: 14.8–17.6%). The intrabar *break-even* wins the design and the holdout on both baskets in `momentum_alpha`, wins the design in `swing_trend` and loses it in `alt_atr`, and the forward window (12–20 trades) is against it everywhere: enabled on the three by the operator's choice, with the Demo as its validation. The cycle repeated the swap (10 `protection.adjusted` events for ~5 positions) | The analyst off (production equal to what the lab tests, no cost, entries 20 s after the close) or without the web step at US$ 1 a day; the pair-local profiles off (`pair_breakout_1h` rejected and already −1.13 on 2 trades; `pair_range_1h` never trades) or `pair_pullback_1h` alone; 1.0%, 1.2% or 1.5% of risk (the lab path above the halt at 65% in `swing_trend`); the *break-even* off or on `momentum_alpha` alone (the review's own rule) |
 | D-048 | 2026-11-04 | **Grafana's SQLite in WAL mode, with query retries** (`GF_DATABASE_WAL`, `GF_DATABASE_QUERY_RETRIES: 5`). The alert rules keep `execErrState: Alerting` | On 2026-11-04, from 14:33 to 14:41 UTC, Grafana's own database returned `SQLITE_BUSY` (95 log lines, none in the previous 24 h). The data source lookup failed on the first attempt and `ta-unprotected` fired as critical with no position open. What held the lock was not identified: no container event in the window, and the test containers started afterwards. In the default journal mode a writer blocks the readers, so WAL removes this failure whoever the writer is | `execErrState: Error` or `KeepLast` (a protection rule that cannot be evaluated must not stay quiet); Grafana's database on PostgreSQL (one more database and migration for a single-user instance) |
 | D-049 | 2026-11-04 | **Grafana runs only the plugins bundled in its image** (`GF_PLUGINS_PREINSTALL_DISABLED`, in `deploy/stack.yml` and in the smoke stack). The plugin copies already in the `grafana` volume must be removed once when this is deployed: they take precedence over the bundled ones whatever the version, and nothing would update them any more | By default each start checks grafana.com and replaces any plugin with a newer version, so the pinned image ran `grafana-postgresql-datasource` 13.0.6 instead of its bundled 13.0.4, a version the smoke stack never tested. The plugin is unregistered during the download: on throwaway stacks a rule evaluated in that gap failed with `plugin.notRegistered` and passed on its third attempt, about 2.4 s later. The Postgres plugin's gap was 2.4-2.8 s, and other plugins reached 32 s on a loaded machine. A longer gap would exhaust the attempts, and `ta-unprotected` (`execErrState: Alerting`, `for: 0s`) would page at once. No alert was seen firing from this gap. It is not the cause of the `SQLITE_BUSY` of 2026-11-04: the plugin folders' dates show no replacement between 14:13 UTC on 2026-11-03 and 16:13 UTC on 2026-11-04 (`mssql`, replaced again at 16:13, cannot be ruled out), and a throwaway stack with the installer disabled and no WAL also fired on `SQLITE_BUSY`. Cost: plugin fixes arrive only with an image upgrade, which is when the smoke tests run on them |
+| D-050 | 2026-11-04 | **The agent records the A/B tape that `lab.paper` replays**, on by default (`TA_TAPE_ENABLED`). `tape_decisions`: one row per profile per cycle, with every candidate the entry planner received, the exposure multiplier, the live state and the research status, also when the state blocks entries. `tape_quotes`: bid/ask at the risk check's cadence for a watch-list (symbols with a setup within the longest enabled `max_holding` plus one day, and the active positions, rebuilt from the tape at startup), pruned after 120 days; decisions are kept. `scripts.tape_export` writes an interval as the replay's JSONL, read-only. No trading semantics change: the cycle's one `book_tickers()` still prices the entries inside the entry lock, a blocked cycle now makes that same request for the tape alone, and a failure of the tape only logs a warning | D-047 weighed turning the analyst off (US$ 61.37 in a month) with no measure of what it contributes, and every Demo month without a tape is a month the A/B cannot use. This is the instrument only: running the A/B, reading it and any change to `llm.weight` stay with the operator. Measured with synthetic rows at the Demo's rate (90 cycles a day, 46 candidates each) and 30 watched symbols: 830 MB on disk and a 102 MB `pg_dump -Fc` at 120 days (runbook, §4), against 20 MB of database before it | Recording in `events` (its rows feed the dashboards and `recent_events()`, and a cycle is about 65 KB of JSON); recording quotes for the whole universe (every evaluated symbol each minute, most of which no paper account could ever hold); a JSONL file written by the agent instead of the database (no transaction or retention, one more volume to keep, and no query to rebuild the watch-list at startup) |
