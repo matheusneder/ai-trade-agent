@@ -159,3 +159,7 @@ doc/                  architecture, plan and decisions
 ```bash
 uv run pytest tests/grafana-dashboard-smoke-tests --headed --slowmo=400
 ```
+
+## Very short decription
+AI Trade Agent is an autonomous cryptocurrency trading agent for Binance Spot. It combines technical-analysis signals with a market reading from an LLM analyst, based on news and sentiment, and runs configurable risk profiles. The LLM can only veto assets or reduce exposure, never increase risk. Every position opens as a native Binance OPOCO order, a buy that arms a trailing take-profit and a stop-loss on the exchange, so it stays protected even if the agent is down. The project also includes a Freqtrade-based backtesting lab, Telegram alerts and commands, and observability dashboards.
+It has been paper trading on Binance’s Demo Mode since September 2026 and must pass a go-live checklist before using real capital. It is experimental software and does not constitute investment advice.
