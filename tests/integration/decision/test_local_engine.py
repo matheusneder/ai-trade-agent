@@ -292,3 +292,73 @@ async def test_a_position_without_a_signal_keeps_only_the_holding_time(
     report = await engine.run_profile("local")
     assert report.exits == ()
     assert (await store.get_position(position.id)).state is PositionState.PROTECTED
+
+
+async def _held_out_of_the_universe(
+    service: PositionService, store: Store, fake: FakeBinance, opened_at: datetime
+) -> int:
+    """A position on ETHUSDT, whose 24h volume no longer qualifies it, while SOLUSDT has a setup.
+    The universe is built every cycle, so a held pair can drop out of it between two closes."""
+    _setup_market(fake)
+    fake.candles[("SOLUSDT", "4h")] = _sol(pair_pullback())
+    fake.candles[("ETHUSDT", "4h")] = _sol(pair_pullback())  # the held pair has a setup too
+    fake.volumes["ETHUSDT"] = D(0)
+    position = await service.open_position(
+        profile="ppb",
+        entry=EntryOrder("ETHUSDT", D("0.01"), D(2500), EntryMode.LIMIT_FOK),
+        policy=POLICY,
+    )
+    await store.update_position(position.id, opened_at=opened_at)
+    return position.id
+
+
+async def test_a_held_pair_that_left_the_universe_does_not_cost_the_cycle(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """The pair's signal is read for its exits, but it has no universe member to be a candidate:
+    with it among the candidates, the cycle died with a KeyError before the entries and the
+    ``decision.cycle`` event, at every close while the position stayed open."""
+    clock = Clock()
+    position_id = await _held_out_of_the_universe(
+        service, store, fake, clock.now - timedelta(hours=8)
+    )
+    strategy = _strategy(risk={"max_open_risk_pct": 3.0})  # room for the position that stays
+    engine, _ = _engine(api, service, store, strategy=strategy, clock=clock)
+    assert "ETHUSDT" not in (await engine._universe.get()).by_symbol()
+    report = await engine.run_profile("local")
+    assert (report.opened, report.exits, report.rejected) == (("SOLUSDT",), (), ())
+    assert report.evaluated == 3  # BTCUSDT and SOLUSDT from the universe, ETHUSDT held
+    assert (await store.get_position(position_id)).state is PositionState.PROTECTED
+    assert sorted(p.symbol for p in await store.active_positions()) == ["ETHUSDT", "SOLUSDT"]
+    (cycle,) = [e for e in await store.recent_events() if e.kind == "decision.cycle"]
+    assert (cycle.payload["profile"], cycle.payload["opened"]) == ("local", ["SOLUSDT"])
+
+
+@pytest.mark.parametrize(
+    ("held_for", "reason"),
+    [
+        (timedelta(hours=8), TECHNICAL_EXITS[Family.PAIR_PULLBACK_RSI]),
+        (timedelta(hours=49), "tempo máximo de permanência"),
+    ],
+    ids=["technical", "holding_time"],
+)
+async def test_a_held_pair_that_left_the_universe_still_exits(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    held_for: timedelta,
+    reason: str,
+) -> None:
+    """Its technical exit and its holding time still run, and the same cycle buys another pair."""
+    clock = Clock()
+    position_id = await _held_out_of_the_universe(service, store, fake, clock.now - held_for)
+    base = pair_pullback()
+    falling = [*base["close"], *(base["close"].iloc[-1] * 0.96**k for k in range(1, 4))]
+    fake.candles[("ETHUSDT", "4h")] = _sol(ohlcv(falling))
+    engine, _ = _engine(api, service, store, strategy=_strategy(), clock=clock)
+    report = await engine.run_profile("local")
+    assert report.exits == (("ETHUSDT", reason),)
+    assert report.opened == ("SOLUSDT",)
+    assert (await store.get_position(position_id)).state is PositionState.CLOSED
+    assert [e.kind for e in await store.recent_events()].count("decision.cycle") == 1
