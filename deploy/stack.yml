@@ -78,6 +78,9 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # The image's bundled plugins, not newer ones downloaded at each start: while one is being
+      # replaced, its queries fail with plugin.notRegistered, alert rules included (D-049)
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana_ro_dev}
