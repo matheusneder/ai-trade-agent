@@ -51,11 +51,11 @@ Grafana listens only on `127.0.0.1:3000`. On a VPS, use a tunnel: `ssh -L 3000:1
 |-------|---------------|
 | `rest.request` / `rest.request_failed` | method, path (without the *query*), status, latency, used weight |
 | `risk.snapshot` / `risk.evaluated` / `risk.hit_already_fired` / `risk.hit_unchanged` / `risk.trigger_rearmed` | equity, day open, peak, BTC 1h, peg, API errors; triggers met, the ones that already acted (D-026), the ones held back by a more restrictive state and the rearmed ones |
-| `decision.cycle_start` / `decision.signal` / `decision.reading` / `decision.plan` / `decision.exit_check` / `decision.pre_trade_rejected` | eligible universe, score and setup per asset, the analyst's reading, ideas and rejections, exit check |
+| `decision.cycle_start` / `decision.signal` / `decision.reading` / `decision.plan` / `decision.exit_check` / `decision.pre_trade_rejected` / `decision.entries_skipped_late` | eligible universe, score and setup per asset, the analyst's reading, ideas and rejections, exit check, a cycle too late for entries (D-051) |
 | `position.sync` / `order.*` / `order_list.*` / `protection.replace` | the verdict of each sync and the path of each order |
 | `reconcile.done` / `reconcile.position` / `reconcile.intent` | summary and detail of each reconciliation |
 | `llm.request` / `llm.response` / `analyst.*` / `research.*` | model, tokens, cost and regime (never the content); collected sources and news |
-| `runtime.job` / `runtime.task_failed` / `schedule.next_run` | duration of each task, failures with the task name, next decision cycle |
+| `runtime.job` / `runtime.task_failed` / `schedule.next_run` / `schedule.late` | duration of each task, failures with the task name, next decision cycle, a close missed while the host slept (D-051) |
 | `telegram.*` / `alert.sent` / `heartbeat.ok` / `telemetry.recorded` | Telegram commands and calls, alerts, heartbeat and telemetry |
 
 ```bash
