@@ -32,6 +32,7 @@ import pandas as pd
 import structlog
 
 from trade_agent import metrics, tracing
+from trade_agent.decision.schedule import last_candle_close
 from trade_agent.decision.tape import DecisionTape
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
@@ -218,6 +219,10 @@ class RegimeWatch:
 
 SHARED_RESEARCH_WAIT = timedelta(minutes=2)
 """How long the first profile of a candle close waits for the others' candidates."""
+MAX_ENTRY_LATENESS = timedelta(minutes=20)
+"""No entry when the cycle's candle closed longer ago than this (D-051): the lab fills at the
+next candle's open. The research and the wait for it are inside: the 47 Demo entries up to
+2026-11-05 went out a median 3.4 min after the close, 15.2 at most."""
 NO_CANDIDATES = "sem candidatos (leitura anterior)"
 
 
@@ -328,6 +333,8 @@ class CycleReport:
     """The profile's setups wait for the benchmark above its slow EMA (D-016, D-044)."""
     filtered: tuple[tuple[str, str], ...] = ()
     """Pair-local families: setup patterns a filter discarded, with the reason (D-044)."""
+    stale_candle: bool = False
+    """The cycle ran too long after its candle closed: exits only, no entries (D-051)."""
 
     def summary(self) -> dict[str, object]:
         return {
@@ -345,6 +352,7 @@ class CycleReport:
             "family": self.family,
             "regime_filter": self.regime_filter,
             "filtered": [list(f) for f in self.filtered],
+            "stale_candle": self.stale_candle,
         }
 
 
@@ -564,6 +572,7 @@ class DecisionEngine:
             eligible=len(members),
             dry_run=self._dry_run,
         )
+        candle_close = last_candle_close(profile.timeframe, self._clock())
         signals, regime = await self._signals(members, profile, self._api.rest.now_ms())
         if regime is not None:
             try:
@@ -599,14 +608,19 @@ class DecisionEngine:
                     if not self._dry_run:
                         await self._positions.close_position(position, ExitReason.DECISION)
         state = await self._guard.effective(name)
-        opened, rejected = await self._entry_stage(
-            name,
-            profile=profile,
-            universe=universe,
-            signals=signals,
-            reading=reading,
-            research=research_status,
-            state=state,
+        stale_candle = self._stale_candle(name, candle_close)
+        opened, rejected = (
+            ([], [])  # not on the A/B tape either: its accounts would buy on the old signal
+            if stale_candle
+            else await self._entry_stage(
+                name,
+                profile=profile,
+                universe=universe,
+                signals=signals,
+                reading=reading,
+                research=research_status,
+                state=state,
+            )
         )
         state = await self._guard.effective(name)
         report = CycleReport(
@@ -625,6 +639,7 @@ class DecisionEngine:
             family=profile.family.value,
             regime_filter=profile.uses_regime_filter,
             filtered=tuple((sym, s.filtered) for sym, s in signals.items() if s.filtered),
+            stale_candle=stale_candle,
         )
         await self._store.record_event("decision.cycle", Severity.INFO, report.summary())
         tracing.annotate(
@@ -659,6 +674,19 @@ class DecisionEngine:
             lines = [f"{prefix}{name}: entradas {opened or '—'}; saídas {exits or '—'}"]
             await self._notify(Severity.INFO, "\n".join(lines))
         return report
+
+    def _stale_candle(self, name: str, candle_close: datetime) -> bool:
+        """Whether the candle the cycle read closed too long ago for an entry (D-051)."""
+        lateness = self._clock() - candle_close
+        if lateness <= MAX_ENTRY_LATENESS:
+            return False
+        log.warning(
+            "decision.entries_skipped_late",
+            profile=name,
+            candle_close=candle_close.isoformat(),
+            lateness_s=round(lateness.total_seconds()),
+        )
+        return True
 
     async def _exits(
         self,

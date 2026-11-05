@@ -1,6 +1,7 @@
 """Runtime background tasks and application composition (Phase 5)."""
 
 import asyncio
+import itertools
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -64,6 +65,8 @@ async def test_background_jobs_services_and_reconcile_hook(
         if len(reports) >= 2 and {"candle", "periodic", "imediato", "heartbeat"} <= set(ticks):
             stop.set()
 
+    # At a close, whatever the startup takes: each read of the clock advances it a little.
+    close, reads = datetime(2026, 9, 26, 16, tzinfo=UTC), itertools.count()
     runtime = AgentRuntime(
         db=db,
         api=api,
@@ -78,7 +81,7 @@ async def test_background_jobs_services_and_reconcile_hook(
         on_reconcile=on_reconcile,
         candle_delay=timedelta(milliseconds=10),
         service_backoff_s=0.01,
-        clock=lambda: datetime(2026, 9, 26, 16, tzinfo=UTC),  # frozen at a close
+        clock=lambda: close + next(reads) * timedelta(milliseconds=5),
     )
     with capture_logs() as logs:
         await asyncio.wait_for(runtime.run(stop), timeout=15)
