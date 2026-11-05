@@ -236,6 +236,70 @@ async def test_time_exit_finishes_before_research(
     assert ("SOLUSDT", "tempo máximo de permanência") in report.exits
 
 
+async def test_late_cycle_exits_but_does_not_enter_or_reach_the_tape(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """After a host sleep, the cycle reads a candle that closed long ago (D-051, 2026-11-05: a
+    10:53 cycle on the 10:00 close): the setup is old for a buy, but a due exit is still due."""
+    _setup_market(fake)
+    clock = Clock()
+    clock.now += engine_module.MAX_ENTRY_LATENESS + timedelta(seconds=1)
+    position = await service.open_position(
+        profile="con",
+        entry=EntryOrder("ETHUSDT", D(1), D(2500), EntryMode.LIMIT_FOK),
+        policy=POLICY,
+    )
+    await store.update_position(position.id, opened_at=clock.now - timedelta(days=100))
+    tape = AsyncMock(spec=DecisionTape)
+    engine, _ = _engine(api, service, store, clock=clock, tape=tape)
+    with capture_logs() as logs:
+        report = await engine.run_profile("conservador")
+    assert report.stale_candle is True
+    assert report.summary()["stale_candle"] is True
+    assert report.setups == 1 and report.opened == ()  # the setup was there
+    assert ("ETHUSDT", "tempo máximo de permanência") in report.exits
+    assert await store.active_positions() == []
+    tape.record_decision.assert_not_awaited()
+    (skipped,) = [e for e in logs if e["event"] == "decision.entries_skipped_late"]
+    assert skipped["lateness_s"] == engine_module.MAX_ENTRY_LATENESS.total_seconds() + 1
+
+
+async def test_a_slow_research_still_enters(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    _setup_market(fake)
+    clock = Clock()
+    clock.now += engine_module.MAX_ENTRY_LATENESS
+    engine, _ = _engine(api, service, store, clock=clock)
+    report = await engine.run_profile("conservador")
+    assert report.stale_candle is False
+    assert report.opened == ("SOLUSDT",)
+
+
+async def test_lateness_counts_from_the_candle_the_cycle_read(
+    api: BinanceSpotApi,
+    service: PositionService,
+    store: Store,
+    fake: FakeBinance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late cycle whose research crosses the next close still holds the old candle's signals:
+    the new close must not make them look fresh."""
+    _setup_market(fake)
+    clock = Clock()
+    clock.now += timedelta(hours=3, minutes=59)
+    engine, _ = _engine(api, service, store, clock=clock)
+    reading = engine._reading
+
+    async def researching(*args: Any) -> Any:
+        clock.now += timedelta(minutes=2)
+        return await reading(*args)
+
+    monkeypatch.setattr(engine, "_reading", researching)
+    report = await engine.run_profile("conservador")
+    assert report.stale_candle is True and report.opened == ()
+
+
 def _twin_profiles() -> StrategyConfig:
     """Two identical enabled profiles on 4h, like swing_trend and momentum_alpha."""
     data = _strategy_data()
