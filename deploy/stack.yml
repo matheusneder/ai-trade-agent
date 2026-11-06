@@ -64,7 +64,7 @@ services:
     logging: *logging
 
   grafana:
-    image: grafana/grafana:13.2.4
+    image: grafana/grafana:13.3.0
     restart: unless-stopped
     # renders the Telegram chatid as text in a copy of the provisioning and starts Grafana
     entrypoint: ["/bin/sh", "-c"]
@@ -175,7 +175,7 @@ services:
     logging: *logging
 
   alloy:
-    image: grafana/alloy:v1.21.2
+    image: grafana/alloy:v1.21.3
     restart: unless-stopped
     command:
       - run
@@ -193,7 +193,7 @@ services:
 
   # CPU, memory, network and disk of each project container → SigNoz (docker_stats).
   container-metrics:
-    image: otel/opentelemetry-collector-contrib:0.163.2
+    image: otel/opentelemetry-collector-contrib:0.164.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
