@@ -5,7 +5,7 @@ name: trade-agent-lab
 
 services:
   freqtrade:
-    image: freqtradeorg/freqtrade:2026.9@sha256:989aff5636d8f0213ed44fe334c3314a194a51c0c755d16866960247aafd2eae
+    image: freqtradeorg/freqtrade:2026.10@sha256:0cc4b6dc9b16e0516d27efae1765e925da7d6aea5c8f3c3825930ffe3098d7c7
     working_dir: /freqtrade
     # one network per run would exhaust Docker's address pools with parallel runs
     network_mode: bridge
