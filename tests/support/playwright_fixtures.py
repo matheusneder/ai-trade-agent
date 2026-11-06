@@ -35,6 +35,14 @@ import pytest
 from playwright.sync_api import Browser, BrowserType, Playwright, sync_playwright
 
 
+@pytest.fixture(scope="session")
+def base_url() -> str | None:
+    """Replaces pytest-playwright's fallback ``base_url``, a session fixture defined as a plugin
+    class method, which pytest 9.2 deprecates (an error under ``filterwarnings``). A suite
+    that knows its URL overrides this one (the Grafana suite does); here, no base URL."""
+    return None
+
+
 @pytest.fixture(scope="module")
 def playwright(_pw_api_request_contexts: Any) -> Iterator[Playwright]:
     pw = sync_playwright().start()

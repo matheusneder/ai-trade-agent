@@ -12,6 +12,7 @@ the seed, and is destroyed at the end (``SIGNOZ_SMOKE_KEEP=1`` keeps it).
 # by mypy); pytest registers them here, in the folder they apply to. This file stays out of mypy:
 # see the "exclude" of [tool.mypy] in pyproject.toml.
 from tests.support.playwright_fixtures import (  # noqa: F401 - fixtures: a browser per module
+    base_url,
     browser,
     browser_context_args,
     browser_type,
