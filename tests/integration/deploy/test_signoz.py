@@ -19,7 +19,7 @@ from tests.support.logs import COMPOSE, DEPLOY, compose_config, image
 
 SIGNOZ = DEPLOY / "signoz"
 POURS = SIGNOZ / "pours" / "deployment"
-FOUNDRY = "signoz/foundryctl:v0.3.0"
+FOUNDRY = "signoz/foundryctl:v0.5.0"
 CONTAINER_METRICS = DEPLOY / "otelcol" / "container-metrics.yaml"
 EVERY_INTERFACE = "0.0.0.0"  # noqa: S104 - what the DEV_*_UI_HOST variables open, on purpose
 

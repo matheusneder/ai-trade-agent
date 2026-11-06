@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.28.0
-FROM python:3.15.1-slim AS runtime
+FROM python:3.15.2-slim AS runtime
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

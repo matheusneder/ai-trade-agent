@@ -582,13 +582,13 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 |---------|-------|------|-------------------------|
 | `agent` | built from the repository | the agent (`trade-agent run`); reads the `.env` and mounts `config/` read-only | — |
 | `postgres` | `postgres:18.6` | the agent's database; creates the `grafana_ro` user on the first initialization | 5432 |
-| `grafana` | `grafana/grafana:13.2.4` | dashboards, datasources and alerts provisioned as code | 3000 |
+| `grafana` | `grafana/grafana:13.3.0` | dashboards, datasources and alerts provisioned as code | 3000 |
 | `loki` | `grafana/loki:3.7.9` | logs for 30 days | — |
-| `alloy` | `grafana/alloy:v1.21.2` | collects the container logs for Loki and SigNoz | 12345 |
+| `alloy` | `grafana/alloy:v1.21.3` | collects the container logs for Loki and SigNoz | 12345 |
 | `docker-proxy` | `tecnativa/docker-socket-proxy:v0.5.0` | read-only Docker API, for Alloy and `container-metrics` | — |
 | `jaeger` | `jaegertracing/jaeger:2.20.0` | traces for 7 days (pinned: 2.21 removed the API Grafana uses) | — |
 | `jaeger-ui` | `alpine/socat:1.8.1.3` | development only (Windows): relays the Jaeger UI; off by default, `DEV_JAEGER_UI=1` turns it on | 16686 |
-| `container-metrics` | `otel/opentelemetry-collector-contrib:0.163.2` | CPU, memory, network and disk of each container, for SigNoz | — |
+| `container-metrics` | `otel/opentelemetry-collector-contrib:0.164.0` | CPU, memory, network and disk of each container, for SigNoz | — |
 | SigNoz (`signoz-*`, `ingester`) | Foundry manifests in `deploy/signoz/` | traces, logs and metrics in parallel | 8080, 14318 (OTLP) |
 
 - **Environments:** `testnet` (order validation), `demo` (*paper trading*, where the agent runs today) and `prod`. It is the same image; only `TA_BINANCE_ENV` and the keys change.

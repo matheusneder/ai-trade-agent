@@ -22,6 +22,11 @@ from scripts.grafana_dashboards import build
 BOARDS: dict[str, dict[str, Any]] = {board["uid"]: board for board in build().values()}
 POSTGRES_UIDS = [uid for uid in BOARDS if uid != "ta-logs"]
 NO_DATA = "No data"
+# Grafana 13.3 reads the user's page history from its user storage; a user with no history
+# yet gets 404 (the expected "not found", not a failure of the dashboards)
+PAGE_HISTORY = re.compile(
+    r"/apis/userstorage\.grafana\.app/v[^/]+/namespaces/[^/]+/user-storage/grafana-page-history:"
+)
 
 
 def query_text(target: dict[str, Any]) -> str:
@@ -82,6 +87,10 @@ def _frames(result: dict[str, Any]) -> list[dict[str, list[Any]]]:
     return frames
 
 
+def _page_history_miss(url: str) -> bool:
+    return PAGE_HISTORY.search(urlparse(url).path) is not None
+
+
 @dataclass
 class Watch:
     """Everything the page reported: queries, console errors and failed requests."""
@@ -98,7 +107,7 @@ class Watch:
         page.on("response", self._response)
 
     def _console(self, message: ConsoleMessage) -> None:
-        if message.type == "error":
+        if message.type == "error" and not _page_history_miss(message.location.get("url", "")):
             self.console_errors.append(message.text)
 
     def _request_failed(self, request: Request) -> None:
@@ -110,7 +119,9 @@ class Watch:
     def _response(self, response: Response) -> None:
         if urlparse(response.url).netloc != urlparse(self.origin).netloc:
             return
-        if response.status >= 400:
+        if response.status >= 400 and not (
+            response.status == 404 and _page_history_miss(response.url)
+        ):
             self.failed.append(f"{response.status} {response.request.method} {response.url}")
         if "/api/ds/query" in response.url and response.request.method == "POST":
             self._record(response)

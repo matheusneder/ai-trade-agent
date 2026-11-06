@@ -239,9 +239,11 @@ class TradeAgentStrategy(IStrategy):
 
     def _parameters(self) -> dict[str, dict[str, float]]:
         spaces: dict[str, dict[str, float]] = {"buy": {}, "sell": {}}
-        for name, attribute in vars(type(self)).items():
-            if isinstance(attribute, DecimalParameter) and attribute.space in spaces:
-                spaces[attribute.space][name] = float(attribute.value)
+        # The names come from the class; the values from the instance: since Freqtrade 2026.10
+        # each strategy instance keeps its own parameter values, and the class keeps the defaults
+        for name, declared in vars(type(self)).items():
+            if isinstance(declared, DecimalParameter) and declared.space in spaces:
+                spaces[declared.space][name] = float(getattr(self, name).value)
         return spaces
 
     @_logged
