@@ -138,7 +138,7 @@ In `--check`, an empty panel may just be a lack of events (no state change, no f
 **Deployment:** the manifests come from Foundry, SigNoz's official tool, from `deploy/signoz/casting.yaml` (pinned versions). To update the version, edit the casting and regenerate; a test fails if `pours/` gets out of date:
 
 ```bash
-docker run --rm -v "$PWD/deploy/signoz:/work" -w /work signoz/foundryctl:v0.3.0 forge --no-ledger --no-updater
+docker run --rm -v "$PWD/deploy/signoz:/work" -w /work signoz/foundryctl:v0.5.0 forge --no-ledger --no-updater
 ```
 
 The local adjustments (ports only on `127.0.0.1`, OTLP on 14318, leaving 4318 free, log rotation) live in `deploy/signoz/compose.override.yaml`. At startup, a helper container downloads `histogram-quantile` from SigNoz's official GitHub releases (a ClickHouse function), as in the official deployment. SigNoz uses more memory than the rest of the stack (ClickHouse): on a VPS, set aside at least 4 GB for it.
