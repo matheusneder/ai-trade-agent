@@ -25,12 +25,13 @@ D = Decimal
 REPOSITORY_FILE = Path(__file__).parents[3] / "config" / "profiles.yaml"
 
 
-def test_repository_local_profiles_are_enabled_seeds() -> None:
-    # D-046: enabled on the Demo, their share taken from swing_trend
+def test_repository_local_profiles_are_seeds() -> None:
+    # D-046: enabled on the Demo, their share taken from swing_trend; D-053: the two the lab
+    # rejected outright are off, their share went to lead_consensus_1h
     config = load_strategy_config(REPOSITORY_FILE)
     local = {n: p for n, p in config.profiles.items() if p.family.local and p.leads is None}
     assert set(local) == {"pair_pullback_1h", "pair_breakout_1h", "pair_range_1h"}
-    assert set(local) <= set(config.enabled_profiles())
+    assert set(local) & set(config.enabled_profiles()) == {"pair_pullback_1h"}
     expected = {
         "pair_pullback_1h": PullbackParams(min_stop_atr=1.5, max_stop_pct=0.06),
         "pair_breakout_1h": BreakoutParams(min_stop_atr=2.0, max_stop_pct=0.07),
@@ -66,9 +67,7 @@ def test_a_local_profile_can_be_enabled_on_a_share_of_the_account() -> None:
 def test_the_risk_guard_gets_the_budgets_of_the_enabled_local_profiles() -> None:
     repository = scope_specs(load_strategy_config(REPOSITORY_FILE))  # D-046
     assert {name: spec.code for name, spec in repository.items()} == {
-        "pair_pullback_1h": "ppb1h",
-        "pair_breakout_1h": "pbo1h",
-        "pair_range_1h": "prg1h",
+        "pair_pullback_1h": "ppb1h",  # pair_breakout_1h and pair_range_1h are off (D-053)
         "lead_consensus_1h": "lead1h",  # D-052: the same budget
     }
     assert scope_specs(local_config()) == {}  # a disabled one has none

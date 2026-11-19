@@ -332,9 +332,8 @@ def assemble(
         commands=commands,
         heartbeat=heartbeat,
         periodic=periodic,
-        candle_jobs=[
-            (profile.timeframe, decide(name))
-            for name, profile in strategy.enabled_profiles().items()
+        candle_jobs=[  # at each candle close, or every cycle of a lead profile (D-053)
+            (profile.cadence, decide(name)) for name, profile in strategy.enabled_profiles().items()
         ],
         services=services,
     )

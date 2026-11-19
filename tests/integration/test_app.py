@@ -118,7 +118,7 @@ async def test_build_runtime_tracks_the_lead_traders_of_a_lead_profile(
     data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
     data["profiles"]["moderado"]["enabled"] = False  # its share goes to the two lead profiles
     lead = merge(LOCAL_PULLBACK, {"family": "lead_consensus", "enabled": True, "leads": {}})
-    data["profiles"]["leads"] = lead
+    data["profiles"]["leads"] = merge(lead, {"cycle": "10m"})  # every 10 minutes (D-053)
     data["profiles"]["slow"] = merge(
         lead, {"code": "slow", "leads": {"poll_interval": "30m", "max_data_age": "1h"}}
     )
@@ -129,7 +129,7 @@ async def test_build_runtime_tracks_the_lead_traders_of_a_lead_profile(
     async with build_runtime(settings, user_stream=False) as runtime:
         jobs = [(interval, job_name(action)) for interval, action in runtime._periodic]
         assert jobs[2:] == [(900.0, "track_leads_leads"), (1800.0, "track_leads_slow")]
-        assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h", "1h"]
+        assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "10m", "1h"]
     strategy = load_strategy_config(profiles)
     http, store = AsyncMock(spec=httpx.AsyncClient), AsyncMock(spec=Store)
     trackers = app.build_lead_trackers(strategy, http, store, LogNotifier())

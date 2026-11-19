@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from trade_agent.execution.orders import EntryMode, ProtectionPolicy, StopMode, TakeProfitMode
+from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.market.universe import Tier
 from trade_agent.risk.conditions import parse_duration as parse_interval
 from trade_agent.risk.scope import ScopeLimits
@@ -19,6 +20,9 @@ from trade_agent.signals.local import STOP_PARAMS as LOCAL_STOP_PARAMS
 Fraction = Annotated[Decimal, Field(ge=0, le=1)]
 Percent = Annotated[Decimal, Field(gt=0, lt=100)]
 Timeframe = Literal["15m", "1h", "4h", "1d"]
+MIN_CYCLE = timedelta(minutes=5)
+"""Shortest decision ``cycle`` (D-053): the universe is cached for 5 minutes, and the lead
+traders are read every 5 minutes at most (``LeadsConfig.poll_interval``)."""
 MIN_TRAILING_BIPS, MAX_TRAILING_BIPS = 10, 2000
 """Binance's ``TRAILING_DELTA`` range for the ``trailingDelta`` of an ATR-based trailing."""
 
@@ -364,6 +368,9 @@ class ProfileConfig(_Strict):
     others decide on the pair's own candles (``trade_agent.signals.local``)."""
     capital_share: Fraction
     timeframe: Timeframe
+    cycle: timedelta | None = None
+    """How often a ``lead_consensus`` profile decides, on the last closed candle of its
+    ``timeframe`` (D-053): its consensus changes between the closes. ``None``: at each close."""
     tiers: dict[Tier, Fraction]
     allocation: AllocationConfig
     entry: EntryConfig
@@ -377,12 +384,25 @@ class ProfileConfig(_Strict):
     leads: LeadsConfig | None = None
     """The lead traders a ``lead_consensus`` profile follows (D-052)."""
 
+    _cycle = field_validator("cycle", mode="before")(parse_interval)
+
     @model_validator(mode="after")
     def _lead_options(self) -> "ProfileConfig":
         if self.family.needs_leads and self.leads is None:
             raise ValueError(f"família {self.family.value} exige leads")
         if self.leads is not None and not self.family.needs_leads:
             raise ValueError("leads é só da família lead_consensus")
+        if self.cycle is not None:
+            # the other families' signals change only at the candle close (D-051 holds)
+            if not self.family.needs_leads:
+                raise ValueError("cycle é só da família lead_consensus")
+            candle = timedelta(milliseconds=INTERVAL_MS[self.timeframe])
+            minute = timedelta(minutes=1)
+            if not MIN_CYCLE <= self.cycle < candle or candle % self.cycle or self.cycle % minute:
+                raise ValueError(
+                    f"cycle deve ter minutos inteiros, ser >= 5m e dividir o timeframe "
+                    f"({self.timeframe})"
+                )
         return self
 
     @model_validator(mode="after")
@@ -441,6 +461,14 @@ class ProfileConfig(_Strict):
         overrides["min_stop_atr"] = stop.atr_mult
         overrides["max_stop_pct"] = float(stop.max_pct or 0) / 100
         return LOCAL_PARAMS[self.family](**overrides)
+
+    @property
+    def cadence(self) -> str:
+        """When the profile decides, for the scheduler (:mod:`trade_agent.decision.schedule`):
+        at each close of its ``timeframe``, or every ``cycle`` (``"10m"``, D-053)."""
+        if self.cycle is None:
+            return self.timeframe
+        return f"{self.cycle // timedelta(minutes=1)}m"
 
     @property
     def uses_regime_filter(self) -> bool:
