@@ -18,11 +18,11 @@ profiles:
     # doc/lab-results.md section 2.9).
     code: swg
     enabled: true
-    capital_share: 0.35        # Main allocation: 350 USDT (was 0.65; 0.30 went to the pair-local profiles)
+    capital_share: 0.25        # Main allocation: 250 USDT (D-053, was 0.35: 0.10 went to lead_consensus_1h)
     timeframe: 4h
     tiers: {core: 0.70, large: 0.30, mid: 0.0, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lots of ~58 USDT at the 4.5% stop cap (D-047; were ~147 at 1.5%)
+      max_open_positions: 2    # Lots of ~42 USDT at the 4.5% stop cap (~58 at 0.35; ~147 at 1.5%, D-047)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15   # 15% liquidity for rebalancing
       risk_per_trade_pct: 0.75  # D-047 (was 1.5): the lab's own path stays under the 15% halt
@@ -59,11 +59,11 @@ profiles:
     # and maximum holding simulated (doc/lab-results.md).
     code: mom
     enabled: true
-    capital_share: 0.30        # Tactical allocation: 300 USDT (was 0.35; 5% went to alt_atr)
+    capital_share: 0.20        # Tactical allocation: 200 USDT (D-053, was 0.30: 0.10 went to lead_consensus_1h)
     timeframe: 4h              # Moved from 1h to 4h to remove noise and fees
     tiers: {core: 0.30, large: 0.50, mid: 0.20, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lots of ~35 USDT at the 6.5% stop cap (D-047; were ~69 at 1.5%)
+      max_open_positions: 2    # Lots of ~23 USDT at the 6.5% stop cap (~35 at 0.30; ~69 at 1.5%, D-047)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15
       risk_per_trade_pct: 0.75  # D-047 (was 1.5): the lab's own path stays under the 15% halt
@@ -138,7 +138,8 @@ profiles:
   # (trade_agent.risk.scope). Entries and exits read only the pair's own candles, so they may
   # buy with BTC below its EMA 200. The signals are research seeds (trade_agent.signals.local),
   # not a calibration. The enabled shares add up to at most 1: pair_breakout_1h and
-  # pair_range_1h, both rejected by the lab, gave half of theirs to lead_consensus_1h (D-052).
+  # pair_range_1h, both rejected by the lab, gave half of theirs to lead_consensus_1h (D-052)
+  # and were turned off when it went to 0.40 (D-053).
   pair_pullback_1h:
     code: ppb1h
     enabled: true
@@ -172,7 +173,7 @@ profiles:
 
   pair_breakout_1h:
     code: pbo1h
-    enabled: true
+    enabled: false             # D-053: its 0.05 went to lead_consensus_1h
     family: pair_volatility_breakout
     capital_share: 0.05        # D-052 (was 0.10): 50 USDT; a stop above ~4.7% no longer fits the 5 USDT minimum
     timeframe: 1h
@@ -196,7 +197,7 @@ profiles:
 
   pair_range_1h:
     code: prg1h
-    enabled: true
+    enabled: false             # D-053: its 0.05 went to lead_consensus_1h
     family: pair_range_reversion
     capital_share: 0.05        # D-052 (was 0.10): 50 USDT; it had no trade at 0.10 either (R:R check)
     timeframe: 1h
@@ -224,13 +225,18 @@ profiles:
   # ranking (trade_agent.leads) and buys an asset only when at least `min_backers` of them
   # bought it in the window AND the pair's own candles confirm it (trade_agent.signals.local).
   # Size, stop, target and exits are the profile's own: no trade is ever copied. The source is
-  # Binance's website, public but undocumented: without fresh data no entry goes out.
+  # Binance's website, public but undocumented: without fresh data no entry goes out. It
+  # decides every `cycle` on the last closed candle, since the trades arrive between the
+  # closes (D-053).
   lead_consensus_1h:
     code: lead1h
     enabled: true
     family: lead_consensus
-    capital_share: 0.10        # 100 USDT: 0.05 from pair_breakout_1h and 0.05 from pair_range_1h
-    timeframe: 1h
+    # 400 USDT (D-053, was 0.10): the 0.05 of pair_breakout_1h and of pair_range_1h, and 0.10
+    # each from swing_trend and momentum_alpha
+    capital_share: 0.40
+    timeframe: 1h              # confirmation, stop and risk budget on the 1h candles
+    cycle: 10m                 # decides at :00, :10 ... :50 on the last closed 1h candle (D-053)
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
     allocation:
       max_open_positions: 2    # with max_open_risk_pct 1.0, two positions at 0.5% of risk each
@@ -272,7 +278,7 @@ profiles:
         min_buy_pct: 2.0       # net purchase, % of the trader's own balance
         max_symbols_per_lead: 3
         max_premium_pct: 1.5   # no entry with the ask more than 1.5% above what they paid
-      poll_interval: 15m       # the followed traders' trades
+      poll_interval: 10m       # the followed traders' trades: one reading per cycle (D-053)
       ranking_interval: 6h     # who is followed
       max_data_age: 45m        # an older reading of a trader does not count
       max_ranking_age: 24h     # without a new ranking for this long: nobody is followed

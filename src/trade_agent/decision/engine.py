@@ -226,7 +226,9 @@ SHARED_RESEARCH_WAIT = timedelta(minutes=2)
 MAX_ENTRY_LATENESS = timedelta(minutes=20)
 """No entry when the cycle's candle closed longer ago than this (D-051): the lab fills at the
 next candle's open. The research and the wait for it are inside: the 47 Demo entries up to
-2026-11-05 went out a median 3.4 min after the close, 15.2 at most."""
+2026-11-05 went out a median 3.4 min after the close, 15.2 at most. A profile with a shorter
+``cycle`` (D-053) counts it from the start of its current cycle instead: each of its cycles
+reads the last closed candle and the lead traders' latest reading again."""
 NO_CANDIDATES = "sem candidatos (leitura anterior)"
 
 
@@ -598,7 +600,8 @@ class DecisionEngine:
             eligible=len(members),
             dry_run=self._dry_run,
         )
-        candle_close = last_candle_close(profile.timeframe, self._clock())
+        # the cycle's start: its candle's close, or the start of its shorter cycle (D-053)
+        candle_close = last_candle_close(profile.cadence, self._clock())
         signals, regime = await self._signals(members, profile, self._api.rest.now_ms())
         if regime is not None:
             try:
@@ -709,7 +712,8 @@ class DecisionEngine:
         return view.summary(profile.leads.consensus)
 
     def _stale_candle(self, name: str, candle_close: datetime) -> bool:
-        """Whether the candle the cycle read closed too long ago for an entry (D-051)."""
+        """Whether the candle the cycle read closed too long ago for an entry (D-051); for a
+        profile with a ``cycle``, whether its cycle started too long ago (D-053)."""
         lateness = self._clock() - candle_close
         if lateness <= MAX_ENTRY_LATENESS:
             return False

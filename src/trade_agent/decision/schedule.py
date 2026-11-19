@@ -18,17 +18,30 @@ WAKE_SETTLE = timedelta(seconds=60)
 and a cycle failing there would cost its exits and count against the API error rate."""
 
 
+def period_ms(period: str) -> int:
+    """A candle timeframe (``"1h"``) or a decision cycle in minutes (``"10m"``, D-053), in ms.
+    Both count from the epoch, so a cycle that divides the timeframe also starts at each of its
+    closes."""
+    if period in INTERVAL_MS:
+        return INTERVAL_MS[period]
+    if period.endswith("m") and period[:-1].isdigit() and int(period[:-1]) > 0:
+        return int(period[:-1]) * 60_000
+    raise ValueError(f"período não suportado: {period}")
+
+
 def next_candle_close(timeframe: str, now: datetime) -> datetime:
-    """Next candle close of the ``timeframe`` (UTC), strictly after ``now``."""
-    interval_ms = INTERVAL_MS[timeframe]
+    """Next candle close of the ``timeframe`` (UTC), strictly after ``now``; with a decision
+    cycle (``"10m"``), the start of the next cycle."""
+    interval_ms = period_ms(timeframe)
     now_ms = int(now.timestamp() * 1000)
     close_ms = (now_ms // interval_ms + 1) * interval_ms
     return datetime.fromtimestamp(close_ms / 1000, UTC)
 
 
 def last_candle_close(timeframe: str, now: datetime) -> datetime:
-    """Close of the last closed candle of the ``timeframe`` (UTC), at or before ``now``."""
-    interval_ms = INTERVAL_MS[timeframe]
+    """Close of the last closed candle of the ``timeframe`` (UTC), at or before ``now``; with
+    a decision cycle (``"10m"``), the start of the current cycle."""
+    interval_ms = period_ms(timeframe)
     close_ms = int(now.timestamp() * 1000) // interval_ms * interval_ms
     return datetime.fromtimestamp(close_ms / 1000, UTC)
 
@@ -51,7 +64,8 @@ async def run_on_candle_close(
     poll: timedelta = POLL,
     settle: timedelta = WAKE_SETTLE,
 ) -> None:
-    """Runs ``action`` right after each close (``delay`` lets the candle settle).
+    """Runs ``action`` right after each close (``delay`` lets the candle settle), or at the
+    start of each decision cycle when ``timeframe`` is one (``"10m"``, D-053).
 
     Closes missed while the host slept become one late run, shortly after it wakes: the exits
     should not wait for the next close. The engine refuses entries on that run (D-051).
