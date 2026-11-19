@@ -14,22 +14,22 @@ spec:
   # Foundry writes `version` but does not apply it to the image (it stays :latest): pin both.
   # The metastore keeps Foundry's major (PostgreSQL 16) at its latest minor: a new major needs
   # a migration of the volume. ClickHouse stays on Foundry's 25.12.5, which it checks against
-  # the ingester (Foundry 0.5.0: "ingester v0.144.15 is incompatible with telemetrystore
+  # the ingester (Foundry 0.5.0: "ingester v0.144.16 is incompatible with telemetrystore
   # 26.10.3: pin ingester to 0.144.5, or upgrade telemetrystore clickhouse to 25.12.5").
   # The MCP server is disabled, but its image is pinned too, so the lock names no :latest.
   signoz:
     spec:
-      version: v0.149.0
-      image: signoz/signoz:v0.149.0
+      version: v0.151.0
+      image: signoz/signoz:v0.151.0
   ingester:
     spec:
-      version: v0.144.15
-      image: signoz/signoz-otel-collector:v0.144.15
+      version: v0.144.16
+      image: signoz/signoz-otel-collector:v0.144.16
   metastore:
     spec:
-      version: "16.15"
-      image: postgres:16.15
+      version: "16.16"
+      image: postgres:16.16
   mcp:
     spec:
-      version: v0.18.0
-      image: signoz/signoz-mcp-server:v0.18.0
+      version: v0.20.0
+      image: signoz/signoz-mcp-server:v0.20.0
