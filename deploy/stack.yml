@@ -17,7 +17,7 @@ include:
 
 services:
   postgres:
-    image: postgres:18.6
+    image: postgres:18.7
     restart: unless-stopped
     environment:
       POSTGRES_DB: trade_agent
@@ -64,7 +64,7 @@ services:
     logging: *logging
 
   grafana:
-    image: grafana/grafana:13.3.0
+    image: grafana/grafana:13.3.1
     restart: unless-stopped
     # renders the Telegram chatid as text in a copy of the provisioning and starts Grafana
     entrypoint: ["/bin/sh", "-c"]
@@ -148,7 +148,7 @@ services:
 
   # Container logs: Alloy collects → Loki stores → Grafana queries ("Logs" dashboard).
   loki:
-    image: grafana/loki:3.7.9
+    image: grafana/loki:3.7.10
     restart: unless-stopped
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
@@ -175,7 +175,7 @@ services:
     logging: *logging
 
   alloy:
-    image: grafana/alloy:v1.21.3
+    image: grafana/alloy:v1.22.0
     restart: unless-stopped
     command:
       - run
@@ -193,7 +193,7 @@ services:
 
   # CPU, memory, network and disk of each project container → SigNoz (docker_stats).
   container-metrics:
-    image: otel/opentelemetry-collector-contrib:0.164.0
+    image: otel/opentelemetry-collector-contrib:0.165.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
