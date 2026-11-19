@@ -16,10 +16,11 @@ import pytest
 import yaml
 
 from tests.support.logs import COMPOSE, DEPLOY, compose_config, image
+from tests.support.versions import foundry_image
 
 SIGNOZ = DEPLOY / "signoz"
 POURS = SIGNOZ / "pours" / "deployment"
-FOUNDRY = "signoz/foundryctl:v0.5.0"
+FOUNDRY = foundry_image()  # the version casting.yaml's regeneration command names
 CONTAINER_METRICS = DEPLOY / "otelcol" / "container-metrics.yaml"
 EVERY_INTERFACE = "0.0.0.0"  # noqa: S104 - what the DEV_*_UI_HOST variables open, on purpose
 

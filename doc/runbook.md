@@ -219,6 +219,19 @@ Scope: `global` (default) or the profile name. Only the configured `TA_TELEGRAM_
   ```
 
 - **Dashboards:** edit `scripts/grafana_dashboards.py` and run `uv run python -m scripts.grafana_dashboards`. A test fails if the versioned JSON files get out of date.
+- **Versions (D-052):** every component is pinned in the file its tool reads, never in two hand-edited places. To upgrade, edit only that file (and regenerate what it generates); `tests/unit/test_version_pins.py` fails if a copy disagrees or an image floats:
+
+  | Component | Edit | Copies the test checks |
+  |---|---|---|
+  | Python | `.python-version` | `Dockerfile` (`FROM python:<version>-slim`); CI reads the file (`python-version-file`) |
+  | uv | `[tool.uv] required-version` in `pyproject.toml` (uv refuses another version) | `Dockerfile` (`COPY --from=ghcr.io/astral-sh/uv:<version>`); CI installs the pin from `pyproject.toml` |
+  | Python libraries | `pyproject.toml` (`==`), then `uv lock` | `uv.lock` (CI runs `--frozen`) |
+  | Stack images | `deploy/stack.yml` | the table in `doc/03-architecture.md` §14; the tests and the Grafana smoke tests read the images from `stack.yml` |
+  | SigNoz, ingester, metastore, ClickHouse, MCP | `deploy/signoz/casting.yaml` (`version` and `image` together), then regenerate with Foundry | `casting.yaml.lock` and `pours/` (`test_pours_are_in_sync_with_the_casting`) |
+  | Foundry | the regeneration command in `casting.yaml`'s header | this runbook (§1.3); the SigNoz test runs that image |
+  | Freqtrade (lab) | `lab/freqtrade/docker-compose.yml` (tag and digest) | the lab tests read it from there |
+  | Dockerfile frontend, GitHub Actions, pre-commit | where they are (`# syntax=`, `uses: …@<sha> # v<version>`, `rev:`) | the test checks they stay pinned |
+
 - **Logs (Loki and Alloy):** the retention lives in `deploy/loki/loki.yaml` (`retention_period`), and the processing (labels, levels, tracebacks) in `deploy/alloy/config.alloy`. The tests run this pipeline for real in containers. Alloy reads the Docker API through a read-only proxy (`docker-proxy`), on an internal network only the collectors (Alloy and `container-metrics`) reach, because inspecting a container shows its environment variables (the `.env` keys). Do not give any service direct access to `docker.sock`. Three precautions kept in the configuration:
   - **Read position:** Alloy keeps how far it read each container (`alloy` volume) by the target's labels. That is why discovery keeps only stable labels (id, name and service). With IP, network or port in the key, every Docker restart made Alloy re-read the containers' whole log. Loki refused the old lines (`entry too far behind`), and the burst filled SigNoz's queue.
   - **Proxy:** `deploy/docker-proxy/haproxy.cfg.template` is the image's template plus a backend for `docker logs --follow`, without the default 10-minute cut. With the cut, a quiet container's log dropped every 10 minutes (`could not transfer logs` in Alloy), and each reconnection duplicated in SigNoz the lines of the last second read. Loki drops those copies, SigNoz does not. When updating the proxy image, a test compares the template with the new original.
