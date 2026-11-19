@@ -21,8 +21,8 @@ PostgreSQL and Loki, and Chromium (Playwright) opens every dashboard.
 | --- | --- | --- |
 | `test_grafana_seed.py` | nothing | the synthetic day keeps the agent's invariants: valid position states, FKs, unique order/fill/intent IDs, PnL and fees recomputed from the fills by the domain's own functions, equity consistent with the trades, determinism per seed |
 | `test_grafana_stack_hygiene.py` | nothing | the stacks of killed runs are recognized by their owner PID, never one of a live run |
-| `test_grafana_provisioning.py` | Docker | the 6 dashboards are provisioned (same panels as the generator), the PostgreSQL (`grafana_ro`) and Loki data sources are healthy, the 3 alert rules evaluate with data (`health=ok`) and stay normal |
-| `test_grafana_dashboards.py` | Docker + Chromium | each dashboard loads; every panel's query returns rows without error; no panel shows "No data" or an error badge; charts draw series and tables rows; stat, table and chart values match the aggregates of the seed (equity, day PnL, drawdown, exposure, trades, win rate, profit factor, fees, exit reasons, news per source, analyst reading, the regime filter and its flips, BTC against its EMA 200 per cycle, setups and stop-noise removals per profile, LLM cost, critical events, log counts, a series per scope in the day's chart...); the day's chart query evaluated at other instants on the ephemeral PostgreSQL: the series of the day so far, the day before kept up to 23:59:59, nothing before the day's first snapshot, zero at it |
+| `test_grafana_provisioning.py` | Docker | the 7 dashboards are provisioned (same panels as the generator), the PostgreSQL (`grafana_ro`) and Loki data sources are healthy, the 3 alert rules evaluate with data (`health=ok`) and stay normal |
+| `test_grafana_dashboards.py` | Docker + Chromium | each dashboard loads; every panel's query returns rows without error; no panel shows "No data" or an error badge; charts draw series and tables rows; stat, table and chart values match the aggregates of the seed (equity, day PnL, drawdown, exposure, trades, win rate, profit factor, fees, exit reasons, news per source, analyst reading, the regime filter and its flips, BTC against its EMA 200 per cycle, setups and stop-noise removals per profile, LLM cost, critical events, log counts, a series per scope in the day's chart, and on *Copy trading* the followed traders in score order, the last reading, the lead profile's open positions and result, the consensus and reading per cycle, every decision per asset by its label, the orders and the source's outages...); the day's chart query evaluated at other instants on the ephemeral PostgreSQL: the series of the day so far, the day before kept up to 23:59:59, nothing before the day's first snapshot, zero at it |
 | `test_grafana_interactions.py` | Docker + Chromium | the time range picker refetches and filters (`Last 6 hours` counts only the trades of the window Grafana sent), the day's chart asks for the UTC day so far ("Today so far") on the last hour, the last 7 days and a range two days ago, the refresh button, the panel view, the `Serviço` and `Nível` variables and the regex search of the Logs dashboard |
 
 Every browser test also fails on any console error, page error, failed request or HTTP
@@ -109,6 +109,11 @@ and writes it through the ORM models of `trade_agent.persistence`:
   exposure, weight, clock offset, states and per-profile results);
 - news per hour following the market activity, triage and research LLM calls priced with
   `config/research.yaml`, a research report per round (one failed);
+- the lead traders of the `lead_consensus` profile (D-052): a ranking reading every 6 hours
+  (`leads.selected`), the traders' reading of each of its cycles (`leads` in `decision.cycle`,
+  built with the agent's own `LeadView`: a buy consensus behind every setup, one the candles
+  refused, a sell consensus, an asset only one trader bought) and one cycle without data
+  between a `leads.source_unavailable` and a `leads.source_recovered`;
 - the logs of the agent and of the other services for Loki.
 
 The domain's own code keeps it coherent: `ensure_transition` for every state change,

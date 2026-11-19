@@ -281,9 +281,12 @@ async def test_a_source_that_is_down_alerts_once_and_then_says_when_it_is_back()
     h = Harness(source)
     await h.tracker.refresh()
     source.fail("trades")
-    for _ in range(4):  # an hour of failures
-        h.clock.advance(minutes=15)
-        await h.tracker.refresh()
+    with capture_logs() as logs:
+        for _ in range(4):  # an hour of failures
+            h.clock.advance(minutes=15)
+            await h.tracker.refresh()
+    (down,) = [e for e in logs if e["event"] == UNAVAILABLE_EVENT]  # also in Loki and SigNoz
+    assert (down["log_level"], down["profile"]) == ("warning", PROFILE)
     assert h.events(UNAVAILABLE_EVENT) == [{"profile": PROFILE}]
     assert h.alerts[-1] == (
         Severity.HIGH,

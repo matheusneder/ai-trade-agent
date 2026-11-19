@@ -109,17 +109,20 @@ class AgentMetrics:
             unit="1",
             description="estado por escopo: 0 operando, 1 pausado, 2 parado, 3 vendendo tudo",
         )
-        lead_gauges = {
-            "selected": "traders acompanhados pelo perfil",
-            "fresh": "traders acompanhados com leitura recente",
-            "consensus": "ativos com consenso de compra dos traders",
-        }
-        for kind, description in lead_gauges.items():
+        lead_gauges = {  # name: (reading, unit, description)
+            "trade_agent.leads.selected": (
+                "selected", "{lead}", "traders acompanhados pelo perfil",
+            ),
+            "trade_agent.leads.fresh": (
+                "fresh", "{lead}", "traders acompanhados com leitura recente",
+            ),
+            "trade_agent.leads.consensus": (
+                "consensus", "{asset}", "ativos com consenso de compra dos traders",
+            ),
+        }  # fmt: skip
+        for name, (kind, unit, description) in lead_gauges.items():
             meter.create_observable_gauge(
-                f"trade_agent.leads.{kind}",
-                callbacks=[self._lead_gauge(kind)],
-                unit="{lead}" if kind != "consensus" else "{asset}",
-                description=description,
+                name, callbacks=[self._lead_gauge(kind)], unit=unit, description=description
             )
         self.lead_errors = meter.create_counter(
             "trade_agent.leads.errors",

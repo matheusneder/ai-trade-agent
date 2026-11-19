@@ -377,6 +377,7 @@ class LeadTracker:
             (UNAVAILABLE_EVENT, Severity.HIGH) if down else (RECOVERED_EVENT, Severity.INFO)
         )
         await self._store.record_event(kind, severity, {"profile": self._profile})
+        (log.warning if down else log.info)(kind, profile=self._profile)
         if self._notify is not None:
             text = (
                 "fonte de copy trading indisponível: sem novas entradas até voltar"

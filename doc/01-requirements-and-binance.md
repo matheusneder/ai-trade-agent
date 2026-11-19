@@ -96,7 +96,8 @@ Checked on 2026-11-19, in the official documentation and on the live endpoints (
 | PnL curve | `GET /public/future/spot-copy-trade/lead-portfolio/performance-chart-data` (`dataType` `PNL`) | The portfolio's cumulative PnL at the end of each day of the window |
 | Trades | `POST /friendly/future/spot-copy-trade/lead-portfolio/get-trade-history-by-page` | Its trades, the most recent first: time, symbol, side, quantity and amount. At most 100 per request, also for the portfolios that hide their holdings |
 
-- An error comes with HTTP 200 and a `code` other than `000000` (e.g. `11081031`, a closed portfolio). The website says the figures are refreshed every 1–2 hours; the trades carry their own time.
+- An error comes with HTTP 200 and a `code` other than `000000` (e.g. `11081031`, a closed portfolio).
+- The contract tests in `tests/contract/binance_copy_trading` check all of this live, with the agent's own client (`uv run pytest tests/contract`; the default run leaves them out). The website says the figures are refreshed every 1–2 hours; the trades carry their own time.
 - On that day the Spot ranking had 2,202 public portfolios (1,959 with a Sharpe ratio) and the Futures one 5,516. The Futures portfolios are leveraged, trade long and short and include tokenized stocks that do not exist on Spot, and only some show their positions (5 of the 18 largest PnLs): the agent follows the Spot ones.
 - **The figures mislead when read alone.** The first Futures portfolio by Sharpe ratio showed a 0% drawdown and a 95% hit rate, the profile of someone who never closes at a loss; of the 12 largest Spot PnLs, 11 had copiers in the red (down to −270 thousand USDT). The ranking's ROI curve is diluted by deposits: one portfolio went from +84% to +23% in three days with its PnL unchanged.
 

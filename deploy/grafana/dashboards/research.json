@@ -107,7 +107,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa, max(COALESCE(payload->>'family', 'legacy')) AS familia, bool_and(COALESCE((payload->>'regime_filter')::bool, true)) AS usa_filtro, sum(COALESCE(jsonb_array_length(payload->'filtered'), 0)) AS filtrados FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT payload->>'profile' AS perfil, count(*) AS ciclos, sum((payload->>'setups')::int) AS setups, sum(jsonb_array_length(payload->'stop_noise')) AS ruido_d039, sum(jsonb_array_length(payload->'opened')) AS entradas, count(*) FILTER (WHERE (payload->'regime'->>'up')::bool IS FALSE) AS ciclos_regime_baixa, (array_agg(COALESCE(payload->>'family', 'legacy') ORDER BY created_at DESC))[1] AS familia, bool_and(COALESCE((payload->>'regime_filter')::bool, true)) AS usa_filtro, sum(COALESCE(jsonb_array_length(payload->'filtered'), 0)) AS filtrados FROM events WHERE kind = 'decision.cycle' AND payload->'setups' IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {

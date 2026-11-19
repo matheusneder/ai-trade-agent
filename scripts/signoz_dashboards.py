@@ -33,7 +33,10 @@ import httpx
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from trade_agent.strategy.profiles import load_strategy_config
+
 OUTPUT = Path(__file__).resolve().parents[1] / "deploy" / "signoz" / "dashboards"
+CONFIG = Path(__file__).resolve().parents[1] / "config" / "profiles.yaml"
 SCHEMA_VERSION = "v6"
 GRID_COLUMNS = 12
 TAGS = [{"key": "projeto", "value": "trade-agent"}]
@@ -1232,8 +1235,325 @@ def _containers() -> Json:
     )
 
 
+LEADS = "service.name = 'trade-agent.leads'"
+LEAD_REQUESTS = f"{LEADS} AND server.address = 'www.binance.com'"
+LEADS_HELP = (
+    "Perfis lead_consensus (D-052): seguem os melhores lead traders do Copy Trading Spot da "
+    "Binance e só compram o que pelo menos dois deles compraram e os candles do próprio par "
+    "confirmam. Tamanho, stop e alvo são do perfil: nenhuma operação é copiada."
+)
+
+
+def lead_profiles(path: Path = CONFIG) -> list[str]:
+    """The profiles of ``path`` that follow the lead traders (D-052): the decision metrics carry
+    the profile's name, so the dashboard filters by them (generate it again after renaming or
+    adding one: the sync test fails until then)."""
+    names = sorted(
+        name for name, p in load_strategy_config(path).profiles.items() if p.family.needs_leads
+    )
+    if not names:
+        raise ValueError(f"nenhum perfil lead_consensus em {path}")
+    return names
+
+
+def _copy_trading() -> Json:
+    profile = key("profile", "attribute")
+    mine = "profile IN (" + ", ".join(f"'{name}'" for name in lead_profiles()) + ")"
+
+    def counter(name: str, **kw: Any) -> Json:
+        return metric(name, time_agg="increase", space="sum", where=mine, **kw)
+
+    return dashboard(
+        "trade-agent-copy-trading",
+        "Trade Agent · Copy trading",
+        "Lead traders do Copy Trading Spot da Binance seguidos pelos perfis lead_consensus "
+        "(D-052): seleção, consenso, decisões, ordens e a fonte de dados.",
+        [
+            (
+                "Agora",
+                [
+                    [
+                        cell(
+                            "leads-selected-now",
+                            number(
+                                "Traders acompanhados",
+                                metric("trade_agent.leads.selected", space="sum", reduce="last"),
+                                decimals=0,
+                                description=LEADS_HELP,
+                            ),
+                            2,
+                            3,
+                        ),
+                        cell(
+                            "leads-fresh-now",
+                            number(
+                                "Com leitura recente",
+                                metric("trade_agent.leads.fresh", space="sum", reduce="last"),
+                                decimals=0,
+                                description=(
+                                    "Traders acompanhados cujos trades foram lidos há menos de "
+                                    "max_data_age (45 min): só esses contam no consenso."
+                                ),
+                            ),
+                            2,
+                            3,
+                        ),
+                        cell(
+                            "leads-consensus-now",
+                            number(
+                                "Ativos com consenso de compra",
+                                metric("trade_agent.leads.consensus", space="sum", reduce="last"),
+                                decimals=0,
+                            ),
+                            2,
+                            3,
+                        ),
+                        cell(
+                            "leads-entries-now",
+                            number(
+                                "Entradas (período)",
+                                counter("trade_agent.decision.entries", reduce="sum"),
+                                decimals=0,
+                            ),
+                            2,
+                            3,
+                        ),
+                        cell(
+                            "leads-exits-now",
+                            number(
+                                "Saídas (período)",
+                                counter("trade_agent.decision.exits", reduce="sum"),
+                                decimals=0,
+                            ),
+                            2,
+                            3,
+                        ),
+                        cell(
+                            "leads-errors-now",
+                            number(
+                                "Falhas na fonte (período)",
+                                metric(
+                                    "trade_agent.leads.errors",
+                                    time_agg="increase",
+                                    space="sum",
+                                    reduce="sum",
+                                ),
+                                decimals=0,
+                                warn=1,
+                                description=(
+                                    "Requisições aos endpoints do site da Binance (não "
+                                    "documentados) que falharam ou foram recusadas."
+                                ),
+                            ),
+                            2,
+                            3,
+                        ),
+                    ]
+                ],
+            ),
+            (
+                "Traders e consenso",
+                [
+                    [
+                        cell(
+                            "leads-followed",
+                            series(
+                                "Traders acompanhados e com leitura recente",
+                                metric(
+                                    "trade_agent.leads.selected", space="sum", legend="acompanhados"
+                                ),
+                                metric(
+                                    "trade_agent.leads.fresh",
+                                    space="sum",
+                                    legend="com leitura recente",
+                                    query="B",
+                                ),
+                                decimals=0,
+                                steps=True,
+                                colors=(SKY_BLUE, ORANGE),
+                                description=(
+                                    "Sem leitura recente, o consenso não conta e o perfil não "
+                                    "abre entradas."
+                                ),
+                            ),
+                            6,
+                        ),
+                        cell(
+                            "leads-consensus",
+                            series(
+                                "Ativos com consenso de compra",
+                                metric(
+                                    "trade_agent.leads.consensus",
+                                    space="sum",
+                                    by=[profile],
+                                    legend="{{profile}}",
+                                ),
+                                decimals=0,
+                                steps=True,
+                                description=(
+                                    "Ativos que os traders acompanhados compraram (compradores "
+                                    "menos vendedores ≥ min_backers) na janela do consenso."
+                                ),
+                            ),
+                            6,
+                        ),
+                    ],
+                    [
+                        cell(
+                            "leads-cycles",
+                            bars(
+                                "Ciclos de decisão do copy trading",
+                                counter(
+                                    "trade_agent.decision.cycles",
+                                    by=[profile],
+                                    legend="{{profile}}",
+                                ),
+                            ),
+                            6,
+                        ),
+                        cell(
+                            "leads-entries-exits",
+                            bars(
+                                "Entradas e saídas do copy trading",
+                                counter(
+                                    "trade_agent.decision.entries",
+                                    by=[profile],
+                                    legend="entradas {{profile}}",
+                                ),
+                                counter(
+                                    "trade_agent.decision.exits",
+                                    by=[profile],
+                                    legend="saídas {{profile}}",
+                                    query="B",
+                                ),
+                            ),
+                            6,
+                        ),
+                    ],
+                ],
+            ),
+            (
+                "Decisões",
+                [
+                    [
+                        cell(
+                            "leads-last-cycles",
+                            listing(
+                                "Últimos ciclos do copy trading",
+                                rows(
+                                    "logs",
+                                    where=(
+                                        f"{AGENT_LOGS} AND event = 'decision.cycle' "
+                                        "AND family = 'lead_consensus'"
+                                    ),
+                                ),
+                                [
+                                    key("profile", "attribute"),
+                                    key("state", "attribute"),
+                                    key("leads.status", "attribute"),
+                                    key("leads.selected", "attribute"),
+                                    key("leads.fresh", "attribute"),
+                                    key("setups", "attribute"),
+                                ],
+                                description=(
+                                    "Cada ciclo com a leitura dos traders em que decidiu: o status "
+                                    "('ok' ou o motivo de não haver entrada), traders "
+                                    "acompanhados e com leitura recente, e os setups confirmados "
+                                    "pelos candles. Quem comprou cada ativo está nos atributos "
+                                    "leads.assets.* do log."
+                                ),
+                            ),
+                            12,
+                            7,
+                        )
+                    ],
+                    [
+                        cell(
+                            "leads-selections",
+                            listing(
+                                "Seleções de traders",
+                                rows(
+                                    "logs",
+                                    where=f"{AGENT_LOGS} AND event = 'leads.selected'",
+                                    limit=20,
+                                ),
+                                [
+                                    key("profile", "attribute"),
+                                    key("pool", "attribute"),
+                                    key("examined", "attribute"),
+                                ],
+                                description=(
+                                    "Cada leitura do ranking (a cada 6 h): portfólios lidos e "
+                                    "candidatos examinados; os seguidos estão em selected.* e as "
+                                    "recusas por critério em rejected.*."
+                                ),
+                            ),
+                            12,
+                            5,
+                        )
+                    ],
+                ],
+            ),
+            (
+                "Fonte de dados",
+                [
+                    [
+                        cell(
+                            "leads-latency",
+                            series(
+                                "Latência p95 da fonte",
+                                events(
+                                    "traces",
+                                    "p95(duration_nano)",
+                                    where=LEAD_REQUESTS,
+                                    by=[key("name", "span")],
+                                    legend="{{name}}",
+                                ),
+                                unit="ns",
+                            ),
+                            4,
+                        ),
+                        cell(
+                            "leads-http-errors",
+                            bars(
+                                "Respostas de erro da fonte por status",
+                                events(
+                                    "traces",
+                                    "count()",
+                                    where=f"{LEAD_REQUESTS} AND http.response.status_code >= 400",
+                                    by=[key("http.response.status_code", "attribute")],
+                                    legend="HTTP {{http.response.status_code}}",
+                                ),
+                                description=(
+                                    "403, 418, 429 e 451 suspendem as requisições por backoff "
+                                    "(1 h); as demais contam como falha da leitura."
+                                ),
+                            ),
+                            4,
+                        ),
+                        cell(
+                            "leads-warnings",
+                            bars(
+                                "Avisos da leitura dos traders",
+                                events(
+                                    "logs",
+                                    "count()",
+                                    where=f"{AGENT_LOGS} AND event LIKE 'leads.%' AND {PROBLEMS}",
+                                    by=[key("event", "attribute")],
+                                    legend="{{event}}",
+                                ),
+                            ),
+                            4,
+                        ),
+                    ]
+                ],
+            ),
+        ],
+    )
+
+
 def build() -> dict[str, Json]:
-    boards = [_operation(), _health(), _llm(), _containers()]
+    boards = [_operation(), _health(), _llm(), _containers(), _copy_trading()]
     return {f"{board['name']}.json": board for board in boards}
 
 
