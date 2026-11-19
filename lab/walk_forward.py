@@ -685,6 +685,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     strategy_config = load_strategy_config(args.profiles_file)
     profile = strategy_config.profiles[args.profile]
+    if profile.family.needs_leads:
+        raise ValueError(
+            f"a família {profile.family.value} não roda no laboratório: o consenso dos traders "
+            "não tem histórico para reproduzir (D-052)"
+        )
     pre_trade = load_stop_conditions(args.stop_conditions).pre_trade
     if pre_trade.max_portfolio_risk_pct or pre_trade.max_portfolio_exposure_pct:
         raise ValueError(

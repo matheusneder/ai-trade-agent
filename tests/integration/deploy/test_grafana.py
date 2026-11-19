@@ -20,7 +20,7 @@ from trade_agent.persistence.db import Database
 
 DEPLOY = Path(__file__).parents[3] / "deploy"
 PROVISIONING = DEPLOY / "grafana" / "provisioning"
-TIME_FILTER = re.compile(r"\$__timeFilter\((\w+)\)")
+TIME_FILTER = re.compile(r"\$__timeFilter\(([\w.]+)\)")  # a column, or alias.column
 
 
 def _grafana_sql(sql: str) -> str:
@@ -54,8 +54,8 @@ def test_versioned_dashboards_match_the_generator() -> None:
         expected = LOKI if name == "logs.json" else DATASOURCE
         assert all(t["datasource"] == expected for p in board["panels"] for t in p["targets"])
         assert all(p["datasource"] == expected for p in board["panels"])
-    assert len(boards) == 6
-    assert len({b["uid"] for b in boards.values()}) == 6
+    assert len(boards) == 7
+    assert len({b["uid"] for b in boards.values()}) == 7
 
 
 @pytest.mark.parametrize(("name", "sql"), _dashboard_queries())

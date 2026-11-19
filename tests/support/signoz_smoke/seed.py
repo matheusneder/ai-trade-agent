@@ -10,7 +10,9 @@ The data imitates what the real stack emits, with the same names and attributes:
 * traces of the agent's components (``trade-agent.<component>``, see ``trade_agent.tracing``):
   the 1-minute risk check, reconciliation, clock sync, news ingestion and the 4-hour decision
   cycles of each profile, with Binance (``trade-agent.exchange``), PostgreSQL
-  (``trade-agent.db``) and Claude (``trade-agent.llm``) calls below them;
+  (``trade-agent.db``) and Claude (``trade-agent.llm``) calls below them, and the lead
+  tracker of the ``lead_consensus`` profile every 15 minutes (``trade-agent.leads``, D-052:
+  the ranking every 6 hours, an outage of 503s around a cycle and one 429);
 * the agent's metrics (``trade_agent.*``, see ``trade_agent.metrics``): gauges every minute
   from one portfolio simulation, and cumulative counters (LLM cost and tokens, cycles,
   entries, exits, risk state changes) fed by the same events that create the spans;
@@ -28,7 +30,7 @@ import json
 import math
 import random
 from collections import Counter, defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import IntEnum
@@ -43,7 +45,17 @@ MS = 1_000_000
 ENVIRONMENT = "smoke"
 VERSION = "0.1.0"
 NAMESPACE = "trade-agent"
-PROFILES = ("swing_trend", "momentum_alpha")
+LEAD = "lead_consensus_1h"
+"""The profile that follows the lead traders (D-052): its cycles carry their reading."""
+PROFILES = ("swing_trend", "momentum_alpha", LEAD)
+LEAD_MINUTE = 7
+"""The lead tracker reads at minute 7 of every quarter of an hour."""
+LEAD_RANKING = "/bapi/futures/v1/friendly/future/spot-copy-trade/common/home-page-list"
+LEAD_TRADES = (
+    "/bapi/futures/v1/friendly/future/spot-copy-trade/lead-portfolio/get-trade-history-by-page"
+)
+LEAD_CURVE = "/bapi/futures/v1/public/future/spot-copy-trade/lead-portfolio/performance-chart-data"
+LEAD_NO_DATA = "copy trading sem dados recentes"
 SCOPES = ("global", *PROFILES)
 STATE_CODES = {"running": 0, "paused": 1, "halted": 2, "flattening": 3}
 CAPITAL = 1000.0
@@ -167,6 +179,10 @@ class Summary:
     problem_logs: list[str]  # "service severity" of the warnings and errors
     agent_problems: int
     last: Mapping[str, float]  # last value of each gauge of the "Agora" row
+    lead_errors: int  # failed requests to the lead traders' source (D-052)
+    lead_rankings: int
+    lead_http_errors: Mapping[int, int]
+    lead_warnings: list[str]  # the lead tracker's warning events
     scope_pnl: Mapping[str, Sequence[tuple[int, float]]]  # trade_agent.pnl.total: (ns, value)
 
     def daily_scope_series(self, instant: int) -> dict[str, list[tuple[int, float]]]:
@@ -338,6 +354,16 @@ class _Generator:
         halt = self.rng.randrange(self.minutes // 2, 4 * self.minutes // 5)
         self.profile_halt = (halt, halt + self.rng.randrange(30, 91))
         self.last: dict[str, float] = {}
+        # the lead tracker (D-052)
+        self.lead_selected = self.lead_fresh = self.lead_consensus = 0
+        self.lead_errors = self.lead_requests = self.lead_rankings = 0
+        self.lead_http: Counter[int] = Counter()
+        self.lead_next_ranking = 0
+        self.lead_blocked_until = self.lead_last_ok = -1
+        self.lead_down = self.lead_seen = False
+        self.lead_outage = (-1, -1)
+        self.lead_refusal = -1
+        self.lead_plan()
         self.container_totals: dict[tuple[object, ...], float] = {}
 
     # ------------------------------------------------------------ helpers
@@ -702,27 +728,21 @@ class _Generator:
             self.research(cycle)
         opened = exits = 0
         mine = [p for p in self.positions if p.profile == profile]
-        if state == "running":
-            # rule exits: the weakest position after a few hours (at least one in the window)
-            for position in mine:
-                aged = cycle.cursor - position.opened > 6 * 3600 * SECOND
-                forced = last_cycle and not self.exits
-                if (aged and position.ret < -0.01) or forced:
-                    self.close_position(position, cycle.cursor, "rule_exit", cycle)
-                    exits += 1
-                    break
-            wanted = self.rng.choice((0, 1, 1, 2)) if self.entries.total() else 1
-            if self.regime < 0:
-                wanted = 0  # the regime down leaves no setup
-            for _ in range(min(wanted, 3 - len(mine) + exits)):
-                self.open_position(profile, cycle)
-                opened += 1
+        lead = profile == LEAD
+        if state == "running" and lead:
+            exits, opened = self.lead_cycle(profile, cycle, mine)
+        elif state == "running":
+            exits, opened = self.legacy_cycle(profile, cycle, mine, last_cycle=last_cycle)
         setups = opened + number % 2 if self.regime > 0 else 0
         noise = int(self.regime > 0 and (number + PROFILES.index(profile)) % 3 == 0)
+        family: dict[str, object] = {"family": "legacy", "regime_filter": True}
+        if lead:  # a pair-local family: no stop-noise filter, the traders' reading
+            setups, noise = opened, 0
+            family = self.lead_fields(cycle, opened, exits)
         cycle.log(
             "decision.cycle", "info", profile=profile, state=state, evaluated=evaluated,
             dry_run=False, research="ok" if research else "sem candidatos (leitura anterior)",
-            setups=setups, family="legacy", regime_filter=True,
+            setups=setups, **family,
         )  # fmt: skip
         cycle.close()
         self.finish_job(job, f"decide_{profile}")
@@ -732,8 +752,9 @@ class _Generator:
         )
         self.setups[profile] += setups
         self.count("trade_agent.decision.setups", at, setups, profile=profile)
-        self.stop_noise[profile] += noise
-        self.count("trade_agent.decision.stop_noise", at, noise, profile=profile)
+        if not lead:
+            self.stop_noise[profile] += noise
+            self.count("trade_agent.decision.stop_noise", at, noise, profile=profile)
         if opened:
             self.entries[profile] += opened
             self.count("trade_agent.decision.entries", at, opened, profile=profile, dry_run=False)
@@ -741,11 +762,47 @@ class _Generator:
             self.exits[profile] += exits
             self.count("trade_agent.decision.exits", at, exits, profile=profile, dry_run=False)
 
-    def open_position(self, profile: str, parent: _Open) -> None:
+    def legacy_cycle(
+        self, profile: str, cycle: _Open, mine: list[_Position], *, last_cycle: bool
+    ) -> tuple[int, int]:
+        """A legacy profile's rule exit (the weakest position after a few hours, at least one
+        in the window) and its entries."""
+        exits = opened = 0
+        for position in mine:
+            aged = cycle.cursor - position.opened > 6 * 3600 * SECOND
+            forced = last_cycle and not set(self.exits) - {LEAD}
+            if (aged and position.ret < -0.01) or forced:
+                self.close_position(position, cycle.cursor, "rule_exit", cycle)
+                exits += 1
+                break
+        wanted = self.rng.choice((0, 1, 1, 2)) if self.entries.total() else 1
+        if self.regime is not None and self.regime < 0:
+            wanted = 0  # the regime down leaves no setup
+        for _ in range(min(wanted, 3 - len(mine) + exits)):
+            self.open_position(profile, cycle)
+            opened += 1
+        return exits, opened
+
+    def lead_cycle(self, profile: str, cycle: _Open, mine: list[_Position]) -> tuple[int, int]:
+        """The lead profile's exits and entries: the traders sold what it holds (one exit a
+        cycle), and it buys one asset when their reading is fresh and the regime up."""
+        exits = opened = 0
+        if mine:
+            self.close_position(mine[0], cycle.cursor, "decision", cycle)
+            exits = 1
+        if self.lead_fresh and self.regime is not None and self.regime > 0:
+            self.open_position(profile, cycle, protected=False)
+            opened = 1
+        return exits, opened
+
+    def open_position(self, profile: str, parent: _Open, *, protected: bool = True) -> None:
+        """``protected``: the reconciliation may see its stop or target fill; the lead
+        profile's positions leave by the traders' sell consensus instead."""
         symbol = self.rng.choice(SYMBOLS)
+        stop, take = self.rng.uniform(0.03, 0.06), self.rng.uniform(0.06, 0.12)
         position = _Position(
             profile, symbol, round(self.rng.uniform(80, 160), 2), parent.cursor,
-            stop=self.rng.uniform(0.03, 0.06), take=self.rng.uniform(0.06, 0.12),
+            stop=stop if protected else 1.0, take=take if protected else 1.0,
         )  # fmt: skip
         self.positions.append(position)
         opening = parent.open("execution", "position.open")
@@ -757,6 +814,158 @@ class _Generator:
         submit.close()
         opening.log("position.protected", "info", symbol=symbol, state="protected", profile=profile)
         opening.close()
+
+    # ------------------------------------------------------------ lead traders (D-052)
+    def lead_plan(self) -> None:
+        """When the source fails: 503s from 70 min before a decision cycle to 20 min after it
+        (its reading goes stale: no entry in that cycle), and one 429 later on (an hour of
+        backoff)."""
+        boundaries = [
+            m
+            for m in range(self.minutes)
+            if (moment := datetime.fromtimestamp((self.start + m * MINUTE) / SECOND, UTC)).minute
+            == 0
+            and moment.hour % 4 == 0
+        ]
+        boundary = boundaries[min(1, len(boundaries) - 1)] if boundaries else self.minutes // 2
+        self.lead_outage = (max(boundary - 70, 20), boundary + 20)
+        later = [
+            m
+            for m in range(3 * self.minutes // 4, self.minutes)
+            if m % 15 == LEAD_MINUTE and not self.lead_outage[0] <= m < self.lead_outage[1] + 60
+        ]
+        self.lead_refusal = later[0] if later else -1
+
+    def lead_call(self, parent: _Open, method: str, path: str, status: int) -> None:
+        """A request to the website's Copy Trading endpoints, as ``LeadSource`` makes it."""
+        busy = activity(parent.cursor)
+        attributes: dict[str, AttributeValue] = {
+            "http.request.method": method,
+            "url.full": f"https://www.binance.com{path}",
+            "url.path": path,
+            "server.address": "www.binance.com",
+            "http.response.status_code": status,
+        }
+        parent.leaf(
+            "leads",
+            f"{method} www.binance.com",
+            self.lognormal_ms(380 * (0.75 + 0.5 * busy)),
+            attributes=attributes,
+            error=f"HTTP {status}" if status >= 400 else None,
+        )
+        self.lead_requests += 1
+        if status >= 400:
+            self.lead_http[status] += 1
+
+    def track_leads(self, minute: int, at: int) -> None:
+        """``LeadTracker.refresh`` every 15 minutes: the ranking every 6 hours, the followed
+        traders' trades in between; the gauges keep the reading until the next one."""
+        job = self.job(f"track_leads_{LEAD}", at)
+        refresh = job.open("leads", "leads.refresh")
+        if minute < self.lead_blocked_until:
+            refresh.log("leads.backing_off", profile=LEAD)
+        else:
+            self.lead_reading(minute, refresh)
+        refresh.close()
+        self.finish_job(job, f"track_leads_{LEAD}")
+
+    def lead_reading(self, minute: int, refresh: _Open) -> None:
+        """One reading: its requests, then what the tracker reports of it."""
+        statuses = self.lead_calls(minute, refresh)
+        ok = sum(status < 400 for status in statuses)
+        failed = len(statuses) - ok
+        if 429 in statuses:
+            self.lead_blocked_until = minute + 60
+            refresh.log("leads.source_refused", "warning", profile=LEAD, error="HTTP 429")
+        if ok and not self.lead_outage[0] <= minute < self.lead_outage[1]:
+            self.lead_last_ok = minute
+        stale = self.lead_last_ok < 0 or minute - self.lead_last_ok > 45  # max_data_age
+        self.lead_fresh = 0 if stale else self.lead_selected
+        self.lead_consensus = self.rng.randint(1, 3) if self.lead_fresh else 0
+        self.lead_seen = True
+        self.lead_errors += failed
+        self.count("trade_agent.leads.errors", refresh.cursor, failed, profile=LEAD)
+        if failed and not ok and not self.lead_down:
+            self.lead_down = True
+            refresh.log("leads.source_unavailable", "warning", profile=LEAD)
+        elif ok and self.lead_down:
+            self.lead_down = False
+            refresh.log("leads.source_recovered", "info", profile=LEAD)
+        refresh.log(
+            "leads.refreshed", profile=LEAD, status="ok" if self.lead_fresh else LEAD_NO_DATA,
+            selected=self.lead_selected, fresh=self.lead_fresh, requests=ok, failed=failed,
+        )  # fmt: skip
+
+    def lead_calls(self, minute: int, refresh: _Open) -> list[int]:
+        """The reading's requests and their statuses: the ranking when it is due (then the PnL
+        curve and the trades of each candidate), otherwise the followed traders' trades. A 429
+        stops the reading."""
+        statuses: list[int] = []
+
+        def call(method: str, path: str) -> int:
+            down = self.lead_outage[0] <= minute < self.lead_outage[1]
+            status = 429 if minute == self.lead_refusal and not statuses else 503 if down else 200
+            self.lead_call(refresh, method, path, status)
+            statuses.append(status)
+            return status
+
+        if minute >= self.lead_next_ranking:
+            status = call("POST", LEAD_RANKING)
+            if status == 200:
+                self.lead_rank(minute, refresh, call)
+                return statuses
+            if status == 429:
+                return statuses
+            refresh.log("leads.ranking_failed", "warning", profile=LEAD, error=f"HTTP {status}")
+        for _ in range(self.lead_selected):
+            status = call("POST", LEAD_TRADES)
+            if status == 429:
+                break
+            if status >= 400:
+                refresh.log("leads.trades_failed", "warning", profile=LEAD, error=f"HTTP {status}")
+        return statuses
+
+    def lead_rank(self, minute: int, refresh: _Open, call: Callable[[str, str], int]) -> None:
+        """The rest of a ranking reading and the ``leads.selected`` it records."""
+        for _ in range(4):  # the other pages of the pool
+            call("POST", LEAD_RANKING)
+        candidates = self.rng.randint(5, 7)
+        for _ in range(candidates):  # the PnL curve and the trades of each candidate
+            call("GET", LEAD_CURVE)
+            call("POST", LEAD_TRADES)
+        self.lead_selected = self.rng.randint(3, candidates - 1)
+        self.lead_rankings += 1
+        self.lead_next_ranking = minute + 360
+        selected = [
+            {"id": f"52{self.rng.randrange(10**16, 10**17)}", "score": self.rng.uniform(0.3, 0.8)}
+            for _ in range(self.lead_selected)
+        ]
+        refresh.log(
+            "leads.selected", "info", profile=LEAD, pool=150, examined=candidates,
+            selected=selected, rejected={"ROI abaixo do mínimo": self.rng.randint(40, 90)},
+        )  # fmt: skip
+
+    def lead_fields(self, cycle: _Open, opened: int, exits: int) -> dict[str, object]:
+        """The cycle's reading of the followed traders, as ``LeadView.summary`` writes it."""
+        if not self.lead_fresh:
+            return {"family": "lead_consensus", "regime_filter": False, "leads": {
+                "status": LEAD_NO_DATA, "selected": self.lead_selected, "fresh": 0,
+                "as_of": None, "assets": {},
+            }}  # fmt: skip
+        assets: dict[str, object] = {}
+        for symbol in self.rng.sample(SYMBOLS, opened + exits + 1):
+            side = "sell" if len(assets) < exits else "buy"
+            backers = [f"52{self.rng.randrange(10**16, 10**17)}" for _ in range(2)]
+            assets[symbol] = {
+                "buyers": backers if side == "buy" else [],
+                "sellers": backers if side == "sell" else [],
+                "avg_buy_price": f"{self.rng.uniform(1, 100):.4f}" if side == "buy" else None,
+                "consensus": side,
+            }
+        return {"family": "lead_consensus", "regime_filter": False, "leads": {
+            "status": "ok", "selected": self.lead_selected, "fresh": self.lead_fresh,
+            "as_of": self.iso(cycle.cursor - 5 * MINUTE), "assets": assets,
+        }}  # fmt: skip
 
     # ------------------------------------------------------------ minute by minute
     def run(self) -> Telemetry:
@@ -775,6 +984,8 @@ class _Generator:
                 self.sync_time(at + 50 * SECOND)
             if minute % 15 == 12:
                 self.ingest(at + 28 * SECOND)
+            if minute % 15 == LEAD_MINUTE:
+                self.track_leads(minute, at + 15 * SECOND)
             if minute == self.forced_http:  # a rate limit, at least once
                 job = self.job("sync_time", at + 55 * SECOND)
                 self.exchange(job, "/api/v3/time", weight=1, fail=429)
@@ -853,6 +1064,14 @@ class _Generator:
         for name, (unit, value) in values.items():
             self.gauge(name, unit, at, value)
             self.last[name] = value
+        if self.lead_seen:  # from the lead tracker's first reading on
+            for name, value in (
+                ("trade_agent.leads.selected", self.lead_selected),
+                ("trade_agent.leads.fresh", self.lead_fresh),
+                ("trade_agent.leads.consensus", self.lead_consensus),
+            ):
+                self.gauge(name, "{lead}", at, float(value), {"profile": LEAD})
+                self.last[name] = float(value)
         if self.regime is not None:  # the agent sets it on every decision cycle
             self.gauge("trade_agent.market.regime", "%", at, self.regime, {"timeframe": "4h"})
             self.last["trade_agent.market.regime"] = self.regime
@@ -925,6 +1144,7 @@ class _Generator:
             "trade_agent.decision.entries": "{position}",
             "trade_agent.decision.exits": "{position}",
             "trade_agent.risk.state_changes": "{change}",
+            "trade_agent.leads.errors": "{request}",
         }
         metrics = []
         for name, unit in units.items():
@@ -989,6 +1209,18 @@ class _Generator:
             problem_logs=sorted({f"{log.service} {log.severity}" for log in problems}),
             agent_problems=sum(1 for log in problems if log.service == "agent"),
             last=dict(self.last),
+            lead_errors=self.lead_errors,
+            lead_rankings=self.lead_rankings,
+            lead_http_errors=dict(sorted(self.lead_http.items())),
+            lead_warnings=sorted(
+                {
+                    str(log.attributes["event"])
+                    for log in self.logs
+                    if log.service == "agent"
+                    and log.severity in problem_levels
+                    and str(log.attributes.get("event", "")).startswith("leads.")
+                }
+            ),
             scope_pnl=self.scope_points(),
         )
         return Telemetry(self.spans, self.logs, metrics, summary)

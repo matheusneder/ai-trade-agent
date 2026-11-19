@@ -12,6 +12,7 @@ from trade_agent.signals.features import (
 )
 from trade_agent.signals.local import (
     BreakoutParams,
+    ConsensusParams,
     Family,
     LocalParams,
     PullbackParams,
@@ -36,6 +37,7 @@ from trade_agent.signals.setups import (
 
 __all__ = [
     "BreakoutParams",
+    "ConsensusParams",
     "Family",
     "FeatureParams",
     "LocalFeatureParams",

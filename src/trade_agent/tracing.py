@@ -35,6 +35,7 @@ COMPONENTS = (
     "risk",  # risk readings and circuit breakers
     "decision",  # decision cycle per profile
     "research",  # news collection and analyst
+    "leads",  # lead traders of Binance Spot Copy Trading (D-052)
     "llm",  # Claude API calls
     "execution",  # positions and orders
     "exchange",  # Binance REST

@@ -28,7 +28,7 @@ REPOSITORY_FILE = Path(__file__).parents[3] / "config" / "profiles.yaml"
 def test_repository_local_profiles_are_enabled_seeds() -> None:
     # D-046: enabled on the Demo, their share taken from swing_trend
     config = load_strategy_config(REPOSITORY_FILE)
-    local = {n: p for n, p in config.profiles.items() if p.family.local}
+    local = {n: p for n, p in config.profiles.items() if p.family.local and p.leads is None}
     assert set(local) == {"pair_pullback_1h", "pair_breakout_1h", "pair_range_1h"}
     assert set(local) <= set(config.enabled_profiles())
     expected = {
@@ -69,6 +69,7 @@ def test_the_risk_guard_gets_the_budgets_of_the_enabled_local_profiles() -> None
         "pair_pullback_1h": "ppb1h",
         "pair_breakout_1h": "pbo1h",
         "pair_range_1h": "prg1h",
+        "lead_consensus_1h": "lead1h",  # D-052: the same budget
     }
     assert scope_specs(local_config()) == {}  # a disabled one has none
     config = local_config(local={"enabled": True, "timeframe": "4h"})

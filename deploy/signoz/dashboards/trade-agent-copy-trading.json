@@ -1,0 +1,1226 @@
+{
+  "schemaVersion": "v6",
+  "image": "",
+  "name": "trade-agent-copy-trading",
+  "generateName": false,
+  "tags": [
+    {
+      "key": "projeto",
+      "value": "trade-agent"
+    }
+  ],
+  "spec": {
+    "display": {
+      "name": "Trade Agent · Copy trading",
+      "description": "Lead traders do Copy Trading Spot da Binance seguidos pelos perfis lead_consensus (D-052): seleção, consenso, decisões, ordens e a fonte de dados."
+    },
+    "variables": [],
+    "panels": {
+      "leads-selected-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Traders acompanhados",
+            "description": "Perfis lead_consensus (D-052): seguem os melhores lead traders do Copy Trading Spot da Binance e só compram o que pelo menos dois deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo são do perfil: nenhuma operação é copiada."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.leads.selected",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-fresh-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Com leitura recente",
+            "description": "Traders acompanhados cujos trades foram lidos há menos de max_data_age (45 min): só esses contam no consenso."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.leads.fresh",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-consensus-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ativos com consenso de compra",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.leads.consensus",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "last"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-entries-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Entradas (período)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "profile IN ('lead_consensus_1h')"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.decision.entries",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-exits-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Saídas (período)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": []
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "profile IN ('lead_consensus_1h')"
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.decision.exits",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-errors-now": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Falhas na fonte (período)",
+            "description": "Requisições aos endpoints do site da Binance (não documentados) que falharam ou foram recusadas."
+          },
+          "plugin": {
+            "kind": "signoz/NumberPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "thresholds": [
+                {
+                  "value": 1,
+                  "operator": "above_or_equal",
+                  "color": "#FFCD56",
+                  "format": "text"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "scalar",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.leads.errors",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum",
+                        "reduceTo": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-followed": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Traders acompanhados e com leitura recente",
+            "description": "Sem leitura recente, o consenso não conta e o perfil não abre entradas."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom",
+                "customColors": {
+                  "acompanhados": "#56B4E9",
+                  "com leitura recente": "#E69F00"
+                }
+              },
+              "chartAppearance": {
+                "lineInterpolation": "step_after"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "acompanhados",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.leads.selected",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": ""
+                          },
+                          "groupBy": [],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "com leitura recente",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.leads.fresh",
+                              "temporality": "",
+                              "timeAggregation": "latest",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-consensus": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ativos com consenso de compra",
+            "description": "Ativos que os traders acompanhados compraram (compradores menos vendedores ≥ min_backers) na janela do consenso."
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "chartAppearance": {
+                "lineInterpolation": "step_after"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": ""
+                    },
+                    "groupBy": [
+                      {
+                        "name": "profile",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{profile}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.leads.consensus",
+                        "temporality": "",
+                        "timeAggregation": "latest",
+                        "spaceAggregation": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-cycles": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Ciclos de decisão do copy trading",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "metrics",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "profile IN ('lead_consensus_1h')"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "profile",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{profile}}",
+                    "aggregations": [
+                      {
+                        "metricName": "trade_agent.decision.cycles",
+                        "temporality": "",
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-entries-exits": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Entradas e saídas do copy trading",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/CompositeQuery",
+                  "spec": {
+                    "queries": [
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "A",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": "profile IN ('lead_consensus_1h')"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "profile",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "entradas {{profile}}",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.decision.entries",
+                              "temporality": "",
+                              "timeAggregation": "increase",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "builder_query",
+                        "spec": {
+                          "name": "B",
+                          "signal": "metrics",
+                          "source": "",
+                          "disabled": false,
+                          "filter": {
+                            "expression": "profile IN ('lead_consensus_1h')"
+                          },
+                          "groupBy": [
+                            {
+                              "name": "profile",
+                              "fieldContext": "attribute"
+                            }
+                          ],
+                          "order": [],
+                          "having": {
+                            "expression": ""
+                          },
+                          "functions": [],
+                          "legend": "saídas {{profile}}",
+                          "aggregations": [
+                            {
+                              "metricName": "trade_agent.decision.exits",
+                              "temporality": "",
+                              "timeAggregation": "increase",
+                              "spaceAggregation": "sum"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-last-cycles": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Últimos ciclos do copy trading",
+            "description": "Cada ciclo com a leitura dos traders em que decidiu: o status ('ok' ou o motivo de não haver entrada), traders acompanhados e com leitura recente, e os setups confirmados pelos candles. Quem comprou cada ativo está nos atributos leads.assets.* do log."
+          },
+          "plugin": {
+            "kind": "signoz/ListPanel",
+            "spec": {
+              "selectFields": [
+                {
+                  "name": "profile",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "state",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "leads.status",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "leads.selected",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "leads.fresh",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "setups",
+                  "fieldContext": "attribute"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "raw",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'agent' AND event = 'decision.cycle' AND family = 'lead_consensus'"
+                    },
+                    "groupBy": [],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "timestamp"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "limit": 50
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-selections": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Seleções de traders",
+            "description": "Cada leitura do ranking (a cada 6 h): portfólios lidos e candidatos examinados; os seguidos estão em selected.* e as recusas por critério em rejected.*."
+          },
+          "plugin": {
+            "kind": "signoz/ListPanel",
+            "spec": {
+              "selectFields": [
+                {
+                  "name": "profile",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "pool",
+                  "fieldContext": "attribute"
+                },
+                {
+                  "name": "examined",
+                  "fieldContext": "attribute"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "raw",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'agent' AND event = 'leads.selected'"
+                    },
+                    "groupBy": [],
+                    "order": [
+                      {
+                        "key": {
+                          "name": "timestamp"
+                        },
+                        "direction": "desc"
+                      }
+                    ],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "",
+                    "limit": 20
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Latência p95 da fonte",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/TimeSeriesPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time"
+              },
+              "formatting": {
+                "unit": "ns",
+                "decimalPrecision": "2"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.leads' AND server.address = 'www.binance.com'"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "name",
+                        "fieldContext": "span"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{name}}",
+                    "aggregations": [
+                      {
+                        "expression": "p95(duration_nano)"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-http-errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Respostas de erro da fonte por status",
+            "description": "403, 418, 429 e 451 suspendem as requisições por backoff (1 h); as demais contam como falha da leitura."
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "traces",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'trade-agent.leads' AND server.address = 'www.binance.com' AND http.response.status_code >= 400"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "http.response.status_code",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "HTTP {{http.response.status_code}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      },
+      "leads-warnings": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Avisos da leitura dos traders",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "signoz/BarChartPanel",
+            "spec": {
+              "visualization": {
+                "timePreference": "global_time",
+                "stackedBarChart": true
+              },
+              "formatting": {
+                "unit": "none",
+                "decimalPrecision": "0"
+              },
+              "legend": {
+                "position": "bottom"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "time_series",
+              "spec": {
+                "plugin": {
+                  "kind": "signoz/BuilderQuery",
+                  "spec": {
+                    "name": "A",
+                    "signal": "logs",
+                    "source": "",
+                    "disabled": false,
+                    "filter": {
+                      "expression": "service.name = 'agent' AND event LIKE 'leads.%' AND severity_text IN ('warn', 'warning', 'error', 'critical', 'fatal')"
+                    },
+                    "groupBy": [
+                      {
+                        "name": "event",
+                        "fieldContext": "attribute"
+                      }
+                    ],
+                    "order": [],
+                    "having": {
+                      "expression": ""
+                    },
+                    "functions": [],
+                    "legend": "{{event}}",
+                    "aggregations": [
+                      {
+                        "expression": "count()"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "links": []
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Agora",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/leads-selected-now"
+              }
+            },
+            {
+              "x": 2,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/leads-fresh-now"
+              }
+            },
+            {
+              "x": 4,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/leads-consensus-now"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/leads-entries-now"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/leads-exits-now"
+              }
+            },
+            {
+              "x": 10,
+              "y": 0,
+              "width": 2,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/leads-errors-now"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Traders e consenso",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-followed"
+              }
+            },
+            {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-consensus"
+              }
+            },
+            {
+              "x": 0,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-cycles"
+              }
+            },
+            {
+              "x": 6,
+              "y": 6,
+              "width": 6,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-entries-exits"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Decisões",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 7,
+              "content": {
+                "$ref": "#/spec/panels/leads-last-cycles"
+              }
+            },
+            {
+              "x": 0,
+              "y": 7,
+              "width": 12,
+              "height": 5,
+              "content": {
+                "$ref": "#/spec/panels/leads-selections"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Fonte de dados",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-latency"
+              }
+            },
+            {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-http-errors"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/leads-warnings"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "duration": "6h",
+    "refreshInterval": "1m"
+  }
+}

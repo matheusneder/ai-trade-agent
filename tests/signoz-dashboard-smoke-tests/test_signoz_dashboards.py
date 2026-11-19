@@ -15,7 +15,7 @@ import pytest
 from playwright.sync_api import Page, expect
 from scripts import signoz_dashboards
 
-from tests.support.signoz_smoke.seed import Summary, Telemetry
+from tests.support.signoz_smoke.seed import LEAD, Summary, Telemetry
 from tests.support.signoz_smoke.ui import (
     BrowserIssues,
     Dashboard,
@@ -55,6 +55,13 @@ EXPECTED_NUMBERS: dict[str, Callable[[Summary], float]] = {
     "calls-now": lambda s: s.llm_calls,
     # Contêineres
     "containers-now": lambda s: len(s.containers),
+    # Copy trading (D-052): the tracker's last reading, and the lead profile's counters
+    "leads-selected-now": lambda s: s.last["trade_agent.leads.selected"],
+    "leads-fresh-now": lambda s: s.last["trade_agent.leads.fresh"],
+    "leads-consensus-now": lambda s: s.last["trade_agent.leads.consensus"],
+    "leads-entries-now": lambda s: s.entries[LEAD],
+    "leads-exits-now": lambda s: s.exits[LEAD],
+    "leads-errors-now": lambda s: s.lead_errors,
 }
 
 # panel key → series the legend must list (exactly)
@@ -62,9 +69,9 @@ EXPECTED_LEGENDS: dict[str, Expect] = {
     # Operação
     "equity": lambda s: {"patrimônio", "abertura do dia", "pico"},
     "pnl": lambda s: {"do dia", "realizado", "aberto"},
-    "pnl-scope": lambda s: {"global", "swing_trend", "momentum_alpha"},
-    "pnl-scope-today": lambda s: {"global", "swing_trend", "momentum_alpha"},
-    "risk-state": lambda s: {"global", "swing_trend", "momentum_alpha"},
+    "pnl-scope": lambda s: set(s.scope_pnl),  # global and each profile
+    "pnl-scope-today": lambda s: set(s.scope_pnl),
+    "risk-state": lambda s: set(s.scope_pnl),
     "state-changes": lambda s: set(s.state_changes),
     "cycles": lambda s: set(s.decision_cycles),
     "regime": lambda s: {"4h"},
@@ -91,12 +98,22 @@ EXPECTED_LEGENDS: dict[str, Expect] = {
         for key in ("cpu", "memory", "rx", "tx", "disk", "memory-limit")
     },
     "log-volume": lambda s: set(s.log_services),
+    # Copy trading
+    "leads-followed": lambda s: {"acompanhados", "com leitura recente"},
+    "leads-consensus": lambda s: {LEAD},
+    "leads-cycles": lambda s: {LEAD},
+    "leads-entries-exits": lambda s: {f"entradas {LEAD}", f"saídas {LEAD}"},
+    "leads-latency": lambda s: {"GET www.binance.com", "POST www.binance.com"},
+    "leads-http-errors": lambda s: {f"HTTP {status}" for status in s.lead_http_errors},
+    "leads-warnings": lambda s: set(s.lead_warnings),
 }
 
 # list panel key → rows it must show
 EXPECTED_ROWS: dict[str, Expect] = {
     "last-cycles": lambda s: min(50, sum(s.decision_cycles.values())),
     "llm-calls": lambda s: min(30, s.llm_calls),
+    "leads-last-cycles": lambda s: min(50, s.decision_cycles[LEAD]),
+    "leads-selections": lambda s: min(20, s.lead_rankings),
 }
 
 
@@ -223,6 +240,8 @@ def test_list_panels_show_the_seeded_rows(
         expect(header).to_contain_text(field["name"])
     if key == "last-cycles":  # the family and the filter flag of each cycle (D-044)
         expect(board.panel(key).locator("tbody")).to_contain_text("legacy")
+    if key == "leads-last-cycles":  # the reading each lead cycle decided on (D-052)
+        expect(board.panel(key).locator("tbody")).to_contain_text("copy trading sem dados")
 
 
 def _fixed_window(query: dict[str, Any]) -> bool:

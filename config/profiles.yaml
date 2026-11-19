@@ -137,8 +137,8 @@ profiles:
   # runs in the production Risk Guard as in the lab
   # (trade_agent.risk.scope). Entries and exits read only the pair's own candles, so they may
   # buy with BTC below its EMA 200. The signals are research seeds (trade_agent.signals.local),
-  # not a calibration. capital_share gives the lab a virtual capital of 100 USDT; enabling one
-  # takes that share from the profiles above (the enabled shares add up to at most 1).
+  # not a calibration. The enabled shares add up to at most 1: pair_breakout_1h and
+  # pair_range_1h, both rejected by the lab, gave half of theirs to lead_consensus_1h (D-052).
   pair_pullback_1h:
     code: ppb1h
     enabled: true
@@ -174,7 +174,7 @@ profiles:
     code: pbo1h
     enabled: true
     family: pair_volatility_breakout
-    capital_share: 0.10
+    capital_share: 0.05        # D-052 (was 0.10): 50 USDT; a stop above ~4.7% no longer fits the 5 USDT minimum
     timeframe: 1h
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
     allocation:
@@ -198,7 +198,7 @@ profiles:
     code: prg1h
     enabled: true
     family: pair_range_reversion
-    capital_share: 0.10
+    capital_share: 0.05        # D-052 (was 0.10): 50 USDT; it had no trade at 0.10 either (R:R check)
     timeframe: 1h
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
     allocation:
@@ -217,3 +217,64 @@ profiles:
       max_holding: 12h
     llm: {enabled: false}
     risk: *local_risk
+
+  # ------------------------------------------------------------ lead traders' consensus (D-052)
+  # Experimental, with no lab verdict: the lead traders' trades have no history to replay, so
+  # the Demo is the validation. Follows the best lead portfolios of Binance's Spot Copy Trading
+  # ranking (trade_agent.leads) and buys an asset only when at least `min_backers` of them
+  # bought it in the window AND the pair's own candles confirm it (trade_agent.signals.local).
+  # Size, stop, target and exits are the profile's own: no trade is ever copied. The source is
+  # Binance's website, public but undocumented: without fresh data no entry goes out.
+  lead_consensus_1h:
+    code: lead1h
+    enabled: true
+    family: lead_consensus
+    capital_share: 0.10        # 100 USDT: 0.05 from pair_breakout_1h and 0.05 from pair_range_1h
+    timeframe: 1h
+    tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
+    allocation:
+      max_open_positions: 2    # with max_open_risk_pct 1.0, two positions at 0.5% of risk each
+      max_position_pct: 0.35
+      cash_reserve_pct: 0.30
+      risk_per_trade_pct: 0.5
+    entry:
+      min_score: -1.0          # ranking only (share of the followed traders that bought)
+      order: limit_fok
+      max_slippage_bps: 20
+    protection:
+      # structural stop: at least 2 ATR away; beyond 6% the setup is discarded
+      stop: {mode: fixed, atr_mult: 2.0, max_pct: 6.0}
+      take_profit: {mode: limit, activation_pct: 0.5, activation_r: 2.0}   # target at 2R net
+      max_holding: 72h
+    signals:
+      max_extension_atr: 1.5   # no entry with the close more than 1.5 ATR above the EMA 20
+    llm: {enabled: false}
+    risk: *local_risk
+    leads:
+      selection:               # who is followed (90-day ranking; trade_agent.leads.ranking)
+        pool_pages: 5          # 150 portfolios, best Sharpe ratio first
+        shortlist: 20          # candidates whose PnL curve and trades are read (2 requests each)
+        max_leads: 6
+        min_days: 90
+        min_balance: 1000      # the trader's own money, USDT
+        min_roi_pct: 3.0
+        max_drawdown_pct: 20.0
+        min_sharpe: 1.0
+        max_copier_loss_pct: 5.0      # the copiers lost at most 5% of what they have in it
+        min_positive_weeks_pct: 55.0  # 7 of the 12 weekly steps of the PnL curve
+        min_recent_gain_pct: 0.0      # no loss over the last 30 days
+        max_idle: 7d
+        min_trades_30d: 4
+        max_trades_per_day: 20.0      # above it: taken for a grid bot
+      consensus:               # when their trades are a signal (trade_agent.leads.consensus)
+        min_backers: 2         # buyers minus sellers: one trader alone never opens a position
+        window: 24h
+        min_buy_pct: 2.0       # net purchase, % of the trader's own balance
+        max_symbols_per_lead: 3
+        max_premium_pct: 1.5   # no entry with the ask more than 1.5% above what they paid
+      poll_interval: 15m       # the followed traders' trades
+      ranking_interval: 6h     # who is followed
+      max_data_age: 45m        # an older reading of a trader does not count
+      max_ranking_age: 24h     # without a new ranking for this long: nobody is followed
+      backoff: 1h              # after the source refuses a request
+      request_delay_s: 0.5

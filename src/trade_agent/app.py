@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import signal
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -22,6 +22,8 @@ from trade_agent.exchange.factory import build_rest_client, build_signer
 from trade_agent.exchange.user_stream import UserDataStream
 from trade_agent.execution.gateway import ExecutionGateway
 from trade_agent.execution.service import PositionService, RulesCache
+from trade_agent.leads.source import LeadSource
+from trade_agent.leads.tracker import LeadTracker
 from trade_agent.market.candles import INTERVAL_MS
 from trade_agent.market.universe import UniverseConfig
 from trade_agent.metrics import configure_metrics
@@ -80,6 +82,40 @@ def scope_specs(strategy: StrategyConfig) -> dict[str, ScopeSpec]:
         for name, profile in strategy.enabled_profiles().items()
         if profile.risk is not None
     }
+
+
+def build_lead_trackers(
+    strategy: StrategyConfig, http: httpx.AsyncClient, store: Store, notifier: Notifier
+) -> dict[str, LeadTracker]:
+    """One tracker per enabled ``lead_consensus`` profile (D-052), on the same public source."""
+    source = LeadSource(http)
+    return {
+        name: LeadTracker(
+            profile=name,
+            config=profile.leads,
+            source=source,
+            store=store,
+            quote_asset=strategy.account.quote_asset,
+            notify=notifier.notify,
+        )
+        for name, profile in strategy.enabled_profiles().items()
+        if profile.leads is not None
+    }
+
+
+def lead_jobs(trackers: Mapping[str, LeadTracker]) -> list[tuple[float, Action]]:
+    """The periodic reading of each tracker (D-052), apart from the decision cycles, which
+    only read its memory. Each task is named after its profile in logs and traces."""
+
+    def track(name: str, tracker: LeadTracker) -> Action:
+        async def action() -> object:
+            await tracker.refresh()
+            return None
+
+        action.__qualname__ = f"track_leads_{name}"
+        return action
+
+    return [(tracker.interval_s, track(name, tracker)) for name, tracker in trackers.items()]
 
 
 def build_tape(
@@ -152,6 +188,7 @@ def assemble(
         notify=notifier.notify,
     )
     tape = build_tape(settings, api, store, strategy)
+    leads = build_lead_trackers(strategy, http, store, notifier)
     engine = DecisionEngine(
         api=api,
         positions=positions,
@@ -170,6 +207,7 @@ def assemble(
         dry_run=not settings.trading_enabled,
         notify=notifier.notify,
         tape=tape,
+        leads=leads,
     )
     guard.set_flattener(engine.flatten)
 
@@ -273,10 +311,12 @@ def assemble(
         tracing=settings.otlp_endpoint is not None,
         metrics=settings.otlp_metrics_endpoint is not None,
         tape=tape is not None,
+        leads=list(leads),
     )
     periodic: list[tuple[float, Action]] = [
         (RISK_INTERVAL_S, check_risk),
         (INGEST_INTERVAL_S, ingest),
+        *lead_jobs(leads),
     ]
     if any(p.protection.break_even_intrabar for p in strategy.enabled_profiles().values()):
         periodic.append((BREAK_EVEN_INTERVAL_S, engine.watch_break_even))
