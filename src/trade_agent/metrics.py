@@ -3,9 +3,10 @@
 On every risk check (1 min), the latest reading feeds the gauges (equity, drawdown, PnL,
 exposure, positions, API errors, used weight, clock, and the result and the state of each
 scope); every decision cycle feeds the market regime's gauge (the benchmark against its
-slow EMA, per timeframe).
+slow EMA, per timeframe); every reading of the lead traders (D-052) feeds theirs.
 Counters record what happens between readings: LLM cost and tokens, decision cycles,
-setups, setups removed by the stop-noise filter, entries, exits and risk state changes.
+setups, setups removed by the stop-noise filter, entries, exits, risk state changes and the
+failed requests to the lead traders' source.
 
 Latency, throughput and errors per operation are not here: SigNoz derives them from the
 traces. Without ``TA_OTLP_METRICS_ENDPOINT``, nothing is installed and the calls do nothing.
@@ -70,6 +71,7 @@ class AgentMetrics:
         )
         self._latest: Reading | None = None
         self._regimes: dict[str, float] = {}
+        self._leads: dict[str, dict[str, int]] = {}
         meter = self._provider.get_meter("trade_agent")
         gauges: dict[str, tuple[str, str]] = {
             "trade_agent.equity": ("USD", "patrimônio do agente (capital + realizado + aberto)"),
@@ -106,6 +108,26 @@ class AgentMetrics:
             callbacks=[self._states],
             unit="1",
             description="estado por escopo: 0 operando, 1 pausado, 2 parado, 3 vendendo tudo",
+        )
+        lead_gauges = {  # name: (reading, unit, description)
+            "trade_agent.leads.selected": (
+                "selected", "{lead}", "traders acompanhados pelo perfil",
+            ),
+            "trade_agent.leads.fresh": (
+                "fresh", "{lead}", "traders acompanhados com leitura recente",
+            ),
+            "trade_agent.leads.consensus": (
+                "consensus", "{asset}", "ativos com consenso de compra dos traders",
+            ),
+        }  # fmt: skip
+        for name, (kind, unit, description) in lead_gauges.items():
+            meter.create_observable_gauge(
+                name, callbacks=[self._lead_gauge(kind)], unit=unit, description=description
+            )
+        self.lead_errors = meter.create_counter(
+            "trade_agent.leads.errors",
+            unit="{request}",
+            description="requisições à fonte de copy trading que falharam",
         )
         self.llm_cost = meter.create_counter(
             "trade_agent.llm.cost", unit="USD", description="custo das chamadas ao LLM"
@@ -181,8 +203,17 @@ class AgentMetrics:
     def _regime(self, _options: CallbackOptions) -> Iterable[Observation]:
         return [Observation(v, {"timeframe": tf}) for tf, v in self._regimes.items()]
 
+    def _lead_gauge(self, kind: str) -> Callable[[CallbackOptions], Iterable[Observation]]:
+        def callback(_options: CallbackOptions) -> Iterable[Observation]:
+            return [Observation(v[kind], {"profile": p}) for p, v in self._leads.items()]
+
+        return callback
+
     def observe(self, reading: Reading) -> None:
         self._latest = reading
+
+    def observe_leads(self, profile: str, values: dict[str, int]) -> None:
+        self._leads[profile] = values
 
     def observe_regime(self, timeframe: str, distance_pct: float) -> None:
         self._regimes[timeframe] = distance_pct
@@ -281,6 +312,15 @@ def observe_regime(*, timeframe: str, distance_pct: float) -> None:
     """The benchmark's distance to its slow EMA on the cycle's candle (> 0: regime up)."""
     if _active is not None:
         _active.observe_regime(timeframe, distance_pct)
+
+
+def observe_leads(*, profile: str, selected: int, fresh: int, consensus: int, errors: int) -> None:
+    """A reading of the profile's lead traders (D-052): how many it follows, how many of
+    them have a recent reading, the assets with a buy consensus and the requests that failed."""
+    if _active is None:
+        return
+    _active.observe_leads(profile, {"selected": selected, "fresh": fresh, "consensus": consensus})
+    _active.lead_errors.add(errors, {"profile": profile})
 
 
 def record_state_change(*, scope: str, state: str, source: str) -> None:

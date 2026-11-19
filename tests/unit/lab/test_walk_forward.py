@@ -479,6 +479,20 @@ def test_main_with_fixed_profile_params(lab: FakeLab) -> None:
     assert "| — |" in reports[0].read_text(encoding="utf-8")  # no local BTC data
 
 
+def test_main_refuses_a_family_that_needs_the_lead_traders(lab: FakeLab) -> None:
+    """D-052: the lead traders' trades have no history, so the candle side alone would be
+    backtested as if every confirmed candle were a purchase."""
+    args = [
+        "--profile",
+        "lead_consensus_1h",
+        "--profiles-file",
+        str(wf.ROOT / "config" / "profiles.yaml"),
+    ]
+    with pytest.raises(ValueError, match="lead_consensus não roda no laboratório"):
+        wf.main(args)
+    assert lab.calls == []
+
+
 def test_main_optimizes_on_training_window(lab: FakeLab) -> None:
     (lab.root / "data").mkdir()
     jan1 = 1_735_689_600_000

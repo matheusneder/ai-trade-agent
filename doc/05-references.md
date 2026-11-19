@@ -16,6 +16,8 @@ External documentation the project depends on.
 - Spot Testnet: https://testnet.binance.vision
 - Delisting schedule (`/sapi/v1/spot/delist-schedule`): https://developers.binance.com/docs/wallet/others/delist-schedule
 - Sub-accounts (eligibility): https://www.binance.com/en/support/faq/binance-sub-account-functions-and-frequently-asked-questions-360020632811
+- Copy Trading API (official: only the caller's own lead trader status): https://developers.binance.com/docs/copy_trading
+- Spot Copy Trading ranking (the website whose own endpoints the lead traders' data comes from; doc 01, §2.6): https://www.binance.com/en/copy-trading/spot
 - Error 451 (restricted location), community discussion: https://dev.binance.vision/t/error-restricted-location-according-b-eligibility/13838
 
 ## LLM (Anthropic / Claude)

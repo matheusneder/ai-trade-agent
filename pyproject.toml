@@ -127,6 +127,7 @@ markers = [
     "e2e: end-to-end tests with Docker and a browser (Playwright); run by path, e.g. `uv run pytest tests/grafana-dashboard-smoke-tests`",
     "grafana: Grafana dashboard smoke tests (tests/grafana-dashboard-smoke-tests)",
     "signoz: SigNoz dashboard smoke tests (ephemeral SigNoz + Chromium); `uv run pytest tests/signoz-dashboard-smoke-tests`",
+    "contract: contract tests against live external APIs (network; tests/contract); `uv run pytest tests/contract`",
 ]
 filterwarnings = ["error"]
 

@@ -38,6 +38,7 @@ def test_without_configuration_nothing_is_recorded() -> None:
     metrics.record_cycle(profile="c", state="running", dry_run=True, opened=1, exits=1)
     metrics.record_state_change(scope="global", state="halted", source="gatilho")
     metrics.observe_regime(timeframe="4h", distance_pct=-1.1)
+    metrics.observe_leads(profile="leads", selected=1, fresh=1, consensus=0, errors=1)
 
 
 def test_gauges_follow_the_latest_reading(measured: Measured) -> None:
@@ -121,6 +122,20 @@ def test_regime_gauge_keeps_the_latest_distance_per_timeframe(measured: Measured
     metrics.observe_regime(timeframe="1h", distance_pct=0.2)
     assert measured.value("trade_agent.market.regime", timeframe="4h") == -1.11
     assert measured.value("trade_agent.market.regime", timeframe="1h") == 0.2
+
+
+def test_lead_gauges_keep_the_latest_reading_per_profile(measured: Measured) -> None:
+    assert "trade_agent.leads.selected" not in measured.points()  # no reading yet
+    metrics.observe_leads(profile="leads", selected=6, fresh=6, consensus=2, errors=0)
+    assert measured.value("trade_agent.leads.errors", profile="leads") == 0  # primed at 0
+    metrics.observe_leads(profile="leads", selected=6, fresh=4, consensus=1, errors=2)
+    metrics.observe_leads(profile="other", selected=3, fresh=0, consensus=0, errors=3)
+    assert measured.value("trade_agent.leads.selected", profile="leads") == 6
+    assert measured.value("trade_agent.leads.fresh", profile="leads") == 4
+    assert measured.value("trade_agent.leads.consensus", profile="leads") == 1
+    assert measured.value("trade_agent.leads.fresh", profile="other") == 0
+    assert measured.value("trade_agent.leads.errors", profile="leads") == 2
+    assert measured.value("trade_agent.leads.errors", profile="other") == 3
 
 
 def test_prime_exports_the_counters_at_zero_before_the_first_event(measured: Measured) -> None:

@@ -3,7 +3,9 @@
 1. universe (built every cycle) and **closed** candles of the assets in the profile's tiers;
 2. technical signals (the same code as the lab) and the market regime, whose flips go to
    Telegram (:class:`RegimeWatch`). The pair-local families (D-044) decide on the pair's own
-   candles: the benchmark only feeds the regime telemetry, and they go on without it;
+   candles: the benchmark only feeds the regime telemetry, and they go on without it. A
+   ``lead_consensus`` profile (D-052) only keeps the setups of the pairs its lead traders
+   bought (:mod:`trade_agent.leads`), read from memory;
 3. LLM analyst, only when there are setups or positions (saves cost), with per-profile
    degradation;
 4. rule-based exits for the profile's positions (rotation, time, veto) and break-even, which
@@ -22,7 +24,7 @@ import contextlib
 import math
 import time
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -37,6 +39,8 @@ from trade_agent.decision.tape import DecisionTape
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import ExitReason, Position, PositionState
 from trade_agent.execution.service import PositionService
+from trade_agent.leads.consensus import NO_TRACKER, LeadView
+from trade_agent.leads.tracker import LeadTracker
 from trade_agent.market.candles import INTERVAL_MS, ClosedCandleCache
 from trade_agent.market.universe import (
     Tier,
@@ -335,6 +339,9 @@ class CycleReport:
     """Pair-local families: setup patterns a filter discarded, with the reason (D-044)."""
     stale_candle: bool = False
     """The cycle ran too long after its candle closed: exits only, no entries (D-051)."""
+    leads: dict[str, object] | None = None
+    """``lead_consensus`` profiles (D-052): the lead traders' reading the cycle decided on,
+    with who bought and sold each asset (:meth:`LeadView.summary`)."""
 
     def summary(self) -> dict[str, object]:
         return {
@@ -353,6 +360,7 @@ class CycleReport:
             "regime_filter": self.regime_filter,
             "filtered": [list(f) for f in self.filtered],
             "stale_candle": self.stale_candle,
+            "leads": self.leads,
         }
 
 
@@ -380,9 +388,13 @@ class DecisionEngine:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         research_wait: timedelta = SHARED_RESEARCH_WAIT,
         tape: DecisionTape | None = None,
+        leads: Mapping[str, LeadTracker] | None = None,
     ) -> None:
         self._api = api
         self._tape = tape
+        self._leads = dict(leads or {})
+        self._lead_views: dict[str, LeadView] = {}
+        """``lead_consensus`` profiles (D-052): the reading each one's cycle decided on."""
         self._positions = positions
         self._store = store
         self._guard = guard
@@ -467,6 +479,7 @@ class DecisionEngine:
         except Exception as exc:
             log.warning("decision.benchmark_unavailable", profile=profile.code, error=repr(exc))
         params = profile.local_params()
+        view = self._lead_view(profile)
         held = {p.symbol for p in await self._store.active_positions() if p.profile == profile.code}
         symbols = dict.fromkeys([*(m.symbol for m in members), *sorted(held)])
         signals: dict[str, Signal] = {}
@@ -477,6 +490,8 @@ class DecisionEngine:
                 continue  # not enough history for the indicators
             features = compute_local_features(compute_features(frame, self._features))
             signal = evaluate_local(features, params)
+            if view is not None and profile.leads is not None:
+                signal = view.apply(symbol, signal, profile.leads.consensus)
             signals[symbol] = signal
             if symbol in held:  # the level each position broke, for its technical exit
                 levels = local_frame(features, params)["level"]
@@ -498,6 +513,17 @@ class DecisionEngine:
                 close=signal.close,
             )
         return signals, regime
+
+    def _lead_view(self, profile: ProfileConfig) -> LeadView | None:
+        """The lead traders' reading a ``lead_consensus`` cycle decides on (D-052), kept for
+        its exits and its report; ``None`` for the other families. Without a tracker the
+        profile has no consensus, hence no entry."""
+        if profile.leads is None:
+            return None
+        tracker = self._leads.get(self._names[profile.code])
+        view = LeadView(NO_TRACKER) if tracker is None else tracker.view(self._clock())
+        self._lead_views[profile.code] = view
+        return view
 
     def _entry_level(self, profile: ProfileConfig, position: Position) -> float | None:
         """The level broken by the position's entry signal: the candle that closed when the
@@ -640,6 +666,7 @@ class DecisionEngine:
             regime_filter=profile.uses_regime_filter,
             filtered=tuple((sym, s.filtered) for sym, s in signals.items() if s.filtered),
             stale_candle=stale_candle,
+            leads=self._lead_summary(profile),
         )
         await self._store.record_event("decision.cycle", Severity.INFO, report.summary())
         tracing.annotate(
@@ -674,6 +701,12 @@ class DecisionEngine:
             lines = [f"{prefix}{name}: entradas {opened or '—'}; saídas {exits or '—'}"]
             await self._notify(Severity.INFO, "\n".join(lines))
         return report
+
+    def _lead_summary(self, profile: ProfileConfig) -> dict[str, object] | None:
+        view = self._lead_views.get(profile.code)
+        if view is None or profile.leads is None:
+            return None
+        return view.summary(profile.leads.consensus)
 
     def _stale_candle(self, name: str, candle_close: datetime) -> bool:
         """Whether the candle the cycle read closed too long ago for an entry (D-051)."""
@@ -711,6 +744,11 @@ class DecisionEngine:
                 await self._store.set_checkpoint(key, {"cycles": weak})
             elif signal is not None:  # pair-local family: its own technical exit (D-044)
                 technical = position_exit(signal, params, self._entry_level(profile, position))
+                view = self._lead_views.get(profile.code)
+                if view is not None and profile.leads is not None:  # which rule fired (D-052)
+                    technical = view.exit_reason(
+                        position.symbol, technical, profile.leads.consensus
+                    )
             opinion = reading.opinions.get(position.base_asset)
             age = now - position.opened_at if position.opened_at else None
             reason = exit_reason(

@@ -18,6 +18,11 @@ A small simulation of a normal day of the agent, written straight into the ORM m
   positions and the prices (the same formulas the dashboards read);
 * the analyst: news per hour (more in the busy hours), triage and research LLM calls with
   their cost, a research report per 4h round (one of them failed);
+* the lead traders of a ``lead_consensus`` profile (D-052): a ranking reading every 6 h
+  (``leads.selected``), the traders' reading of each cycle (``leads`` in
+  ``decision.cycle``: a buy consensus behind every setup, one the candles refused, a sell
+  consensus, an asset only one trader bought) and a cycle without data between a
+  ``leads.source_unavailable`` and a ``leads.source_recovered``;
 * the agent's and the other services' logs for Loki (the "Logs" dashboard).
 
 The domain invariants hold: position states follow ``TRANSITIONS``, order IDs follow
@@ -62,6 +67,17 @@ from trade_agent.execution.positions import (
     realized_pnl,
     summarize_fills,
 )
+from trade_agent.leads.consensus import NO_DATA, OK, SELL_CONSENSUS, Backing, LeadView
+from trade_agent.leads.ranking import (
+    COPIERS_LOST,
+    DEEP_DRAWDOWN,
+    INCONSISTENT,
+    LOW_ROI,
+    LOW_SHARPE,
+    SMALL,
+    WEAK_RECENT,
+)
+from trade_agent.leads.tracker import Followed
 from trade_agent.persistence.models import (
     Base,
     CheckpointRecord,
@@ -77,7 +93,13 @@ from trade_agent.persistence.models import (
 )
 from trade_agent.research.models import AssetView, Horizon, MarketRegime, MarketView, NewsItem
 from trade_agent.risk.state import GLOBAL, OpState
-from trade_agent.strategy.profiles import ProfileConfig, load_strategy_config
+from trade_agent.signals import Family
+from trade_agent.signals.local import BELOW_SHORT, DOWNTREND, EXTENDED, TECHNICAL_EXITS
+from trade_agent.strategy.profiles import (
+    LeadConsensusConfig,
+    ProfileConfig,
+    load_strategy_config,
+)
 
 ROOT = Path(__file__).parents[2]
 STEP = timedelta(minutes=5)
@@ -126,6 +148,23 @@ NEWS_TOPICS = (
     ("other", "Análise: o que esperar do {name} nesta semana"),
 )
 PRICING = yaml.safe_load((ROOT / "config" / "research.yaml").read_text("utf-8"))["pricing"]
+LEAD_TRADERS = (
+    ("4826459036709499393", "lead-anna"),
+    ("5170723964746482176", "lead-bruno"),
+    ("5201882091966324993", "lead-carla"),
+    ("5161289413750811136", "lead-davi"),
+    ("4473005195730798081", "lead-elis"),
+    ("5078531301964743681", "lead-fabio"),
+)
+LEAD_REJECTIONS = (
+    LOW_SHARPE, LOW_ROI, COPIERS_LOST, SMALL, DEEP_DRAWDOWN, WEAK_RECENT, INCONSISTENT,
+)  # fmt: skip
+LEAD_ENTRY_REFUSALS = (
+    "preço já avançou além do limite do sinal",
+    "risco aberto do perfil acima do limite",
+)
+CANDLE_REFUSALS = (DOWNTREND, BELOW_SHORT, EXTENDED)
+LEAD_RANKING = timedelta(hours=6)
 
 
 # ============================================================================ the dataset
@@ -182,6 +221,23 @@ class Expected:
     llm_cost: float = 0.0
     pending_intents: int = 0
     unprotected: int = 0
+    lead_traders: list[str] = field(default_factory=list)
+    """The latest selection's traders, best score first (D-052)."""
+    lead_selections: int = 0
+    lead_status: str = ""
+    lead_fresh: int = 0
+    lead_open: int = 0
+    lead_open_cost: float = 0.0
+    lead_realized: float = 0.0
+    lead_positions: int = 0
+    lead_consensus: dict[str, int] = field(default_factory=dict)
+    """``buy``, ``sell`` and ``None`` → assets over every lead cycle."""
+    lead_cycles: tuple[int, int] = (0, 0)
+    """Lead cycles with the traders' reading and without it."""
+    lead_decisions: dict[str, int] = field(default_factory=dict)
+    """What the cycles did with each asset the traders moved (the table's labels)."""
+    lead_source: list[str] = field(default_factory=list)
+    """The source's outages and returns, the most recent first."""
 
 
 @dataclass(slots=True)
@@ -197,6 +253,8 @@ class Dataset:
     llm: list[LlmUsageRecord] = field(default_factory=list)
     checkpoints: list[CheckpointRecord] = field(default_factory=list)
     logs: list[LogLine] = field(default_factory=list)
+    lead_codes: set[str] = field(default_factory=set)
+    """The codes of the ``lead_consensus`` profiles: their positions carry them."""
     expected: Expected = field(default_factory=Expected)
 
     def events(self) -> list[EventRecord]:
@@ -271,6 +329,10 @@ class _Simulation:
         self.day_start = INITIAL_EQUITY
         self.offset_ms = rng.randint(-40, 40)
         self.prices = self._price_paths()
+        self.followed: list[Followed] = []
+        self.lead_outage: datetime | None = None
+        self.lead_name = next((p.name for p in self.profiles if p.config.family.needs_leads), None)
+        self.data.lead_codes = {p.config.code for p in self.profiles if p.config.family.needs_leads}
 
     # ------------------------------------------------------------------ market
     def _steps(self) -> list[datetime]:
@@ -635,32 +697,41 @@ class _Simulation:
         regime = self.regime(index, boundary, number, up)
         for order, profile in enumerate(self.profiles):
             at = boundary + timedelta(seconds=95 + 40 * order + self.rng.randint(0, 30))
+            # D-052: a lead_consensus profile postdates D-044, so every one of its cycles carries
+            # the traders' reading; with a reading, they sold the oldest position it holds
+            lead = profile.config.family.needs_leads
+            outage = lead and boundary == self.lead_outage  # no reading: no setup
             exits: list[tuple[str, str]] = []
-            for item in [o for o in self.open if o.profile is profile]:
+            for held, item in enumerate([o for o in self.open if o.profile is profile]):
                 price = self.price(item.asset, index)
                 gaining = price > (item.record.entry_price or price)
-                if self.rng.random() < (0.5 if gaining else 0.35):  # score below exit_score
+                sold = lead and not outage and held == 0
+                if sold or self.rng.random() < (0.5 if gaining else 0.35):  # or a weak score
                     price = _q(self.price(item.asset, index) * Decimal("0.9995"), item.asset.tick)
                     exits.append(self.close(item, at, price, ExitReason.DECISION))
             effective = max(self.global_state, profile.state, key=lambda s: s.rank)
             opened: list[str] = []
             rejected: list[tuple[str, str]] = []
             evaluated = self.rng.randint(9, 16)
-            if effective is OpState.RUNNING and up:  # the regime down leaves no setup
+            if effective is OpState.RUNNING and up and not outage:
                 busy = {o.asset.base for o in self.open}  # one position per asset
                 slots = profile.config.allocation.max_open_positions - sum(
                     o.profile is profile for o in self.open
                 )
-                candidates = [a for a in ASSETS if a.base not in busy]
+                exited = {symbol for symbol, _ in exits}  # no setup on what it just sold
+                candidates = [a for a in ASSETS if a.base not in busy and a.symbol not in exited]
                 self.rng.shuffle(candidates)
                 for asset in candidates[: self.rng.randint(1, 4)]:
                     if slots <= 0:
                         rejected.append((asset.symbol, "max_open_positions"))
                         continue
                     if self.rng.random() < 0.3:
-                        rejected.append(
-                            (asset.symbol, self.rng.choice(["llm_veto", "reward_risk", "score"]))
+                        reasons = (
+                            LEAD_ENTRY_REFUSALS
+                            if profile.config.family.needs_leads
+                            else ("llm_veto", "reward_risk", "score")
                         )
+                        rejected.append((asset.symbol, self.rng.choice(reasons)))
                         continue
                     reason = self.try_entry(profile, asset, index, at)
                     if reason:
@@ -686,13 +757,136 @@ class _Simulation:
                 "stop_noise": noise,
                 "regime": regime,
             }
-            if number:  # the first cycles predate D-044: no family, filter flag nor filtered
+            if number or lead:  # the first cycles predate D-044: no family, filter flag, filtered
                 payload |= {
                     "family": profile.config.family.value,
                     "regime_filter": profile.config.uses_regime_filter,
                     "filtered": [],
                 }
+            if lead:  # D-052: who was behind each asset, and the exits they caused
+                labelled = list(exits)
+                filtered: list[list[str]] = []
+                payload["leads"] = self._lead_view(
+                    index, at, outage=outage, opened=opened, rejected=rejected,
+                    exits=labelled, filtered=filtered,
+                )  # fmt: skip
+                payload["exits"] = [list(e) for e in labelled]
+                payload["filtered"] = filtered
             self.event(at + timedelta(seconds=2), "decision.cycle", "info", payload)
+
+    # ------------------------------------------------------------------ lead traders (D-052)
+    def _lead_selection(self, at: datetime) -> None:
+        """A reading of the ranking, as ``LeadTracker`` records it: who is followed now."""
+        chosen = sorted(self.rng.sample(LEAD_TRADERS, self.rng.randint(4, 5)))
+        followed = []
+        for portfolio, nickname in chosen:
+            followed.append(
+                Followed(
+                    portfolio_id=portfolio,
+                    nickname=nickname,
+                    balance=Decimal(self.rng.randint(1_000, 25_000)),
+                    score=round(self.rng.uniform(0.3, 0.8), 4),
+                    figures={
+                        "roi_pct": round(self.rng.uniform(3, 40), 4),
+                        "mdd_pct": round(self.rng.uniform(1, 18), 4),
+                        "sharpe": round(self.rng.uniform(1.0, 3.5), 4),
+                        "positive_weeks": round(self.rng.randint(7, 11) / 12, 4),
+                        "recent_gain_pct": round(self.rng.uniform(0, 6), 4),
+                        "trading_days": self.rng.randint(90, 700),
+                        "copier_pnl": str(self.rng.randint(-50, 900)),
+                    },
+                )
+            )
+        self.followed = followed
+        rejected = {
+            reason: self.rng.randint(1, 90)
+            for reason in self.rng.sample(
+                LEAD_REJECTIONS, self.rng.randint(3, len(LEAD_REJECTIONS))
+            )
+        }
+        payload = {
+            "profile": self.lead_name,
+            "pool": 150,
+            "examined": len(followed) + self.rng.randint(1, 4),
+            "selected": [lead.to_json() for lead in followed],
+            "rejected": dict(sorted(rejected.items(), key=lambda item: -item[1])),
+            "unread": [],
+        }
+        self.event(at, "leads.selected", "info", payload)
+
+    def _lead_view(
+        self,
+        index: int,
+        at: datetime,
+        *,
+        outage: bool,
+        opened: list[str],
+        rejected: list[tuple[str, str]],
+        exits: list[tuple[str, str]],
+        filtered: list[list[str]],
+    ) -> dict[str, Any]:
+        """The cycle's reading of the followed traders (``LeadView.summary``): a buy consensus
+        behind every setup, one the pair's candles refused, a sell consensus that closed a
+        position (or had nothing to close) and an asset only one trader bought."""
+        config = LeadConsensusConfig()
+        if outage:  # no reading of the traders: only the candles' own exit
+            exits[:] = [(s, TECHNICAL_EXITS[Family.LEAD_CONSENSUS]) for s, _ in exits]
+            return LeadView(NO_DATA, selected=len(self.followed)).summary(config)
+        ids = [lead.portfolio_id for lead in self.followed]
+        by_symbol = {a.symbol: a for a in ASSETS}
+
+        def buy(symbol: str, backers: int) -> Backing:
+            paid = self.price(by_symbol[symbol], index) * Decimal(
+                repr(self.rng.uniform(0.985, 1.0))
+            )
+            return Backing(symbol, buyers=tuple(sorted(self.rng.sample(ids, backers))),
+                           avg_buy_price=_q(paid, by_symbol[symbol].tick))  # fmt: skip
+
+        assets = {s: buy(s, self.rng.randint(2, 3)) for s in [*opened, *(s for s, _ in rejected)]}
+        free = [a.symbol for a in ASSETS if a.symbol not in assets and a.symbol not in dict(exits)]
+        self.rng.shuffle(free)  # at least 2 left: 4 candidates and 2 exits at most, of 8 assets
+        refused = free.pop()
+        assets[refused] = buy(refused, 2)
+        filtered.append([refused, self.rng.choice(CANDLE_REFUSALS)])
+        sold = exits[0][0] if exits else free.pop()  # the first exit: the traders sold it
+        assets[sold] = Backing(sold, sellers=tuple(sorted(self.rng.sample(ids, 2))))
+        if free:
+            lone = free.pop()
+            assets[lone] = buy(lone, 1)
+        exits[:] = [
+            (s, SELL_CONSENSUS if s == sold else TECHNICAL_EXITS[Family.LEAD_CONSENSUS])
+            for s, _ in exits
+        ]
+        view = LeadView(
+            selected=len(self.followed),
+            fresh=len(self.followed),
+            as_of=at - timedelta(minutes=self.rng.randint(1, 14)),
+            backings=dict(sorted(assets.items())),
+        )
+        return view.summary(config)
+
+    def _lead_plan(self, cycles: Sequence[datetime]) -> list[tuple[datetime, str, str]]:
+        """The lead tracker's events, in time order: the ranking every 6 h from the start, and
+        one outage of the source around a cycle (never the last: it recovers before the next)."""
+        if self.lead_name is None or len(cycles) < 2:
+            return []
+        pick = min(2, len(cycles) - 2)
+        self.lead_outage = cycles[pick]
+        events = [
+            (cycles[pick] - timedelta(minutes=20), "leads.source_unavailable", "high"),
+            (cycles[pick + 1] - timedelta(minutes=10), "leads.source_recovered", "info"),
+        ]
+        ranking = self.start + timedelta(minutes=3)
+        while ranking <= self.end:
+            events.append((ranking, "leads.selected", "info"))
+            ranking += LEAD_RANKING
+        return sorted(events)
+
+    def _lead_event(self, at: datetime, kind: str, severity: str) -> None:
+        if kind == "leads.selected":
+            self._lead_selection(at)
+        else:
+            self.event(at, kind, severity, {"profile": self.lead_name})
 
     def set_global(self, at: datetime, state: OpState, reason: str | None, source: str) -> None:
         self.global_state, self.global_reason = state, reason
@@ -913,6 +1107,7 @@ class _Simulation:
     def run(self) -> Dataset:
         steps = self._steps()
         plan = self._plan(steps)
+        lead_events = self._lead_plan(plan.cycles)
         news_hours = iter(sorted({s.replace(minute=0) for s in steps}))
         next_news: datetime | None = next(news_hours)
         self._agent_started()
@@ -927,6 +1122,9 @@ class _Simulation:
             previous = steps[index - 1] if index else at
             if index:
                 self.watch(index, at)
+            for moment, kind, severity in lead_events:
+                if previous < moment <= at:
+                    self._lead_event(moment, kind, severity)
             for number, boundary in enumerate(plan.cycles):
                 if previous < boundary + CYCLE_WORK <= at:
                     report = self.research(boundary, failed=boundary == plan.failed_round)
@@ -1034,6 +1232,23 @@ def _expected(data: Dataset) -> Expected:
             entries + len(c["opened"]),
             down + (not c["regime"]["up"]),
         )
+    # D-052: the lead traders and what the lead_consensus cycles did with their trades
+    ordered = sorted(events, key=lambda e: e.created_at)
+    lead_cycles = [c for c in cycles if isinstance(c.get("leads"), dict)]
+    selections = [e.payload for e in ordered if e.kind == "leads.selected"]
+    latest = selections[-1]["selected"] if selections else []
+    consensus = {"compra": 0, "venda": 0, "sem_consenso": 0}
+    decisions: dict[str, int] = {}
+    for c in lead_cycles:
+        for symbol, asset in c["leads"]["assets"].items():
+            side = {"buy": "compra", "sell": "venda"}.get(asset["consensus"], "sem_consenso")
+            consensus[side] += 1
+            label = _lead_decision(c, symbol, asset)
+            decisions[label] = decisions.get(label, 0) + 1
+    lead = [p for p in data.positions if p.profile in data.lead_codes]
+    active = [p for p in lead if p.state not in {"closed", "rejected"}]
+    outages = {"leads.source_unavailable", "leads.source_recovered"}
+    sources = [e for e in reversed(ordered) if e.kind in outages]
     return Expected(
         equity=float(last.equity),
         day_pnl=float(last.equity - last.day_start_equity),
@@ -1064,7 +1279,59 @@ def _expected(data: Dataset) -> Expected:
         llm_cost=float(sum((u.cost_usd for u in data.llm), Decimal(0))),
         pending_intents=0,
         unprotected=sum(p.state == "unprotected" for p in data.positions),
+        lead_traders=[
+            t["nickname"] for t in sorted(latest, key=lambda t: (-t["score"], t["nickname"]))
+        ],
+        lead_selections=len(selections),
+        lead_status=lead_cycles[-1]["leads"]["status"] if lead_cycles else "",
+        lead_fresh=lead_cycles[-1]["leads"]["fresh"] if lead_cycles else 0,
+        lead_open=len(active),
+        lead_open_cost=float(sum((p.entry_quote or Decimal(0) for p in active), Decimal(0))),
+        lead_realized=float(
+            sum((p.realized_pnl or Decimal(0) for p in lead if p in closed), Decimal(0))
+        ),
+        lead_positions=len(lead),
+        lead_consensus=consensus,
+        lead_cycles=(
+            sum(c["leads"]["status"] == "ok" for c in lead_cycles),
+            sum(c["leads"]["status"] != "ok" for c in lead_cycles),
+        ),
+        lead_decisions=decisions,
+        lead_source=[
+            "indisponível" if e.kind == "leads.source_unavailable" else "voltou a responder"
+            for e in sources
+        ],
     )
+
+
+def _lead_complete(data: Dataset) -> bool:
+    """D-052: the lead_consensus profile's cycles with the traders' reading opened a position
+    and closed one ("entrada aberta" and an exit in "Decisões por ativo", an order in "Ordens e
+    trades"); nothing to check without such a profile."""
+    cycles = [
+        e.payload
+        for e in data.events()
+        if e.kind == "decision.cycle" and (e.payload.get("leads") or {}).get("status") == OK
+    ]
+    return not data.lead_codes or (
+        any(c["opened"] for c in cycles) and any(c["exits"] for c in cycles)
+    )
+
+
+def _lead_decision(cycle: dict[str, Any], symbol: str, asset: dict[str, Any]) -> str:
+    """What a lead cycle did with an asset the traders moved, as "Decisões por ativo" says it."""
+    if symbol in cycle["opened"]:
+        return "entrada aberta"
+    for kind, prefix in (
+        ("exits", ""),
+        ("rejected", "recusada: "),
+        ("filtered", "candles recusaram: "),
+    ):
+        reason = next((str(r) for s, r in cycle.get(kind, []) if s == symbol), None)
+        if reason is not None:
+            return prefix + reason
+    labels = {"buy": "compra sem entrada", "sell": "venda sem posição"}
+    return labels.get(str(asset["consensus"]), "sem consenso")
 
 
 def _timestamps(data: Dataset) -> Iterator[datetime]:
@@ -1090,6 +1357,7 @@ def _complete(data: Dataset) -> bool:
         and any(r.status == "failed" for r in data.reports)
         and data.telemetry[-1].drawdown_pct < 10  # the "Drawdown elevado" alert stays normal
         and any(e.kind == "risk.state_changed" for e in data.events())
+        and _lead_complete(data)
     )
 
 

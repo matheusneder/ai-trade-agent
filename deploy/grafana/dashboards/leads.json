@@ -1,0 +1,400 @@
+{
+  "uid": "ta-leads",
+  "title": "Trade Agent — Copy trading",
+  "tags": [
+    "trade-agent"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Traders acompanhados",
+      "description": "Perfis lead_consensus (D-052): seguem os melhores lead traders do Copy Trading Spot da Binance e só compram o que pelo menos dois deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo são do perfil: nenhuma operação é copiada.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT coalesce(sum(jsonb_array_length(payload->'selected')), 0)::int AS traders FROM events WHERE id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Última leitura dos traders",
+      "description": "Status da leitura que o último ciclo usou ('ok' ou o motivo de não haver entrada) e quantos traders acompanhados tinham leitura recente.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT payload->'leads'->>'status' AS status, (payload->'leads'->>'fresh')::int AS com_leitura FROM events WHERE kind = 'decision.cycle' AND jsonb_typeof(payload->'leads') = 'object' ORDER BY id DESC LIMIT 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        }
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Posições abertas (copy trading)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS posicoes, coalesce(sum(entry_quote), 0)::float AS custo FROM positions WHERE state NOT IN ('closed', 'rejected') AND profile IN ('lead1h')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Resultado realizado (período)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 6,
+        "h": 4,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT coalesce(sum(realized_pnl), 0)::float AS pnl FROM positions WHERE state = 'closed' AND realized_pnl IS NOT NULL AND profile IN ('lead1h') AND $__timeFilter(closed_at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "id": 4
+    },
+    {
+      "type": "table",
+      "title": "Traders acompanhados agora",
+      "description": "A última seleção de cada perfil: nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, e o dinheiro do próprio trader no portfólio (USDT).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 16,
+        "h": 8,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile') ORDER BY 1, 4 DESC, 2"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 5
+    },
+    {
+      "type": "table",
+      "title": "Fonte de copy trading",
+      "description": "Leituras em que todas as requisições à fonte (endpoints do site da Binance, não documentados) falharam, e a volta. Sem leitura recente, o perfil não abre entradas.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 8,
+        "h": 8,
+        "x": 16,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, CASE kind WHEN 'leads.source_unavailable' THEN 'indisponível' ELSE 'voltou a responder' END AS fonte FROM events WHERE kind IN ('leads.source_unavailable', 'leads.source_recovered') AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 6
+    },
+    {
+      "type": "timeseries",
+      "title": "Consenso dos traders por ciclo",
+      "description": "Ativos com consenso de compra (compradores menos vendedores ≥ min_backers), de venda, e movimentados sem consenso, a cada ciclo.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT e.created_at AS time, count(a.key) FILTER (WHERE a.value->>'consensus' = 'buy') AS compra, count(a.key) FILTER (WHERE a.value->>'consensus' = 'sell') AS venda, count(a.key) FILTER (WHERE jsonb_typeof(a.value->'consensus') = 'null') AS sem_consenso FROM events e LEFT JOIN LATERAL jsonb_each(e.payload->'leads'->'assets') a ON true WHERE e.kind = 'decision.cycle' AND jsonb_typeof(payload->'leads') = 'object' AND $__timeFilter(e.created_at) GROUP BY e.id, e.created_at ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 7
+    },
+    {
+      "type": "barchart",
+      "title": "Leitura dos traders por ciclo",
+      "description": "Ciclos que decidiram com a leitura dos traders e ciclos sem ela (ranking vencido, nenhum trader selecionado ou fonte sem dados recentes): esses não abrem entradas.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 12,
+        "h": 8,
+        "x": 12,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', created_at) AS time, count(*) FILTER (WHERE payload->'leads'->>'status' = 'ok') AS com_leitura, count(*) FILTER (WHERE payload->'leads'->>'status' <> 'ok') AS sem_leitura FROM events WHERE kind = 'decision.cycle' AND jsonb_typeof(payload->'leads') = 'object' AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 8
+    },
+    {
+      "type": "table",
+      "title": "Decisões por ativo",
+      "description": "Cada ativo que os traders acompanhados movimentaram, em cada ciclo: quem comprou e quem vendeu (ids dos portfólios), o preço médio que pagaram e o que o ciclo fez. 'candles recusaram' é o consenso que o agente decidiu não seguir; 'recusada' é a recusa do planejamento ou do Risk Guard (preço além do que os traders pagaram, vagas, orçamento).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 10,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT e.created_at AS time, e.payload->>'profile' AS perfil, e.payload->>'state' AS estado, a.key AS ativo, COALESCE(a.value->>'consensus', 'nenhum') AS consenso, jsonb_array_length(a.value->'buyers') AS compradores, jsonb_array_length(a.value->'sellers') AS vendedores, (a.value->>'avg_buy_price')::float AS preco_traders, COALESCE( CASE WHEN e.payload->'opened' @> jsonb_build_array(a.key) THEN 'entrada aberta' END, (SELECT x->>1 FROM jsonb_array_elements(e.payload->'exits') x WHERE x->>0 = a.key LIMIT 1), (SELECT 'recusada: ' || (x->>1) FROM jsonb_array_elements(e.payload->'rejected') x WHERE x->>0 = a.key LIMIT 1), (SELECT 'candles recusaram: ' || (x->>1) FROM jsonb_array_elements(COALESCE(e.payload->'filtered', '[]'::jsonb)) x WHERE x->>0 = a.key LIMIT 1), CASE a.value->>'consensus' WHEN 'buy' THEN 'compra sem entrada' WHEN 'sell' THEN 'venda sem posição' ELSE 'sem consenso' END ) AS decisao, array_to_string(ARRAY(SELECT jsonb_array_elements_text(a.value->'buyers')), ', ') AS compraram, array_to_string(ARRAY(SELECT jsonb_array_elements_text(a.value->'sellers')), ', ') AS venderam FROM events e, jsonb_each(e.payload->'leads'->'assets') a WHERE e.kind = 'decision.cycle' AND jsonb_typeof(payload->'leads') = 'object' AND $__timeFilter(e.created_at) ORDER BY e.created_at DESC, a.key LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 9
+    },
+    {
+      "type": "table",
+      "title": "Ordens e trades do copy trading",
+      "description": "Posições dos perfis lead_consensus: as abertas e as que mudaram no período (encerradas e entradas FOK não executadas).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 9,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT COALESCE(opened_at, created_at) AS time, symbol AS ativo, profile AS perfil, state AS estado, entry_price::float AS entrada, exit_price::float AS saida, (policy->>'stop_pct')::float AS stop_pct, (policy->>'take_profit_pct')::float AS alvo_pct, entry_quote::float AS custo, realized_pnl::float AS pnl, exit_reason AS motivo, closed_at AS encerrada_em FROM positions WHERE profile IN ('lead1h') AND (state NOT IN ('closed', 'rejected') OR $__timeFilter(updated_at)) ORDER BY 1 DESC LIMIT 200"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 10
+    },
+    {
+      "type": "table",
+      "title": "Seleções de traders",
+      "description": "Cada leitura do ranking (a cada 6 h): portfólios lidos, candidatos examinados, traders seguidos e quantos portfólios cada critério recusou.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "trade-agent-pg"
+      },
+      "gridPos": {
+        "w": 24,
+        "h": 7,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "trade-agent-pg"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, payload->>'profile' AS perfil, (payload->>'pool')::int AS ranking, (payload->>'examined')::int AS examinados, jsonb_array_length(payload->'selected') AS seguidos, (SELECT string_agg(r.key || ': ' || r.value, ', ' ORDER BY r.value::int DESC, r.key) FROM jsonb_each_text(payload->'rejected') r) AS recusas FROM events WHERE kind = 'leads.selected' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "id": 11
+    }
+  ]
+}

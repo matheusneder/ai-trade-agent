@@ -239,7 +239,7 @@ def test_local_regime_and_family_of() -> None:
     assert family_of(BreakoutParams()) is Family.PAIR_VOLATILITY_BREAKOUT
     assert family_of(RangeParams()) is Family.PAIR_RANGE_REVERSION
     assert family_of(SignalParams()) is Family.LEGACY
-    assert [f.local for f in Family] == [False, True, True, True]
+    assert [f.local for f in Family] == [False, True, True, True, True]
 
 
 def test_local_score_drops_only_the_relative_strength() -> None:

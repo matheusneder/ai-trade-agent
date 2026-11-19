@@ -78,7 +78,7 @@ def test_versioned_dashboards_match_the_generator() -> None:
 def test_dashboards_have_stable_valid_names() -> None:
     """The ``name`` identifies the dashboard when applying again: unique, a DNS label (RFC 1123)."""
     names = [board["name"] for board in BOARDS.values()]
-    assert len(set(names)) == len(names) == 4
+    assert len(set(names)) == len(names) == 5
     for board in BOARDS.values():
         assert re.fullmatch(r"trade-agent-[a-z0-9-]+", board["name"])
         assert len(board["name"]) <= 63

@@ -125,11 +125,12 @@ SigNoz's internal logs (ClickHouse, keeper, migrations) go neither to Loki nor t
 | Trade Agent · Saúde técnica (technical health) | Binance failures and weight, clock offset, errors in the logs and failed tasks; p95 latency per Binance endpoint, per task and per database operation; error responses by status; spans per component; warnings and errors per service and the agent's latest ones |
 | Trade Agent · LLM | cost, tokens, calls and latency in the period; cost per model and purpose, tokens per direction, p50/p95 latency and the latest calls |
 | Trade Agent · Contêineres (containers) | CPU, memory, network and disk per compose service; memory relative to the limit; log lines per service |
+| Trade Agent · Copy trading (D-052) | lead traders followed and with a recent reading, assets with a buy consensus, entries, exits and failed requests of the `lead_consensus` profiles; their cycles with the traders' reading and the ranking readings; p95 latency, error responses by status and warnings of the source (§2.8) |
 
 The dashboards are code: the `scripts/signoz_dashboards.py` generator writes the JSON to `deploy/signoz/dashboards/` and applies them through the API. A test fails if the JSON files get out of date. Edit the generator, not the dashboard in the UI: applying again overwrites, by `name`, whatever was changed by hand. Applying requires the key of a service account with the *Editor* role (*Settings → Service Accounts*) in `TA_SIGNOZ_API_KEY` in the `.env`:
 
 ```bash
-uv run python -m scripts.signoz_dashboards --apply   # creates or updates the four dashboards
+uv run python -m scripts.signoz_dashboards --apply   # creates or updates the five dashboards
 uv run python -m scripts.signoz_dashboards --check   # runs every query over the last 24 h
 ```
 
@@ -191,7 +192,37 @@ A large, persistent *offset* in the "Offset de relógio (ms)" panel (the `trade_
 
 ### 2.7 No orders for days
 
-Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EMA200)", or *Decisões e pesquisa* → "BTC vs EMA200 (%)" and "Viradas de regime" (SigNoz: *Operação* → *Regime e setups*). While BTC closes its candle below its EMA 200, the regime filter (D-016) leaves the profiles that use it without a setup and their cycles end with `sem candidatos (leitura anterior)`: that is the strategy, not a fault. Today that is every enabled profile: "Setups e filtros por perfil" and "Ciclos de decisão" show each profile's `familia` and `usa_filtro` (SigNoz: `family` and `regime_filter` in "Últimos ciclos de decisão"). The pair-local families (D-044) decide on the pair's own candles and ignore the filter; since D-046 their three profiles run on the Demo, so with BTC below its EMA 200 they are the only ones that can still open. The agent says on Telegram when the regime flips, naming the profiles of the timeframe that use the filter and the ones that do not (D-043, D-044). With the regime up, "Setups e filtros por perfil" shows where the setups went: removed by the stop-noise filter (`ruido_d039`, D-039) or found and refused (the `recusas` of "Ciclos de decisão": score, slots, asset already held, R:R). Only after that look for a fault: risk states (§2.3), failed tasks in *Saúde técnica* and an empty universe (`decision.empty_universe` in the logs).
+Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EMA200)", or *Decisões e pesquisa* → "BTC vs EMA200 (%)" and "Viradas de regime" (SigNoz: *Operação* → *Regime e setups*). While BTC closes its candle below its EMA 200, the regime filter (D-016) leaves the profiles that use it without a setup and their cycles end with `sem candidatos (leitura anterior)`: that is the strategy, not a fault. Today that is every enabled profile: "Setups e filtros por perfil" and "Ciclos de decisão" show each profile's `familia` and `usa_filtro` (SigNoz: `family` and `regime_filter` in "Últimos ciclos de decisão"). The pair-local families (D-044) decide on the pair's own candles and ignore the filter; since D-046 their three profiles run on the Demo, so with BTC below its EMA 200 they are the only ones that can still open. The agent says on Telegram when the regime flips, naming the profiles of the timeframe that use the filter and the ones that do not (D-043, D-044). With the regime up, "Setups e filtros por perfil" shows where the setups went: removed by the stop-noise filter (`ruido_d039`, D-039) or found and refused (the `recusas` of "Ciclos de decisão": score, slots, asset already held, R:R). Only after that look for a fault: risk states (§2.3), failed tasks in *Saúde técnica* and an empty universe (`decision.empty_universe` in the logs). The `lead_consensus` profile (D-052) has its own reasons: §2.8.
+
+### 2.8 The `lead_consensus` profile opens nothing, or its source is down
+
+The profile buys only what at least `min_backers` of its followed lead traders bought **and** its own candles confirm (doc 03, §6.4), so days without an entry are usually the strategy, as in §2.7. The *Copy trading* dashboard (Grafana and SigNoz) shows all of it; the queries below are the same data. Look in this order:
+
+1. **What the last cycle read**: the `leads` field of the profile's `decision.cycle` event.
+
+   ```sql
+   SELECT created_at, payload->'leads' FROM events
+   WHERE kind = 'decision.cycle' AND payload->>'profile' = 'lead_consensus_1h'
+   ORDER BY id DESC LIMIT 5;
+   ```
+
+   | `status` | Meaning | What to do |
+   |----------|---------|------------|
+   | `ok` | The reading is fresh. `assets` lists who bought and sold each asset: without a `"consensus": "buy"` there was nothing to confirm; with one and no entry, the cycle's `filtered` (the candles refused it) or `rejected` (price past what the traders paid, slots, risk budget) says why | nothing |
+   | `nenhum trader selecionado` | The last ranking found nobody that passes `leads.selection` | see step 2 |
+   | `ranking de traders vencido` | No ranking could be read for `max_ranking_age` (24 h), or none since the start | see step 3 |
+   | `copy trading sem dados recentes` | The followed traders' trades could not be read for `max_data_age` (45 min) | see step 3 |
+
+2. **Who is followed and who was refused**: the `leads.selected` event of each ranking (every 6 h) has the followed traders with their score and figures, `rejected`, how many portfolios each criterion refused, and `unread`, the followed traders it could not read and kept: their vote is unknown, so they block a buy consensus they could overturn until they are read again. In a falling market most Spot traders fail the recent gain and the positive weeks: on 2026-11-19, with BTC below its EMA 200 for four weeks, 1 portfolio of 150 was followed. That is the strategy declining to follow anybody. Loosening a threshold is a change of strategy: edit `leads.selection` in `config/profiles.yaml` and restart the agent.
+
+   ```sql
+   SELECT created_at, payload->'rejected', jsonb_array_length(payload->'selected') FROM events
+   WHERE kind = 'leads.selected' ORDER BY id DESC LIMIT 4;
+   ```
+
+3. **The source**: a `leads.source_unavailable` event and the 🔴 Telegram alert mean a whole reading failed; `leads.source_recovered` ends it. The logs say what failed (`docker compose -f deploy/docker-compose.yml logs agent | grep '"leads\.'`): `leads.ranking_failed` and `leads.trades_failed` carry the error, and `leads.source_refused` (HTTP 403, 418, 429 or 451) the time until which the agent stops asking. `HTTP 451` is a restricted location, as in the API (doc 01, §2.5). An error that says `fora do formato esperado`, or one that repeats for hours with the website itself working, means Binance changed the endpoint: it is undocumented (doc 01, §2.6). Confirm it with the contract tests (`uv run pytest tests/contract`): the failing one names what changed, and the fix is in `leads/source.py`.
+
+While the source is down the profile opens nothing, and nothing else is affected: the other profiles do not read it, and the profile's open positions keep their native protection, their own technical exit and `max_holding`. To turn the profile off, set `enabled: false` in `config/profiles.yaml` and restart the agent; its positions stay protected on Binance and are reconciled as usual, and its share of the capital stays unused until another enabled profile gets it.
 
 ## 3. Telegram commands
 

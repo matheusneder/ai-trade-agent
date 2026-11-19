@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from trade_agent.execution.orders import EntryMode, ProtectionPolicy, StopMode, TakeProfitMode
 from trade_agent.market.universe import Tier
+from trade_agent.risk.conditions import parse_duration as parse_interval
 from trade_agent.risk.scope import ScopeLimits
 from trade_agent.signals import Family, LocalParams, SignalParams
 from trade_agent.signals.local import PARAMS as LOCAL_PARAMS
@@ -249,6 +250,107 @@ class ScopeRiskConfig(_Strict):
         )
 
 
+class LeadSelectionConfig(_Strict):
+    """Which lead traders of Binance's Spot Copy Trading ranking a profile follows (D-052).
+
+    The figures are the ranking's own, over its 90-day window. No criterion is the cumulative
+    return alone: a portfolio must also be old enough, have its owner's money in it, a bounded
+    drawdown, a risk-adjusted return, copiers that did not lose much, gains spread over the
+    weeks, a recent gain and a human trading rhythm (:mod:`trade_agent.leads.ranking`).
+    """
+
+    pool_pages: int = Field(default=5, ge=1, le=20)
+    """Pages of 30 portfolios read from the ranking, best Sharpe ratio first."""
+    shortlist: int = Field(default=20, ge=1, le=60)
+    """Portfolios that passed the ranking figures whose PnL curve and trades are read (two
+    requests each), in the ranking's order."""
+    max_leads: int = Field(default=6, ge=1, le=20)
+    """Lead traders followed at the same time."""
+    min_days: int = Field(default=90, ge=1)
+    """Days the portfolio has been trading."""
+    min_balance: Decimal = Field(default=Decimal(1000), ge=0)
+    """The lead trader's own money in the portfolio (its AUM minus the copiers'), in USDT."""
+    min_roi_pct: float = 3.0
+    max_drawdown_pct: float = Field(default=20.0, gt=0)
+    min_sharpe: float = 1.0
+    """A portfolio without a Sharpe ratio (Binance gives none to the young ones) is refused."""
+    max_copier_loss_pct: float | None = Field(default=5.0, ge=0)
+    """What the copiers lost over the window, in % of the money they have in the portfolio,
+    above which it is refused whatever its own ROI (``null``: not checked)."""
+    min_positive_weeks_pct: float = Field(default=55.0, ge=0, le=100)
+    """Share of the 7-day steps of the cumulative PnL curve that ended higher."""
+    min_recent_gain_pct: float = 0.0
+    """PnL of the last 30 days, in % of the trader's own balance."""
+    max_idle: timedelta = timedelta(days=7)
+    """Longest time since the portfolio's last trade."""
+    min_trades_30d: int = Field(default=4, ge=0)
+    max_trades_per_day: float = Field(default=20.0, gt=0)
+    """Above it the portfolio is taken for a grid bot, whose buys are no directional signal."""
+
+    _max_idle = field_validator("max_idle", mode="before")(parse_interval)
+
+    @model_validator(mode="after")
+    def _check(self) -> "LeadSelectionConfig":
+        if self.shortlist < self.max_leads:
+            raise ValueError("shortlist deve ser >= max_leads")
+        return self
+
+
+class LeadConsensusConfig(_Strict):
+    """When the followed lead traders' trades are a signal (D-052)."""
+
+    min_backers: int = Field(default=2, ge=1)
+    """Lead traders that bought the asset, net of the ones that sold it: one trader alone
+    never opens a position with the default. The same margin of sellers is the exit."""
+    window: timedelta = timedelta(hours=24)
+    """How far back a lead trader's trades count."""
+    min_buy_pct: Percent = Decimal(2)
+    """Net purchase (or sale) of the asset in the window, in % of the trader's own balance,
+    for it to count."""
+    max_symbols_per_lead: int = Field(default=3, ge=1)
+    """A trader backs at most this many assets at a time (its largest net purchases), so one
+    that buys everything does not weigh on every consensus."""
+    max_premium_pct: Percent = Decimal("1.5")
+    """No entry once the ask is this far above the average price the backers paid."""
+
+    _window = field_validator("window", mode="before")(parse_interval)
+
+
+class LeadsConfig(_Strict):
+    """The lead traders a ``lead_consensus`` profile follows (D-052): who, when their trades
+    are a signal, and how the public source is read (:mod:`trade_agent.leads`)."""
+
+    selection: LeadSelectionConfig = LeadSelectionConfig()
+    consensus: LeadConsensusConfig = LeadConsensusConfig()
+    poll_interval: timedelta = timedelta(minutes=15)
+    """How often the followed traders' trade history is read."""
+    ranking_interval: timedelta = timedelta(hours=6)
+    """How often the ranking is read again and the traders are chosen again."""
+    max_data_age: timedelta = timedelta(minutes=45)
+    """A trader whose history was last read longer ago than this does not count."""
+    max_ranking_age: timedelta = timedelta(hours=24)
+    """Without a new ranking for this long, nobody is followed and no entry goes out."""
+    backoff: timedelta = timedelta(hours=1)
+    """Pause of every request after the source refuses one (HTTP 403, 418, 429 or 451)."""
+    request_delay_s: float = Field(default=0.5, ge=0, le=10)
+    """Wait between two requests of the same reading."""
+
+    _durations = field_validator(
+        "poll_interval", "ranking_interval", "max_data_age", "max_ranking_age", "backoff",
+        mode="before",
+    )(parse_interval)  # fmt: skip
+
+    @model_validator(mode="after")
+    def _check(self) -> "LeadsConfig":
+        if self.poll_interval < timedelta(minutes=5):
+            raise ValueError("poll_interval deve ser >= 5m")
+        if self.max_data_age < self.poll_interval:
+            raise ValueError("max_data_age deve ser >= poll_interval")
+        if self.max_ranking_age < self.ranking_interval:
+            raise ValueError("max_ranking_age deve ser >= ranking_interval")
+        return self
+
+
 # Signal parameters defined in ``protection.stop``: they cannot be adjusted in ``signals``.
 STOP_SIGNAL_PARAMS = frozenset({"atr_stop_mult", "max_stop_pct"})
 
@@ -272,6 +374,16 @@ class ProfileConfig(_Strict):
     """Adjustments of the signal parameters (``SignalParams``, or the family's)."""
     risk: ScopeRiskConfig | None = None
     """Risk budget of a pair-local profile (D-044)."""
+    leads: LeadsConfig | None = None
+    """The lead traders a ``lead_consensus`` profile follows (D-052)."""
+
+    @model_validator(mode="after")
+    def _lead_options(self) -> "ProfileConfig":
+        if self.family.needs_leads and self.leads is None:
+            raise ValueError(f"família {self.family.value} exige leads")
+        if self.leads is not None and not self.family.needs_leads:
+            raise ValueError("leads é só da família lead_consensus")
+        return self
 
     @model_validator(mode="after")
     def _known_signal_params(self) -> "ProfileConfig":

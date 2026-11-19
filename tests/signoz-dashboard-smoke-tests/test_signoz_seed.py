@@ -91,6 +91,12 @@ def test_every_panel_has_something_to_show(day: seed.Telemetry) -> None:
     assert summary.exchange_http_errors
     assert summary.entries and summary.exits
     assert all(summary.setups.values()) and all(summary.stop_noise.values())
+    assert set(summary.stop_noise) == set(seed.PROFILES) - {seed.LEAD}  # no D-039 in a local family
+    # D-052: the lead profile trades, the tracker reads, and the source fails both ways
+    assert summary.entries[seed.LEAD] and summary.exits[seed.LEAD]
+    assert summary.lead_rankings >= 1 and summary.lead_errors >= 1
+    assert {429, 503} <= set(summary.lead_http_errors)
+    assert {"leads.source_unavailable", "leads.source_refused"} <= set(summary.lead_warnings)
     regime = [
         p.value for m in day.metrics if m.name == "trade_agent.market.regime" for p in m.points
     ]

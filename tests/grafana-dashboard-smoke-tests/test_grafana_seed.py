@@ -135,3 +135,26 @@ def test_events_and_logs_tell_the_same_story(day: Dataset) -> None:
     assert counts["errors"] > 0 and counts["warnings"] > 0 and counts["tracebacks"] == 2
     labels = [s["stream"] for s in loki_streams(day)]
     assert len(labels) == len({tuple(sorted(s.items())) for s in labels})
+
+
+def test_lead_cycles_buy_only_what_the_traders_bought(day: Dataset) -> None:
+    """D-052: a lead_consensus cycle opens or refuses only assets with a buy consensus, the
+    candles' refusals are of assets the traders bought, and its exits name their rule."""
+    cycles = [
+        e.payload
+        for e in day.events()
+        if e.kind == "decision.cycle" and isinstance(e.payload.get("leads"), dict)
+    ]
+    assert cycles and day.lead_codes
+    for cycle in cycles:
+        assets = cycle["leads"]["assets"]
+        if cycle["leads"]["status"] != "ok":
+            assert assets == {} and cycle["opened"] == [] and cycle["rejected"] == []
+        bought = {s for s, a in assets.items() if a["consensus"] == "buy"}
+        assert set(cycle["opened"]) | {s for s, _ in cycle["rejected"]} <= bought
+        assert {s for s, _ in cycle["filtered"]} <= bought
+        assert all(r.startswith("saída") for _, r in cycle["exits"])
+        for asset in assets.values():  # the shape LeadView.summary writes
+            assert set(asset) == {"buyers", "sellers", "avg_buy_price", "consensus"}
+    selection = next(e.payload for e in day.events() if e.kind == "leads.selected")
+    assert {"profile", "pool", "examined", "selected", "rejected", "unread"} == set(selection)

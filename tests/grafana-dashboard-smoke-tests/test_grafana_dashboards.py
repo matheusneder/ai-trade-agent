@@ -240,6 +240,59 @@ def test_research_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> Non
         ).to_be_visible()
 
 
+def test_copy_trading_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
+    """D-052: the followed traders, the reading each cycle decided on, what it did with each
+    asset they moved, the orders of the lead_consensus profile and the source's outages."""
+    page, watch = grafana
+    expected = seeded.expected
+    open_dashboard(page, watch, "ta-leads")
+
+    def result(title: str) -> Result:
+        return _result(watch, "ta-leads", title)
+
+    assert result("Traders acompanhados").value("traders") == len(expected.lead_traders)
+    assert stat_text(page, "Traders acompanhados") == str(len(expected.lead_traders))
+    reading = result("Última leitura dos traders")
+    assert (reading.value("status"), reading.value("com_leitura")) == (
+        expected.lead_status,
+        expected.lead_fresh,
+    )
+    expect(panel(page, "Última leitura dos traders")).to_contain_text(expected.lead_status)
+    open_ = result("Posições abertas (copy trading)")
+    assert open_.value("posicoes") == expected.lead_open
+    assert open_.value("custo") == pytest.approx(expected.lead_open_cost, abs=1e-6)
+    realized = result("Resultado realizado (período)").value("pnl")
+    assert realized == pytest.approx(expected.lead_realized, abs=1e-6)
+    traders = result("Traders acompanhados agora")
+    assert traders.column("trader") == expected.lead_traders  # best score first
+    for trader in expected.lead_traders:
+        expect(panel(page, "Traders acompanhados agora").get_by_text(trader)).to_be_visible()
+    assert result("Seleções de traders").rows == expected.lead_selections
+    consensus = result("Consenso dos traders por ciclo")
+    assert {side: sum(consensus.column(side)) for side in expected.lead_consensus} == (
+        expected.lead_consensus
+    )
+    cycles = result("Leitura dos traders por ciclo")
+    assert (sum(cycles.column("com_leitura")), sum(cycles.column("sem_leitura"))) == (
+        expected.lead_cycles
+    )
+    decisions = result("Decisões por ativo")
+    assert decisions.rows == sum(expected.lead_decisions.values())
+    labels = decisions.column("decisao")
+    assert {label: labels.count(label) for label in set(labels)} == expected.lead_decisions
+    entered = [
+        buyers
+        for buyers, label in zip(decisions.column("compradores"), labels, strict=True)
+        if label == "entrada aberta"
+    ]
+    assert entered and min(entered) >= 2  # nothing is bought on one trader alone
+    orders = result("Ordens e trades do copy trading")
+    assert orders.rows == expected.lead_positions
+    assert set(orders.column("perfil")) == seeded.lead_codes
+    source = result("Fonte de copy trading")
+    assert source.column("fonte") == expected.lead_source  # the most recent first
+
+
 def test_health_matches_the_seed(grafana: GrafanaPage, seeded: Dataset) -> None:
     page, watch = grafana
     open_dashboard(page, watch, "ta-health")

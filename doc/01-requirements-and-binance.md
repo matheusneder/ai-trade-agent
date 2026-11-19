@@ -7,7 +7,7 @@
 | # | Requirement | How the agent meets it |
 |---|-------------|------------------------|
 | R1 | Choose pairs and buy or sell without intervention | The universe is built every cycle, with liquidity, spread, history, delisting and *tier* filters. Then come the technical signals, the LLM analyst and each profile's portfolio, up to the OPOCO (doc 03, §6) |
-| R2 | Allocation profiles | Declarative profiles in `config/profiles.yaml`, validated by schema. Today they are `swing_trend`, `momentum_alpha` and the experimental `alt_atr`, all on 4h (doc 03, §8) |
+| R2 | Allocation profiles | Declarative profiles in `config/profiles.yaml`, validated by schema. Today they are `swing_trend`, `momentum_alpha` and the experimental `alt_atr`, all on 4h, plus the experimental pair-local profiles and `lead_consensus_1h` on 1h (doc 03, §8) |
 | R3 | Decisions with technical analysis, news and sentiment | Technical analysis is pure functions (`signals/`). News and sentiment go through the LLM analyst, with structured output capped by code (doc 03, §7) |
 | R4 | Protection even with the agent turned off | Every entry is an OPOCO: Binance arms the trailing take-profit and the stop on its own server (§2; doc 03, §9) |
 | R5 | Configurable stop conditions | `config/stop_conditions.yaml`, with the persisted states `running`, `paused`, `halted` and `flattening` (doc 03, §10) |
@@ -83,6 +83,24 @@ Other API points:
 - **Restricted location:** Binance answers **HTTP 451** to IPs from restricted locations (e.g. the US and Ontario), which includes cloud regions in those countries. The server must be in an allowed region (e.g. São Paulo, Frankfurt, Tokyo).
 - **Sub-accounts:** only for corporate accounts or **VIP 1+** individuals. That is why the profiles share the same account: each one has a share of `managed_capital`, and the positions are identified by the prefix of the order IDs (doc 03, §8).
 
+### 2.6 Copy Trading data
+
+Checked on 2026-11-19, in the official documentation and on the live endpoints (D-052).
+
+- **The official API has no data about other traders.** Its Copy Trading section has two endpoints, both signed and about the caller: `GET /sapi/v1/copyTrading/futures/userStatus` (whether the account is a Futures lead trader) and `GET /sapi/v1/copyTrading/futures/leadSymbol` (the symbols a lead trader may trade). Nothing lists lead traders, their performance, their positions or their trades.
+- **The website's own endpoints have it.** The ranking and each lead portfolio's page are served by `https://www.binance.com/bapi/futures/v1/...`, with no key, cookie or signature. They are undocumented, with no stated rate limit and no guarantee of staying as they are; whether Binance's terms allow reading them automatically was not confirmed (the terms page did not load its text). Using them is the operator's decision (D-052), and the agent treats every answer as something that may change (doc 03, §6.4).
+
+| Reading | Endpoint (under `/bapi/futures/v1`) | What it returns |
+|---------|--------------------------------------|-----------------|
+| Ranking | `POST /friendly/future/spot-copy-trade/common/home-page-list` (`timeRange` `90D`, `dataType` `SHARP_RATIO`, 30 a page) | Per public Spot lead portfolio: ROI, PnL, maximum drawdown, Sharpe ratio (none for a portfolio younger than about a month), AUM and the copiers' share of it, the copiers' PnL, days trading |
+| PnL curve | `GET /public/future/spot-copy-trade/lead-portfolio/performance-chart-data` (`dataType` `PNL`) | The portfolio's cumulative PnL at the end of each day of the window |
+| Trades | `POST /friendly/future/spot-copy-trade/lead-portfolio/get-trade-history-by-page` | Its trades, the most recent first: time, symbol, side, quantity and amount. At most 100 per request, also for the portfolios that hide their holdings |
+
+- An error comes with HTTP 200 and a `code` other than `000000` (e.g. `11081031`, a closed portfolio).
+- The contract tests in `tests/contract/binance_copy_trading` check all of this live, with the agent's own client (`uv run pytest tests/contract`; the default run leaves them out). The website says the figures are refreshed every 1–2 hours; the trades carry their own time.
+- On that day the Spot ranking had 2,202 public portfolios (1,959 with a Sharpe ratio) and the Futures one 5,516. The Futures portfolios are leveraged, trade long and short and include tokenized stocks that do not exist on Spot, and only some show their positions (5 of the 18 largest PnLs): the agent follows the Spot ones.
+- **The figures mislead when read alone.** The first Futures portfolio by Sharpe ratio showed a 0% drawdown and a 95% hit rate, the profile of someone who never closes at a loss; of the 12 largest Spot PnLs, 11 had copiers in the red (down to −270 thousand USDT). The ranking's ROI curve is diluted by deposits: one portfolio went from +84% to +23% in three days with its PnL unchanged.
+
 ## 3. Confirmed behaviors
 
 **Spot Testnet, 2026-09-28** (`scripts/spike_opoco.py`, BTCUSDT): 19 out of 19 checks passed. Tested: OPOCO with a `LIMIT FOK` buy, `TAKE_PROFIT` with activation and trailing and a fixed `STOP_LOSS`, the variant with a trailing-only `STOP_LOSS`, the non-executable FOK (entry `EXPIRED`, legs not armed), the standalone OCO with lookup and cancellation, and the User Data Stream over the WebSocket API. The *live* test (open, arm, adjust and close) also passed on Testnet.
@@ -109,9 +127,10 @@ Findings the code handles:
 | RSS: CoinDesk, Cointelegraph, The Block, Decrypt | News | News for the analyst |
 | Fear & Greed Index (alternative.me) | Sentiment | Metric for the analyst and the `fear_greed_below` circuit breaker |
 | Binance Futures, public endpoints (*funding rate*, *open interest*) | Quantitative sentiment | Metrics for the analyst (up to 12 symbols) |
+| Binance Spot Copy Trading, the website's own endpoints (ranking, PnL curve and trades of the lead portfolios; §2.6) | Other traders' behavior | The `lead_consensus` profile: who it follows and what they bought (doc 03, §6.4) |
 | Claude's web search and fetch (`web_search`, `web_fetch`) | On-demand news | The analyst's verification step, with up to 5 searches and 3 fetches per cycle (US$ 10 per 1,000 searches, plus tokens) |
 
-The sources live in `config/research.yaml` (D-020), all public and keyless. Each one fails in isolation.
+The sources live in `config/research.yaml` (D-020), all public and keyless. Each one fails in isolation. The lead traders' source is set in its profile's `leads` block, in `config/profiles.yaml` (D-052).
 
 ## 5. Known pitfalls and how the agent avoids them
 
@@ -125,4 +144,5 @@ The sources live in `config/research.yaml` (D-020), all public and keyless. Each
 | Stop-limit "skipped" in a *gap* | The stop triggers but does not fill | Lower leg `STOP_LOSS` (at market), with the `expiryReason` monitored |
 | Delisting or *depeg* | Abrupt loss or a stuck asset | The universe excludes scheduled delistings, the analyst can veto, and the `quote_depeg_pct` circuit breaker sells everything if USDT loses its peg |
 | Out-of-sync clock | Rejection by `timestamp` and `recvWindow` (`-1021`) | Sync at startup and every 10 min, with three samples, and a new measurement with one retry when Binance refuses (runbook, §2.6) |
+| Following a ranking sorted by return | The top of the list is whoever took the most risk and has not blown up yet, and its copiers often lose | The followed traders are chosen on risk-adjusted, consistent and recent figures and on what their copiers lost; an entry needs a consensus of two of them and the agent's own confirmation, size and stop; no trade is copied (doc 03, §6.4) |
 | Two instances running | Duplicate orders | Exclusive *advisory lock* in the database and deterministic order IDs |

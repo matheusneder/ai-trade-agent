@@ -37,6 +37,17 @@ They only buy (Spot). The default parameters are research seeds (doc/lab-results
     frozen on the signal (``Signal.target_pct``). Technical exit on a close below the lower
     band.
 
+``lead_consensus`` (D-052)
+    The agent's own confirmation of a consensus of Binance Spot Copy Trading lead traders.
+    The consensus is not in the candles: the engine removes the setup of every pair without
+    one (:mod:`trade_agent.leads`), so here every candle is a pattern and the checks say
+    whether the pair's own candles allow the purchase. The pair is not in a local downtrend
+    (EMA 20 < EMA 50 with the EMA 50 falling over 5 candles), the candle closes above the
+    EMA 20 and at most ``max_extension_atr`` ATRs above it. Stop ``stop_buffer_atr`` ATRs
+    below the lowest low of the 5 previous candles and the signal candle. Technical exit when
+    the pair turns into a local downtrend. The lab cannot run it: the lead traders' trades
+    have no history to replay (``Family.needs_leads``).
+
 Every stop is at least ``min_stop_atr`` ATRs away; a setup whose stop would sit beyond
 ``max_stop_pct`` is discarded, never tightened to fit (``filtered`` says why). The ranking
 score is the legacy one without the relative strength (``SignalParams.local_score``).
@@ -56,16 +67,24 @@ class Family(StrEnum):
     PAIR_PULLBACK_RSI = "pair_pullback_rsi"
     PAIR_VOLATILITY_BREAKOUT = "pair_volatility_breakout"
     PAIR_RANGE_REVERSION = "pair_range_reversion"
+    LEAD_CONSENSUS = "lead_consensus"
 
     @property
     def local(self) -> bool:
-        """Decides on the pair's own candles only."""
+        """Reads the pair's own candles only, never the benchmark."""
         return self is not Family.LEGACY
+
+    @property
+    def needs_leads(self) -> bool:
+        """Its entries also need the lead traders' consensus, read live (D-052): the candles
+        alone are no signal, so the lab cannot run it."""
+        return self is Family.LEAD_CONSENSUS
 
 
 PAIR_PULLBACK = "pair_pullback"
 PAIR_BREAKOUT = "pair_breakout"
 PAIR_RANGE = "pair_range"
+LEAD_CONSENSUS = "lead_consensus"
 
 DIP_CANDLES = 3
 SLOPE_CANDLES = 5
@@ -84,6 +103,8 @@ WIDE_STOP = "stop acima do teto"
 WIDE_RANGE = "candle amplo demais"
 NO_ADX = "ADX sem força"
 NO_TARGET = "alvo abaixo do preço"
+DOWNTREND = "par em tendência local de baixa"
+BELOW_SHORT = "fechou abaixo da EMA20"
 
 
 @dataclass(frozen=True)
@@ -144,12 +165,24 @@ class RangeParams:
     max_stop_pct: float = 0.04
 
 
-type LocalParams = PullbackParams | BreakoutParams | RangeParams
+@dataclass(frozen=True)
+class ConsensusParams:
+    """The agent's own confirmation of a consensus of lead traders (D-052)."""
+
+    max_extension_atr: float = 1.5
+    """0: off."""
+    stop_buffer_atr: float = 0.25
+    min_stop_atr: float = 2.0
+    max_stop_pct: float = 0.06
+
+
+type LocalParams = PullbackParams | BreakoutParams | RangeParams | ConsensusParams
 
 PARAMS: dict[Family, type[LocalParams]] = {
     Family.PAIR_PULLBACK_RSI: PullbackParams,
     Family.PAIR_VOLATILITY_BREAKOUT: BreakoutParams,
     Family.PAIR_RANGE_REVERSION: RangeParams,
+    Family.LEAD_CONSENSUS: ConsensusParams,
 }
 STOP_PARAMS = frozenset({"min_stop_atr", "max_stop_pct"})
 """Set from ``protection.stop`` (``atr_mult``, ``max_pct``), never in ``signals``."""
@@ -301,6 +334,32 @@ def _range(f: pd.DataFrame, p: RangeParams) -> pd.DataFrame:
     )
 
 
+def _confirmation(f: pd.DataFrame, p: ConsensusParams) -> pd.DataFrame:
+    """The candle side of ``lead_consensus``: every candle is a pattern, and the checks say
+    whether the pair's own candles allow buying what the lead traders bought."""
+    close, low, atr = _col(f, "close"), _col(f, "low"), _col(f, "atr")
+    short = _col(f, "ema_short")
+    falling = local_regime_frame(f) == "baixa"
+    above = close > short
+    extension_ok = (close - short <= p.max_extension_atr * atr) | (p.max_extension_atr <= 0)
+    stop_price = np.minimum(low.shift(1).rolling(STOP_CANDLES).min(), low) - p.stop_buffer_atr * atr
+    stop, fits = _stop(f, stop_price, p)
+    checks = [(~falling, DOWNTREND), (above, BELOW_SHORT), (extension_ok, EXTENDED)]
+    checks.append((fits, WIDE_STOP))
+    return pd.DataFrame(
+        {
+            "setup": np.where(~falling & above & extension_ok & fits, LEAD_CONSENSUS, ""),
+            "stop_pct": stop,
+            "target_pct": np.nan,
+            "entry_cap": np.nan,
+            "level": np.nan,
+            "exit": falling,
+            "filtered": _reasons(pd.Series(True, index=f.index), checks),
+        },
+        index=f.index,
+    )
+
+
 def local_regime_frame(features: pd.DataFrame) -> pd.Series:
     """The pair's own trend on each candle: ``alta``, ``baixa`` or ``lateral``."""
     short, fast, slope = _col(features, "ema_short"), _col(features, "ema_fast"), _slope(features)
@@ -317,6 +376,8 @@ def local_frame(features: pd.DataFrame, params: LocalParams) -> pd.DataFrame:
         frame = _pullback(features, params)
     elif isinstance(params, BreakoutParams):
         frame = _breakout(features, params)
+    elif isinstance(params, ConsensusParams):
+        frame = _confirmation(features, params)
     else:
         frame = _range(features, params)
     frame["exit"] = frame["exit"].astype(bool)
@@ -354,6 +415,7 @@ TECHNICAL_EXITS = {
     Family.PAIR_PULLBACK_RSI: "saída técnica: dois fechamentos abaixo da EMA20 com RSI baixo",
     Family.PAIR_VOLATILITY_BREAKOUT: "saída técnica: fechou abaixo do nível rompido",
     Family.PAIR_RANGE_REVERSION: "saída técnica: fechou abaixo da banda inferior",
+    Family.LEAD_CONSENSUS: "saída técnica: par em tendência local de baixa",
 }
 
 
