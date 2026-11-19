@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock
 import pytest
 from structlog.testing import capture_logs
 
-from tests.support.leads import NOW, FakeSource, active, stats, trade
+from tests.support.leads import NOW, FakeSource, active, days, stats, trade
+from tests.support.metrics import measuring
 from trade_agent.leads import tracker as tracker_module
 from trade_agent.leads.consensus import BUY, NO_DATA, NO_LEADS, OK, STALE_RANKING
 from trade_agent.leads.ranking import IDLE, LOW_ROI, WEAK_RECENT
@@ -25,6 +26,8 @@ from trade_agent.leads.tracker import (
 )
 from trade_agent.persistence.store import Severity, Store
 from trade_agent.strategy.profiles import LeadsConfig
+
+CONSENSUS = LeadsConfig().consensus
 
 D = Decimal
 PROFILE = "lead_consensus_1h"
@@ -164,7 +167,7 @@ async def test_a_new_ranking_replaces_the_followed_traders_and_says_who_left() -
 
 
 async def test_nobody_qualifying_is_recorded_and_no_entry_goes_out() -> None:
-    falling = [float(90 - day) for day in range(90)]
+    falling = days([float(90 - day) for day in range(90)])
     source = FakeSource([stats("a")], curves={"a": falling}, trades={"a": active()})
     h = Harness(source)
     await h.tracker.refresh()
@@ -416,3 +419,67 @@ def test_a_followed_trader_round_trips_through_the_checkpoint() -> None:
     assert Followed.from_json(data) == followed
     with pytest.raises(KeyError):
         Followed.from_json({"id": "7"})
+
+
+async def test_a_stale_seller_does_not_turn_into_a_buy_consensus() -> None:
+    """The review of PR #57: buyers a and b, seller c, no consensus (a margin of one). Only c's
+    trades fail; past max_data_age the view still has two buyers and must not call it a buy."""
+    sold = active(trade("SOLUSDT", buy=False, quote="200"))
+    source = _source(a=_buys(), b=_buys(), c=sold)
+    h = Harness(source)
+    await h.tracker.refresh()
+    assert h.tracker.view().consensus("SOLUSDT", CONSENSUS) is None
+    source.fail("trades:c")
+    for _ in range(4):
+        h.clock.advance(minutes=15)
+        await h.tracker.refresh()
+    view = h.tracker.view()
+    assert (view.status, view.selected, view.fresh, view.unknown) == (OK, 3, 2, 1)
+    assert view.backings["SOLUSDT"].buyers == ("a", "b")
+    assert view.consensus("SOLUSDT", CONSENSUS) is None
+
+
+async def test_each_reading_keeps_the_time_its_trades_arrived() -> None:
+    """The review of PR #57: a slow ranking (41 requests 10 s apart, max_data_age of 5 min)
+    dated every history at its end, so readings 390 s old counted as fresh."""
+    config = LeadsConfig.model_validate(
+        {"poll_interval": "5m", "max_data_age": "5m", "request_delay_s": 10}
+    )
+    source = _source(**{f"p{n:02d}": _buys() for n in range(20)})
+    h = Harness(source, config=config)
+
+    async def slow(seconds: float) -> None:
+        h.clock.advance(seconds=seconds)
+
+    h.tracker._sleep = slow
+    await h.tracker.refresh()
+    assert len(source.calls) == 41 and h.clock.now == NOW + timedelta(seconds=410)
+    view = h.tracker.view()
+    # the six followed are the first six candidates: their trades arrived at 30 s..130 s
+    assert (view.selected, view.fresh) == (6, 2)
+    assert view.as_of == NOW + timedelta(seconds=110)
+
+
+async def test_the_gauges_keep_ageing_while_the_source_is_backed_off() -> None:
+    """The review of PR #57: a 429 at 12:15 stops the requests until 13:15; at 13:00 the
+    reading of 12:00 is stale and the gauges must say so, without asking the source."""
+    with measuring() as measured:
+        source = _source(a=_buys(), b=_buys())
+        h = Harness(source)
+        await h.tracker.refresh()  # 12:00
+        assert measured.value("trade_agent.leads.consensus", profile=PROFILE) == 1
+        source.fail("trades:a", LeadSourceRefusedError("HTTP 429"))
+        h.clock.advance(minutes=15)
+        await h.tracker.refresh()  # 12:15: refused
+        source.failures.clear()
+        calls = len(source.calls)
+        h.clock.advance(minutes=15)
+        await h.tracker.refresh()  # 12:30: backing off, the reading is 30 min old
+        assert measured.value("trade_agent.leads.fresh", profile=PROFILE) == 2
+        h.clock.advance(minutes=30)
+        await h.tracker.refresh()  # 13:00: still backing off, now 60 min old
+        assert len(source.calls) == calls  # nothing asked
+        assert measured.value("trade_agent.leads.fresh", profile=PROFILE) == 0
+        assert measured.value("trade_agent.leads.consensus", profile=PROFILE) == 0
+        assert measured.value("trade_agent.leads.selected", profile=PROFILE) == 2
+        assert measured.value("trade_agent.leads.errors", profile=PROFILE) == 1

@@ -1,11 +1,17 @@
 """When the followed lead traders' trades are a signal (pure functions, D-052).
 
-A trader **buys** an asset when its net purchase of it in the window (what it bought minus
-what it sold, in the quote asset) reaches ``min_buy_pct`` of its own balance, and **sells**
-it on the same net sale. Only its ``max_symbols_per_lead`` largest net purchases count, so a
-trader that buys everything does not weigh on every asset. An asset has a **buy consensus**
-when its buyers outnumber its sellers by ``min_backers``, and a **sell consensus** on the
-opposite margin.
+A trader **buys** an asset when its net purchase of it in the window reaches ``min_buy_pct``
+of its own balance, and **sells** it on the same net sale. The net is in quantity (what it
+bought minus what it sold), valued at the price of the side that grew it: a round trip nets
+zero whatever its result, so a loss realized in the quote asset is never a purchase. Only its
+``max_symbols_per_lead`` largest net purchases count, so a trader that buys everything does
+not weigh on every asset.
+
+An asset has a **buy consensus** when its buyers outnumber its sellers by ``min_backers``
+even if every followed trader without a recent reading had sold it: a missing reading is a
+vote that may be against, never a neutral one, so the source failing can only take a buy
+consensus away. A **sell consensus** (an exit, which only reduces exposure) is the opposite
+margin among the readings there are.
 
 The agent never copies a trade: a buy consensus only lets the pair's own candles decide
 (``lead_consensus`` in :mod:`trade_agent.signals.local`), and the size, the stop and the
@@ -43,12 +49,16 @@ class Backing:
     avg_buy_price: Decimal | None = None
     """Volume-weighted price the buyers paid in the window; ``None`` without a buyer."""
 
-    def consensus(self, min_backers: int) -> str | None:
-        """``buy`` or ``sell`` when that side outnumbers the other by ``min_backers``."""
+    def consensus(self, min_backers: int, unknown: int = 0) -> str | None:
+        """``buy`` when the buyers outnumber the sellers by ``min_backers`` even with the
+        ``unknown`` traders (no recent reading) among the sellers; ``sell`` on the opposite
+        margin among the readings there are."""
         margin = len(self.buyers) - len(self.sellers)
-        if abs(margin) < min_backers:
-            return None
-        return BUY if margin > 0 else SELL
+        if margin - unknown >= min_backers:
+            return BUY
+        if -margin >= min_backers:
+            return SELL
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,9 +71,23 @@ class LeadReading:
 
 @dataclass(slots=True)
 class _Flow:
-    net: Decimal = Decimal(0)
     bought: Decimal = Decimal(0)
+    """Quote asset spent on purchases."""
     qty: Decimal = Decimal(0)
+    """Quantity bought."""
+    sold: Decimal = Decimal(0)
+    sold_qty: Decimal = Decimal(0)
+
+    @property
+    def net(self) -> Decimal:
+        """The net change of the position, valued at the average price of the side that grew
+        it: positive a net purchase, negative a net sale, zero for a round trip."""
+        change = self.qty - self.sold_qty
+        if change > 0:
+            return change * self.bought / self.qty
+        if change < 0:
+            return change * self.sold / self.sold_qty
+        return Decimal(0)
 
 
 def _flows(trades: Sequence[LeadTrade], since: datetime, quote_asset: str) -> dict[str, _Flow]:
@@ -74,11 +98,11 @@ def _flows(trades: Sequence[LeadTrade], since: datetime, quote_asset: str) -> di
             continue
         flow = flows[trade.symbol]
         if trade.buy:
-            flow.net += trade.quote
             flow.bought += trade.quote
             flow.qty += trade.qty
         else:
-            flow.net -= trade.quote
+            flow.sold += trade.quote
+            flow.sold_qty += trade.qty
     return flows
 
 
@@ -134,14 +158,20 @@ class LeadView:
     """The oldest of the readings that count."""
     backings: Mapping[str, Backing] = field(default_factory=dict)
 
-    def sold(self, symbol: str, config: LeadConsensusConfig) -> bool:
-        return self._consensus(symbol, config) == SELL
+    @property
+    def unknown(self) -> int:
+        """Followed traders without a recent reading: votes that may be against a purchase."""
+        return max(self.selected - self.fresh, 0)
 
-    def _consensus(self, symbol: str, config: LeadConsensusConfig) -> str | None:
+    def sold(self, symbol: str, config: LeadConsensusConfig) -> bool:
+        return self.consensus(symbol, config) == SELL
+
+    def consensus(self, symbol: str, config: LeadConsensusConfig) -> str | None:
+        """``buy``, ``sell`` or ``None`` for ``symbol``; ``None`` without a reading."""
         backing = self.backings.get(symbol)
         if self.status != OK or backing is None:
             return None
-        return backing.consensus(config.min_backers)
+        return backing.consensus(config.min_backers, self.unknown)
 
     def apply(self, symbol: str, signal: Signal, config: LeadConsensusConfig) -> Signal:
         """The cycle's signal for ``symbol`` from its candle side.
@@ -152,7 +182,7 @@ class LeadView:
         keeps its reason (``filtered``), which is what the agent declined to follow. A sell
         consensus is a technical exit for a position the profile holds.
         """
-        consensus = self._consensus(symbol, config)
+        consensus = self.consensus(symbol, config)
         signal = replace(signal, exit_signal=signal.exit_signal or consensus == SELL)
         if consensus != BUY:
             return replace(signal, setup=None, filtered=None)
@@ -182,7 +212,7 @@ class LeadView:
                     "buyers": list(b.buyers),
                     "sellers": list(b.sellers),
                     "avg_buy_price": None if b.avg_buy_price is None else f"{b.avg_buy_price:f}",
-                    "consensus": b.consensus(config.min_backers),
+                    "consensus": self.consensus(symbol, config),
                 }
                 for symbol, b in self.backings.items()
             },

@@ -71,6 +71,14 @@ class LeadStats:
 
 
 @dataclass(frozen=True, slots=True)
+class PnlPoint:
+    """A day of a portfolio's cumulative PnL curve (quote asset)."""
+
+    at: datetime
+    pnl: float
+
+
+@dataclass(frozen=True, slots=True)
 class LeadTrade:
     at: datetime
     symbol: str
@@ -151,14 +159,14 @@ def parse_trades(data: Any) -> list[LeadTrade]:
     return sorted(trades, key=lambda t: t.at, reverse=True)
 
 
-def parse_pnl_curve(data: Any) -> tuple[float, ...]:
-    """A portfolio's cumulative PnL (quote asset) at the end of each day of the ranking's
-    window, the oldest first."""
+def parse_pnl_curve(data: Any) -> tuple[PnlPoint, ...]:
+    """A portfolio's cumulative PnL (quote asset) on each day of the ranking's window, the
+    oldest first, with its date: a day may be missing, so windows go by the calendar."""
     try:
         points = sorted((int(p["dateTime"]), float(p["value"])) for p in _data(data) or ())
     except (KeyError, TypeError, ValueError) as exc:
         raise LeadSourceError(f"curva de PnL fora do formato esperado: {exc!r}") from exc
-    return tuple(value for _, value in points)
+    return tuple(PnlPoint(_at(ms), value) for ms, value in points)
 
 
 # ============================================================================ fetch (HTTP)
@@ -182,7 +190,7 @@ class LeadSource:
         body = {"portfolioId": portfolio_id, "pageNumber": 1, "pageSize": TRADES_PAGE}
         return parse_trades(await self._request("POST", TRADES, json=body))
 
-    async def pnl_curve(self, portfolio_id: str) -> tuple[float, ...]:
+    async def pnl_curve(self, portfolio_id: str) -> tuple[PnlPoint, ...]:
         params = {"dataType": "PNL", "portfolioId": portfolio_id, "timeRange": RANKING_WINDOW}
         return parse_pnl_curve(await self._request("GET", PNL_CURVE, params=params))
 

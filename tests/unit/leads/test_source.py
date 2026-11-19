@@ -2,6 +2,7 @@
 turned into ``LeadSourceError``."""
 
 import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -65,10 +66,14 @@ def test_trades_come_back_the_most_recent_first() -> None:
     assert (new.qty, new.quote, new.buy, old.buy) == (D(2), D(100), True, False)
 
 
-def test_the_pnl_curve_is_ordered_by_day() -> None:
+def test_the_pnl_curve_is_ordered_by_day_and_keeps_its_dates() -> None:
     payload = curve_payload([10.0, 12.5, 11.0])
     payload["data"].reverse()
-    assert parse_pnl_curve(payload) == (10.0, 12.5, 11.0)
+    curve = parse_pnl_curve(payload)
+    assert [p.pnl for p in curve] == [10.0, 12.5, 11.0]
+    assert [p.at for p in curve] == [
+        datetime(2026, 8, 22, tzinfo=UTC) + timedelta(days=day) for day in range(3)
+    ]
     assert parse_pnl_curve(envelope(None)) == ()  # a portfolio without a curve yet
 
 
@@ -108,7 +113,7 @@ async def test_the_three_readings_ask_only_the_public_endpoints() -> None:
         source = LeadSource(http)
         assert await source.ranking(2) == [lead]
         assert await source.trades("77") == [trade(now=NOW)]
-        assert await source.pnl_curve("77") == (1.0, 2.0)
+        assert [p.pnl for p in await source.pnl_curve("77")] == [1.0, 2.0]
     asked = json.loads(ranking.calls.last.request.content)
     assert asked == {
         "pageNumber": 2,

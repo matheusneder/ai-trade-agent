@@ -145,7 +145,8 @@ async def test_the_pnl_curve_is_the_cumulative_pnl_of_the_90_days() -> None:
     assert all(b - a >= DAY_MS for a, b in itertools.pairwise(times))  # a day may be missing
     now_ms = datetime.now(UTC).timestamp() * 1000
     assert now_ms - times[-1] < 3 * DAY_MS
-    assert curve[-1] == pytest.approx(row["pnl"], rel=0.05, abs=1.0)
+    assert [p.at for p in curve] == sorted(p.at for p in curve)
+    assert curve[-1].pnl == pytest.approx(row["pnl"], rel=0.05, abs=1.0)
 
 
 async def test_trades_are_the_latest_fills_with_their_amount_in_the_quote_asset() -> None:

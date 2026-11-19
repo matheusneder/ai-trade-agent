@@ -57,6 +57,45 @@ def test_a_purchase_counts_net_of_what_the_trader_sold() -> None:
     assert found["SOLUSDT"].buyers == ("caio",)
 
 
+def test_a_round_trip_is_no_purchase_whatever_it_lost() -> None:
+    """The review of PR #57: two traders bought 10 SOL for 1,000 and sold the same 10 for 950.
+    Netting the quote asset left +50 each, above the 20 of the threshold, and a buy consensus
+    behind traders with no position at all. Netted in quantity, a round trip is nothing."""
+    round_trip = [
+        trade("SOLUSDT", quote="1000", price="100", hours_ago=3),
+        trade("SOLUSDT", buy=False, quote="950", price="95", hours_ago=1),
+    ]
+    assert _backings(ana=round_trip, bia=round_trip) == {}
+    # what is left of a position is valued at what it cost; a net sale at what it fetched
+    half = [
+        trade("SOLUSDT", quote="1000", price="100", hours_ago=3),
+        trade("SOLUSDT", buy=False, quote="475", price="95", hours_ago=1),  # 5 of the 10
+    ]
+    more_sold = [
+        trade("SOLUSDT", quote="100", price="100", hours_ago=3),
+        trade("SOLUSDT", buy=False, quote="300", price="100", hours_ago=1),
+    ]
+    found = _backings(ana=half, bia=more_sold)
+    assert (found["SOLUSDT"].buyers, found["SOLUSDT"].sellers) == (("ana",), ("bia",))
+    assert found["SOLUSDT"].avg_buy_price == D(100)
+
+
+def test_a_trader_without_a_recent_reading_may_be_a_seller() -> None:
+    """The review of PR #57: two buyers and a seller are a margin of one, no consensus; the
+    seller's reading going stale must not make it two. Unknown votes count against a buy, and
+    a sell consensus (an exit) is the margin among the readings there are."""
+    two = Backing("SOLUSDT", buyers=("ana", "bia"), avg_buy_price=D(100))
+    assert two.consensus(2) == BUY
+    assert two.consensus(2, unknown=1) is None
+    assert Backing("SOLUSDT", buyers=("a", "b", "c")).consensus(2, unknown=1) == BUY
+    assert Backing("SOLUSDT", sellers=("a", "b")).consensus(2, unknown=3) == SELL
+    view = LeadView(selected=3, fresh=2, as_of=NOW, backings={"SOLUSDT": two})
+    assert view.unknown == 1
+    assert view.consensus("SOLUSDT", CONFIG) is None
+    assert view.apply("SOLUSDT", CONFIRMED, CONFIG).setup is None
+    assert view.summary(CONFIG)["assets"]["SOLUSDT"]["consensus"] is None  # type: ignore[index]
+
+
 def test_only_the_window_and_the_accounts_quote_asset_count() -> None:
     found = _backings(
         ana=[trade("SOLUSDT", hours_ago=25)],

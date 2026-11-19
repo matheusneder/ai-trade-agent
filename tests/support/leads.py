@@ -6,12 +6,26 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from trade_agent.leads.source import LeadSourceError, LeadStats, LeadTrade
+from trade_agent.leads.source import LeadSourceError, LeadStats, LeadTrade, PnlPoint
 
 NOW = datetime(2026, 11, 19, 12, tzinfo=UTC)
 D = Decimal
 
-RISING = tuple(float(day) for day in range(90))
+
+def days(
+    values: Sequence[float], *, end: datetime = NOW, skip: Sequence[int] = ()
+) -> tuple[PnlPoint, ...]:
+    """A PnL curve of one point a day ending at ``end``; ``skip``: days back (0 = the last
+    one) the source left out."""
+    count = len(values)
+    return tuple(
+        PnlPoint(end - timedelta(days=count - 1 - i), value)
+        for i, value in enumerate(values)
+        if count - 1 - i not in skip
+    )
+
+
+RISING = days([float(day) for day in range(90)])
 """A PnL curve that gains 1 USDT a day: every weekly step rises, +30 in the last 30 days."""
 
 
@@ -126,7 +140,7 @@ class FakeSource:
         self,
         ranking: Sequence[LeadStats] = (),
         *,
-        curves: Mapping[str, Sequence[float]] | None = None,
+        curves: Mapping[str, Sequence[PnlPoint]] | None = None,
         trades: Mapping[str, Sequence[LeadTrade]] | None = None,
         page_size: int = 30,
     ) -> None:
@@ -149,7 +163,7 @@ class FakeSource:
         start = (page - 1) * self.page_size
         return self.pool[start : start + self.page_size]
 
-    async def pnl_curve(self, portfolio_id: str) -> tuple[float, ...]:
+    async def pnl_curve(self, portfolio_id: str) -> tuple[PnlPoint, ...]:
         self._call("curve", portfolio_id)
         return tuple(self.curves.get(portfolio_id, RISING))
 

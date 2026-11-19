@@ -19,7 +19,9 @@ contained here and ends in fewer entries, never in a wrong one:
   candidate that cannot be read is left out of that ranking, and one where no candidate
   could be read is a failed one;
 * a trader whose trades could not be read stops counting after ``max_data_age``;
-* a refusal (HTTP 403, 418, 429 or 451) stops every request for ``backoff``;
+* a refusal (HTTP 403, 418, 429 or 451) stops every request for ``backoff``, and the
+  readings keep ageing meanwhile (the gauges too);
+* each trader's reading carries the time its trades were received, also in a long ranking;
 * a reading with nothing but failures is a ``leads.source_unavailable`` event and alert,
   once per outage.
 
@@ -195,6 +197,7 @@ class LeadTracker:
         now = self._clock()
         if self._blocked_until is not None and now < self._blocked_until:
             log.debug("leads.backing_off", profile=self._profile, until=self._blocked_until)
+            self._publish(self.view(now), errors=0)  # no request: the readings only age
             return
         if not self._loaded:
             await self._load()
@@ -216,10 +219,11 @@ class LeadTracker:
         await self._report(now, outcome)
 
     async def _request[T](self, request: Awaitable[T], outcome: _Outcome) -> T:
-        """One request, counted, with the wait that spaces it from the next one."""
+        """One request, counted, after the wait that spaces it from the previous one: the
+        clock right after it is when its answer was received."""
+        await self._sleep(self._config.request_delay_s)
         result = await request
         outcome.ok += 1
-        await self._sleep(self._config.request_delay_s)
         return result
 
     async def _load(self) -> None:
@@ -242,7 +246,7 @@ class LeadTracker:
         A failure keeps the previous ones, and the ranking is tried again at the next reading."""
         selection = self._config.selection
         assessed: list[Assessment] = []
-        trades: dict[str, tuple[LeadTrade, ...]] = {}
+        trades: dict[str, tuple[datetime, tuple[LeadTrade, ...]]] = {}
         try:
             pool: list[LeadStats] = []
             for page in range(1, selection.pool_pages + 1):
@@ -267,10 +271,11 @@ class LeadTracker:
                         error=str(exc),
                     )
                     continue
+                received = self._clock()  # a long ranking ages its first readings
                 assessment = assess(lead, curve, history, now, selection)
                 rejected.update(assessment.reasons)
                 assessed.append(assessment)
-                trades[lead.portfolio_id] = tuple(history)
+                trades[lead.portfolio_id] = (received, tuple(history))
             if examined and not assessed:  # an outage is no reason to stop following anybody
                 raise LeadSourceError("nenhum candidato pôde ser lido")
         except LeadSourceRefusedError:
@@ -282,8 +287,7 @@ class LeadTracker:
         previous = self._followed
         chosen = {a.lead.portfolio_id: Followed.chosen(a) for a in best(assessed, selection)}
         self._followed, self._ranked_at = chosen, now
-        read_at = self._clock()
-        self._readings = {lead: (read_at, trades[lead]) for lead in chosen}
+        self._readings = {lead: trades[lead] for lead in chosen}
         await self._selected(
             previous, now, pool=len(pool), examined=len(examined), rejected=rejected
         )
@@ -337,19 +341,25 @@ class LeadTracker:
                 continue
             self._readings[lead] = (self._clock(), tuple(history))
 
-    async def _report(self, now: datetime, outcome: _Outcome) -> None:
-        """Metrics and log of the reading, and the source going down or coming back."""
-        view = self.view(now)
+    def _publish(self, view: LeadView, *, errors: int) -> list[str]:
+        """The gauges of ``view`` and the failed requests; returns the assets with a
+        consensus."""
         config = self._config.consensus
-        consensus = sorted(s for s, b in view.backings.items() if b.consensus(config.min_backers))
-        bought = [s for s in consensus if view.backings[s].consensus(config.min_backers) == BUY]
+        consensus = sorted(s for s in view.backings if view.consensus(s, config))
+        bought = [s for s in consensus if view.consensus(s, config) == BUY]
         metrics.observe_leads(
             profile=self._profile,
             selected=len(self._followed),
             fresh=view.fresh,
             consensus=len(bought),
-            errors=outcome.failed,
+            errors=errors,
         )
+        return consensus
+
+    async def _report(self, now: datetime, outcome: _Outcome) -> None:
+        """Metrics and log of the reading, and the source going down or coming back."""
+        view = self.view(now)
+        consensus = self._publish(view, errors=outcome.failed)
         tracing.annotate(
             profile=self._profile,
             status=view.status,

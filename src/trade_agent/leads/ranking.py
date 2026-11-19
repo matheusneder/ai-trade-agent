@@ -23,17 +23,18 @@ The floors and caps keep one extreme figure from carrying the score: a drawdown 
 more than the cap. The rejection reasons are operator text (Portuguese).
 """
 
+import bisect
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from trade_agent.leads.source import LeadStats, LeadTrade
+from trade_agent.leads.source import LeadStats, LeadTrade, PnlPoint
 from trade_agent.strategy.profiles import LeadSelectionConfig
 
-WEEK = 7
-RECENT_DAYS = 30
+WEEK = timedelta(days=7)
+RECENT = timedelta(days=30)
 ACTIVITY_WINDOW = timedelta(days=30)
 MDD_FLOOR = 2.0
 """Drawdown (%) below which the risk-adjusted return stops improving."""
@@ -88,19 +89,34 @@ def candidates(
     return passed[: config.shortlist], rejected
 
 
-def positive_weeks(curve: Sequence[float]) -> float | None:
+def pnl_at(curve: Sequence[PnlPoint], moment: datetime) -> float | None:
+    """The cumulative PnL at ``moment``: its last point at or before it (a missing day keeps
+    the day before); ``None`` before the curve starts."""
+    index = bisect.bisect_right([point.at for point in curve], moment)
+    return curve[index - 1].pnl if index else None
+
+
+def positive_weeks(curve: Sequence[PnlPoint]) -> float | None:
     """Share (0–1) of the 7-day steps of the cumulative PnL curve that ended higher, counted
-    back from the last day; ``None`` without a whole step."""
-    steps = [curve[i] - curve[i - WEEK] for i in range(len(curve) - 1, WEEK - 1, -WEEK)]
+    back from its last point by the calendar; ``None`` without a whole step."""
+    if not curve:
+        return None
+    end, steps = curve[-1].at, []
+    while (earlier := pnl_at(curve, end - WEEK)) is not None:
+        later = pnl_at(curve, end)
+        assert later is not None  # noqa: S101 - end is after earlier, inside the curve
+        steps.append(later - earlier)
+        end -= WEEK
     return sum(step > 0 for step in steps) / len(steps) if steps else None
 
 
-def recent_gain_pct(curve: Sequence[float], balance: Decimal) -> float | None:
-    """PnL of the last 30 days of the curve, in % of the trader's own balance; ``None`` on a
-    shorter curve or without a balance."""
-    if len(curve) <= RECENT_DAYS or balance <= 0:
+def recent_gain_pct(curve: Sequence[PnlPoint], balance: Decimal) -> float | None:
+    """PnL of the last 30 calendar days of the curve, in % of the trader's own balance;
+    ``None`` on a shorter curve or without a balance."""
+    start = pnl_at(curve, curve[-1].at - RECENT) if curve else None
+    if start is None or balance <= 0:
         return None
-    return (curve[-1] - curve[-1 - RECENT_DAYS]) / float(balance) * 100
+    return (curve[-1].pnl - start) / float(balance) * 100
 
 
 def activity_reasons(
@@ -135,7 +151,7 @@ class Assessment:
 
 def assess(
     lead: LeadStats,
-    curve: Sequence[float],
+    curve: Sequence[PnlPoint],
     trades: Sequence[LeadTrade],
     now: datetime,
     config: LeadSelectionConfig,

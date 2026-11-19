@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from tests.support.leads import NOW, RISING, active, stats, trade
+from tests.support.leads import NOW, RISING, active, days, stats, trade
 from trade_agent.leads.ranking import (
     COPIERS_LOST,
     DEEP_DRAWDOWN,
@@ -84,24 +84,42 @@ def test_candidates_keep_the_rankings_order_and_count_the_refusals() -> None:
 
 def test_positive_weeks_counts_back_from_the_last_day() -> None:
     assert positive_weeks(RISING) == 1.0
-    assert positive_weeks([5.0] * 90) == 0.0
-    # 14 days: one step down, one up
-    assert positive_weeks([10.0] * 7 + [9.0] + [9.0] * 6 + [12.0]) == 0.5
-    assert positive_weeks([1.0, 2.0, 3.0]) is None
-    assert positive_weeks([]) is None
+    assert positive_weeks(days([5.0] * 90)) == 0.0
+    # 15 days: one step down, one up
+    assert positive_weeks(days([10.0] * 7 + [9.0] + [9.0] * 6 + [12.0])) == 0.5
+    assert positive_weeks(days([1.0, 2.0, 3.0])) is None
+    assert positive_weeks(()) is None
 
 
 def test_the_recent_gain_is_the_pnl_of_30_days_over_the_balance() -> None:
     assert recent_gain_pct(RISING, D(2000)) == pytest.approx(1.5)  # 30 USDT of 2000
-    assert recent_gain_pct([100.0] * 60 + [40.0] * 30, D(1000)) == pytest.approx(-6.0)
+    assert recent_gain_pct(days([100.0] * 60 + [40.0] * 30), D(1000)) == pytest.approx(-6.0)
     assert recent_gain_pct(RISING[:30], D(2000)) is None  # no day 30 days back
     assert recent_gain_pct(RISING, D(0)) is None
+    assert recent_gain_pct((), D(2000)) is None
+
+
+def test_the_windows_go_by_the_calendar_when_the_source_leaves_out_a_day() -> None:
+    """The review of PR #57: one day missing in the last month moved the 30-day window to the
+    31st day by index, and a month that lost 10 USDT read as +1.55%. By the calendar it is the
+    loss it was, and the trader is refused."""
+    values = [59.0] * 59 + [100.0] * 30 + [90.0]  # +41 on day 30 back, then -10 in the month
+    gap = days(values, skip=[10])
+    assert len(gap) == 89
+    assert recent_gain_pct(gap, D(2000)) == pytest.approx(-0.5)
+    assert WEAK_RECENT in assess(stats(aum=D(5000)), gap, active(), NOW, CONFIG).reasons
+    # the weekly steps too: the same rising curve with days missing is still all rising weeks
+    holes = days([float(day) for day in range(90)], skip=[3, 20, 45])
+    assert positive_weeks(holes) == 1.0
+    # a missing day keeps the day before: the step that spans it is measured from it
+    flat_then_up = days([0.0] * 83 + [5.0] * 7, skip=[7])
+    assert positive_weeks(flat_then_up) == pytest.approx(1 / 12)
 
 
 def test_a_deposit_does_not_look_like_a_loss() -> None:
     """Why the curve is the PnL and not the ranking's ROI: on 2026-11-19 a portfolio's ROI
     went from +84% to +23% in three days with its PnL unchanged (a deposit diluted it)."""
-    pnl = [600.0 + day for day in range(90)]
+    pnl = days([600.0 + day for day in range(90)])
     assert recent_gain_pct(pnl, D(2800)) == pytest.approx(30 / 2800 * 100)
     assert positive_weeks(pnl) == 1.0
 
@@ -137,12 +155,12 @@ def test_the_score_is_bounded_and_no_extreme_figure_carries_it() -> None:
     assert extreme.score == pytest.approx(0.40 + 0.35 + 0.25 * 0.15)
     perfect = assess(stats(roi_pct=300.0, mdd_pct=0.0, aum=D(3100)), RISING, active(), NOW, CONFIG)
     assert perfect.score == 1.0  # 30 USDT on a balance of 100: the recent part at its cap too
-    loser = assess(stats(roi_pct=-20.0), [0.0] * 90, active(), NOW, CONFIG)
+    loser = assess(stats(roi_pct=-20.0), days([0.0] * 90), active(), NOW, CONFIG)
     assert loser.score == 0.0
 
 
 def test_the_curve_and_the_trades_refuse_a_candidate() -> None:
-    falling = [float(90 - day) for day in range(90)]
+    falling = days([float(90 - day) for day in range(90)])
     refused = assess(stats(), falling, [], NOW, CONFIG)
     assert refused.reasons == (INCONSISTENT, WEAK_RECENT, IDLE)
     assert not refused.eligible
@@ -151,7 +169,7 @@ def test_the_curve_and_the_trades_refuse_a_candidate() -> None:
     assert short.consistency is None and short.recent_gain_pct is None
     assert short.score == pytest.approx(0.35 * 0.4)
     # six of twelve weeks up is below the 55% of the default
-    half = [float(week // 2) for week in range(13) for _ in range(7)][:90]
+    half = days([float(week // 2) for week in range(13) for _ in range(7)][:90])
     assert assess(stats(), half, active(), NOW, CONFIG).reasons[0] == INCONSISTENT
 
 
