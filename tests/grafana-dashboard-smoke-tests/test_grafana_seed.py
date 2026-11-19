@@ -157,4 +157,4 @@ def test_lead_cycles_buy_only_what_the_traders_bought(day: Dataset) -> None:
         for asset in assets.values():  # the shape LeadView.summary writes
             assert set(asset) == {"buyers", "sellers", "avg_buy_price", "consensus"}
     selection = next(e.payload for e in day.events() if e.kind == "leads.selected")
-    assert {"profile", "pool", "examined", "selected", "rejected"} == set(selection)
+    assert {"profile", "pool", "examined", "selected", "rejected", "unread"} == set(selection)

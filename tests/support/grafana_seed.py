@@ -807,6 +807,7 @@ class _Simulation:
             "examined": len(followed) + self.rng.randint(1, 4),
             "selected": [lead.to_json() for lead in followed],
             "rejected": dict(sorted(rejected.items(), key=lambda item: -item[1])),
+            "unread": [],
         }
         self.event(at, "leads.selected", "info", payload)
 

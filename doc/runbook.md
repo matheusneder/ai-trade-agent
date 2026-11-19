@@ -213,7 +213,7 @@ The profile buys only what at least `min_backers` of its followed lead traders b
    | `ranking de traders vencido` | No ranking could be read for `max_ranking_age` (24 h), or none since the start | see step 3 |
    | `copy trading sem dados recentes` | The followed traders' trades could not be read for `max_data_age` (45 min) | see step 3 |
 
-2. **Who is followed and who was refused**: the `leads.selected` event of each ranking (every 6 h) has the followed traders with their score and figures, and `rejected`, how many portfolios each criterion refused. In a falling market most Spot traders fail the recent gain and the positive weeks: on 2026-11-19, with BTC below its EMA 200 for four weeks, 1 portfolio of 150 was followed. That is the strategy declining to follow anybody. Loosening a threshold is a change of strategy: edit `leads.selection` in `config/profiles.yaml` and restart the agent.
+2. **Who is followed and who was refused**: the `leads.selected` event of each ranking (every 6 h) has the followed traders with their score and figures, `rejected`, how many portfolios each criterion refused, and `unread`, the followed traders it could not read and kept: their vote is unknown, so they block a buy consensus they could overturn until they are read again. In a falling market most Spot traders fail the recent gain and the positive weeks: on 2026-11-19, with BTC below its EMA 200 for four weeks, 1 portfolio of 150 was followed. That is the strategy declining to follow anybody. Loosening a threshold is a change of strategy: edit `leads.selection` in `config/profiles.yaml` and restart the agent.
 
    ```sql
    SELECT created_at, payload->'rejected', jsonb_array_length(payload->'selected') FROM events

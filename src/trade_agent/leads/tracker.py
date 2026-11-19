@@ -15,10 +15,15 @@ The decision cycle only reads memory (:meth:`LeadTracker.view`): it never waits 
 source. The source is undocumented and may fail or change at any time, so every failure is
 contained here and ends in fewer entries, never in a wrong one:
 
-* a failed ranking keeps the traders already followed, up to ``max_ranking_age``; a
-  candidate that cannot be read is left out of that ranking, and one where no candidate
-  could be read is a failed one;
-* a trader whose trades could not be read stops counting after ``max_data_age``;
+* a failed ranking keeps the traders already followed, up to ``max_ranking_age``, and one
+  where no candidate could be read is a failed one;
+* a failure is never a reason to stop following a trader: one the ranking cannot read stays
+  followed, in one of the ``max_leads`` slots, and only the ranking's own data takes a
+  trader out (no longer listed, failing the figures, outranked, or failing its curve or its
+  trading rhythm). A new candidate that cannot be read is left out of that ranking: it never
+  had a vote;
+* a trader whose trades could not be read stops counting after ``max_data_age``, and its
+  vote is then unknown: a possible seller against a buy (:class:`LeadView`);
 * a refusal (HTTP 403, 418, 429 or 451) stops every request for ``backoff``, and the
   readings keep ageing meanwhile (the gauges too);
 * each trader's reading carries the time its trades were received, also in a long ranking;
@@ -242,11 +247,13 @@ class LeadTracker:
         self._ranked_at = ranked_at
 
     async def _rank(self, now: datetime, outcome: _Outcome) -> set[str]:
-        """Chooses the followed traders again; returns the ones whose trades it just read.
-        A failure keeps the previous ones, and the ranking is tried again at the next reading."""
+        """Chooses the followed traders again; returns the ones whose trades it already asked
+        for. A failure keeps the previous ones, and the ranking is tried again at the next
+        reading; a followed trader it cannot read keeps its place, its vote unknown."""
         selection = self._config.selection
         assessed: list[Assessment] = []
         trades: dict[str, tuple[datetime, tuple[LeadTrade, ...]]] = {}
+        unread: list[str] = []
         try:
             pool: list[LeadStats] = []
             for page in range(1, selection.pool_pages + 1):
@@ -263,12 +270,17 @@ class LeadTracker:
                     raise
                 except LeadSourceError as exc:  # e.g. a portfolio closed since the ranking
                     outcome.failed += 1
-                    rejected[UNREADABLE] += 1
+                    followed = lead.portfolio_id in self._followed  # its vote must not vanish
+                    if followed:
+                        unread.append(lead.portfolio_id)
+                    else:
+                        rejected[UNREADABLE] += 1
                     log.warning(
                         "leads.candidate_failed",
                         profile=self._profile,
                         lead=lead.portfolio_id,
                         error=str(exc),
+                        kept=followed,
                     )
                     continue
                 received = self._clock()  # a long ranking ages its first readings
@@ -285,13 +297,22 @@ class LeadTracker:
             log.warning("leads.ranking_failed", profile=self._profile, error=str(exc))
             return set()
         previous = self._followed
-        chosen = {a.lead.portfolio_id: Followed.chosen(a) for a in best(assessed, selection)}
-        self._followed, self._ranked_at = chosen, now
-        self._readings = {lead: trades[lead] for lead in chosen}
+        kept = {lead: previous[lead] for lead in unread}
+        ranked = best(assessed, selection)[: max(selection.max_leads - len(kept), 0)]
+        chosen = {a.lead.portfolio_id: Followed.chosen(a) for a in ranked}
+        self._followed, self._ranked_at = chosen | kept, now
+        self._readings = {lead: trades[lead] for lead in chosen} | {
+            lead: reading for lead, reading in self._readings.items() if lead in kept
+        }  # a kept trader's last reading ages, then its vote is unknown
         await self._selected(
-            previous, now, pool=len(pool), examined=len(examined), rejected=rejected
+            previous,
+            now,
+            pool=len(pool),
+            examined=len(examined),
+            rejected=rejected,
+            unread=sorted(kept),
         )
-        return set(chosen)
+        return set(self._followed)
 
     async def _selected(
         self,
@@ -301,8 +322,10 @@ class LeadTracker:
         pool: int,
         examined: int,
         rejected: Counter[str],
+        unread: list[str],
     ) -> None:
-        """Persists and records the followed traders, and announces a change of them."""
+        """Persists and records the followed traders, and announces a change of them.
+        ``unread``: the followed traders this ranking could not read, kept."""
         followed = [lead.to_json() for lead in self._followed.values()]
         await self._store.set_checkpoint(
             CHECKPOINT.format(profile=self._profile),
@@ -314,6 +337,7 @@ class LeadTracker:
             "examined": examined,
             "selected": followed,
             "rejected": dict(rejected.most_common()),
+            "unread": unread,
         }
         await self._store.record_event(SELECTED_EVENT, Severity.INFO, payload)
         log.info(SELECTED_EVENT, **payload)

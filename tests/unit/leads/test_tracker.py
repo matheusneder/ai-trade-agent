@@ -439,6 +439,70 @@ async def test_a_stale_seller_does_not_turn_into_a_buy_consensus() -> None:
     assert view.consensus("SOLUSDT", CONSENSUS) is None
 
 
+async def test_a_ranking_that_cannot_read_a_followed_seller_keeps_its_vote_unknown() -> None:
+    """The review of PR #57, reopened: past the 6 hours of the ranking, the seller whose trades
+    fail was left out of the new selection, and the two buyers made a consensus. Failing to
+    read a followed trader is no reason to stop following it: it stays, its vote unknown,
+    until a reading settles it; only the ranking's own data takes it out."""
+    sold = active(trade("SOLUSDT", buy=False, quote="200"))
+    source = _source(a=_buys(), b=_buys(), c=sold)
+    h = Harness(source)
+    await h.tracker.refresh()
+    source.fail("trades:c", LeadSourceError("HTTP 500"))
+    source.calls.clear()
+    h.clock.advance(hours=6)
+    with capture_logs() as logs:
+        await h.tracker.refresh()  # the ranking is due, c cannot be read
+    view = h.tracker.view()
+    assert (view.status, view.selected, view.fresh, view.unknown) == (OK, 3, 2, 1)
+    assert view.backings["SOLUSDT"].buyers == ("a", "b")
+    assert view.consensus("SOLUSDT", CONSENSUS) is None
+    selection = h.events(SELECTED_EVENT)[-1]
+    assert {lead["id"] for lead in selection["selected"]} == {"a", "b", "c"}
+    assert selection["unread"] == ["c"]
+    assert UNREADABLE not in selection["rejected"]  # kept, not refused
+    (failed,) = [e for e in logs if e["event"] == "leads.candidate_failed"]
+    assert (failed["lead"], failed["kept"]) == ("c", True)
+    assert source.calls.count("trades:c") == 1  # not asked again within the same reading
+    assert len(h.alerts) == 1  # nobody joined or left
+    # read again, its sale counts: a margin of one, as at the start
+    source.failures.clear()
+    h.clock.advance(minutes=15)
+    await h.tracker.refresh()
+    view = h.tracker.view()
+    assert (view.selected, view.fresh, view.consensus("SOLUSDT", CONSENSUS)) == (3, 3, None)
+    # a ranking that confirms it out (its ROI fell below the minimum) does drop it
+    source.pool[2] = stats("c", roi_pct=1.0)
+    h.clock.advance(hours=6)
+    await h.tracker.refresh()
+    view = h.tracker.view()
+    assert (view.selected, view.unknown, view.consensus("SOLUSDT", CONSENSUS)) == (2, 0, BUY)
+    assert h.events(SELECTED_EVENT)[-1]["unread"] == []
+    assert h.alerts[-1][1].endswith("saíram: lead-c")
+
+
+async def test_a_trader_kept_unread_takes_a_slot_of_the_selection() -> None:
+    """A kept trader counts in ``max_leads``: the ranking fills only the slots left, even when
+    the configuration now allows fewer traders than were followed."""
+    config = LeadsConfig.model_validate({"selection": {"max_leads": 2, "shortlist": 3}})
+    source = _source(a=_buys(), b=_buys(), c=_buys())
+    h = Harness(source, config=config)
+    await h.tracker.refresh()
+    assert set(h.tracker._followed) == {"a", "b"}
+    source.fail("curve:a")
+    h.clock.advance(hours=6)
+    await h.tracker.refresh()
+    assert set(h.tracker._followed) == {"a", "b"}  # a kept, one slot left: b, read first
+    assert h.events(SELECTED_EVENT)[-1]["unread"] == ["a"]
+    narrower = LeadsConfig.model_validate({"selection": {"max_leads": 1, "shortlist": 3}})
+    h.tracker._config = narrower
+    source.fail("curve:b")
+    h.clock.advance(hours=6)
+    await h.tracker.refresh()
+    assert set(h.tracker._followed) == {"a", "b"}  # both kept: no slot left for c
+    assert h.events(SELECTED_EVENT)[-1]["unread"] == ["a", "b"]
+
+
 async def test_each_reading_keeps_the_time_its_trades_arrived() -> None:
     """The review of PR #57: a slow ranking (41 requests 10 s apart, max_data_age of 5 min)
     dated every history at its end, so readings 390 s old counted as fresh."""
