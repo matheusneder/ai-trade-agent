@@ -186,8 +186,8 @@ spec:
       enabled: true
       env:
         SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
-      image: signoz/signoz-otel-collector:v0.144.15
-      version: v0.144.15
+      image: signoz/signoz-otel-collector:v0.144.16
+      version: v0.144.16
     status:
       addresses:
         otlp:
@@ -374,8 +374,8 @@ spec:
         replicas: 1
       config: {}
       enabled: false
-      image: signoz/signoz-mcp-server:v0.18.0
-      version: v0.18.0
+      image: signoz/signoz-mcp-server:v0.20.0
+      version: v0.20.0
     status:
       addresses:
         http: null
@@ -391,8 +391,8 @@ spec:
         POSTGRES_DB: signoz
         POSTGRES_PASSWORD: signoz
         POSTGRES_USER: signoz
-      image: postgres:16.15
-      version: "16.15"
+      image: postgres:16.16
+      version: "16.16"
     status:
       addresses:
         dsn:
@@ -413,8 +413,8 @@ spec:
         SIGNOZ_SQLSTORE_PROVIDER: postgres
         SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
         SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
-      image: signoz/signoz:v0.149.0
-      version: v0.149.0
+      image: signoz/signoz:v0.151.0
+      version: v0.151.0
     status:
       addresses:
         apiserver:
