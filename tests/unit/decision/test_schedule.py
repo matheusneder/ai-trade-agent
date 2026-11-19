@@ -3,11 +3,13 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from structlog.testing import capture_logs
 
 from trade_agent.decision.schedule import (
     last_candle_close,
     next_candle_close,
+    period_ms,
     run_on_candle_close,
 )
 
@@ -33,6 +35,20 @@ def test_last_candle_close() -> None:
     assert last_candle_close("4h", at) == CLOSE
     assert last_candle_close("1h", at) == datetime(2026, 9, 26, 19, tzinfo=UTC)
     assert last_candle_close("4h", CLOSE) == CLOSE
+
+
+def test_a_decision_cycle_counts_from_the_candle_closes() -> None:
+    """D-053: a 10-minute cycle starts at each 1h close and every 10 minutes after it."""
+    at = datetime(2026, 9, 26, 19, 40, 19, tzinfo=UTC)
+    assert next_candle_close("10m", at) == datetime(2026, 9, 26, 19, 50, tzinfo=UTC)
+    assert last_candle_close("10m", at) == datetime(2026, 9, 26, 19, 40, tzinfo=UTC)
+    assert next_candle_close("10m", datetime(2026, 9, 26, 19, 55, tzinfo=UTC)) == (
+        datetime(2026, 9, 26, 20, tzinfo=UTC)  # the hour's close is also a cycle's start
+    )
+    assert (period_ms("1h"), period_ms("15m"), period_ms("10m")) == (3_600_000, 900_000, 600_000)
+    for period in ("0m", "10", "1w", "m"):
+        with pytest.raises(ValueError, match="período não suportado"):
+            period_ms(period)
 
 
 async def _runs(now: datetime, delay: timedelta, *, stop_early: bool = False) -> int:

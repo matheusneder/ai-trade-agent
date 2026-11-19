@@ -198,7 +198,7 @@ Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EM
 
 The profile buys only what at least `min_backers` of its followed lead traders bought **and** its own candles confirm (doc 03, §6.4), so days without an entry are usually the strategy, as in §2.7. The *Copy trading* dashboard (Grafana and SigNoz) shows all of it; the queries below are the same data. Look in this order:
 
-1. **What the last cycle read**: the `leads` field of the profile's `decision.cycle` event.
+1. **What the last cycle read** (one every 10 minutes, D-053): the `leads` field of the profile's `decision.cycle` event.
 
    ```sql
    SELECT created_at, payload->'leads' FROM events

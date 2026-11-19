@@ -236,6 +236,41 @@ async def test_without_a_fresh_reading_of_the_traders_nothing_is_bought(
     assert orphan.leads["status"] == NO_TRACKER
 
 
+async def test_a_cycle_shorter_than_the_candle_buys_between_the_closes(
+    api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """D-053: the traders' trades arrive between the candle closes, so a profile with a
+    ``cycle`` decides every cycle on the last closed candle, and its lateness (D-051) counts
+    from the start of the cycle. 2h40 after a 4h close, only the 10-minute cycle buys."""
+    _market(fake)
+    clock = Clock()
+    clock.now += timedelta(hours=2, minutes=40, seconds=20)
+    tracker, _ = await _tracker(store, clock, ana=_bought(clock), bia=_bought(clock))
+    at_the_close, _ = _engine(
+        api,
+        service,
+        store,
+        strategy=_strategy(),
+        clock=clock,
+        dry_run=True,
+        leads={"lead": tracker},
+    )
+    late = await at_the_close.run_profile("lead")
+    assert late.stale_candle is True and late.opened == ()  # as before: the candle is old
+    engine, _ = _engine(
+        api,
+        service,
+        store,
+        strategy=_strategy(cycle="10m"),
+        clock=clock,
+        leads={"lead": tracker},
+    )
+    report = await engine.run_profile("lead")
+    assert report.stale_candle is False
+    assert report.opened == ("SOLUSDT",)
+    assert report.leads is not None and report.leads["status"] == "ok"
+
+
 async def test_a_sell_consensus_closes_the_position_and_names_itself(
     api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
 ) -> None:
