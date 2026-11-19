@@ -135,6 +135,7 @@ The agent records a telemetry snapshot every 5 minutes (`telemetry_snapshots`) a
 ```bash
 docker compose -f deploy/docker-compose.yml up -d postgres grafana   # reads the root .env
 uv run python -m scripts.grafana_dashboards   # regenerates the dashboards after editing the generator
+docker compose -f deploy/docker-compose.yml restart grafana   # Grafana here picks up dashboard changes only when it starts
 uv run pytest tests/grafana-dashboard-smoke-tests   # E2E smoke tests of the dashboards (Docker + Playwright)
 ```
 
