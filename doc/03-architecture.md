@@ -643,7 +643,7 @@ Only one authorized `chat_id`. Every command is audited in `events`.
 
 - **Environments:** `testnet` (order validation), `demo` (*paper trading*, where the agent runs today) and `prod`. It is the same image; only `TA_BINANCE_ENV` and the keys change.
 - **Where it runs today:** on a Windows machine with Rancher Desktop, with the network quirks described in the runbook (§1.2). For production, the recommendation is a VPS with 2 vCPUs, at least 8 GB of RAM (SigNoz alone asks for 4 GB), a fixed IP and a **region allowed by Binance** (e.g. Tokyo, Frankfurt, São Paulo). Latency is not critical for swing trading.
-- **Deploy:** `git pull` + `docker compose -f deploy/docker-compose.yml up -d --build`. The Alembic migrations run at startup, and the exclusive *lock* prevents two instances during the *deploy*.
+- **Deploy:** `git pull` + `docker compose -f deploy/docker-compose.yml up -d --build`. The Alembic migrations run at startup, and the exclusive *lock* prevents two instances during the *deploy*. Grafana here picks up a change in `deploy/grafana/dashboards` only when it starts, so such a change also needs `docker compose -f deploy/docker-compose.yml restart grafana` (runbook, §4).
 
 ## 15. Implementation decision log
 
