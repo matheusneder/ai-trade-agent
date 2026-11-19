@@ -15,6 +15,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from tests.support.fake_binance import FakeBinance
+from tests.support.local_profiles import LOCAL_PULLBACK, merge
 from tests.support.metrics import Measured
 from tests.support.tracing import Recorded
 from trade_agent import app, cli, metrics, tracing
@@ -22,6 +23,7 @@ from trade_agent.app import build_runtime, install_signal_handlers, run_agent
 from trade_agent.config.settings import Settings, load_settings
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.exchange.errors import BinanceConfigurationError
+from trade_agent.notify.notifier import LogNotifier
 from trade_agent.persistence.db import AlreadyRunningError, Database
 from trade_agent.persistence.store import Store
 from trade_agent.runtime import job_name
@@ -107,6 +109,45 @@ async def test_build_runtime_watches_the_break_even_between_closes(
     async with build_runtime(settings, user_stream=False) as runtime:
         jobs = [(interval, job_name(action)) for interval, action in runtime._periodic]
         assert jobs[2] == (app.BREAK_EVEN_INTERVAL_S, "watch_break_even")
+
+
+async def test_build_runtime_tracks_the_lead_traders_of_a_lead_profile(
+    postgres_url: str, tmp_path: Path
+) -> None:
+    """D-052: one periodic task per enabled lead_consensus profile, apart from its cycles."""
+    data = yaml.safe_load(PROFILES.read_text(encoding="utf-8"))
+    data["profiles"]["moderado"]["enabled"] = False  # its share goes to the two lead profiles
+    lead = merge(LOCAL_PULLBACK, {"family": "lead_consensus", "enabled": True, "leads": {}})
+    data["profiles"]["leads"] = lead
+    data["profiles"]["slow"] = merge(
+        lead, {"code": "slow", "leads": {"poll_interval": "30m", "max_data_age": "1h"}}
+    )
+    data["profiles"]["off"] = merge(lead, {"code": "off", "enabled": False})
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(yaml.safe_dump(data), encoding="utf-8")
+    settings = _settings(postgres_url, strategy_config=profiles, tape_enabled=False)
+    async with build_runtime(settings, user_stream=False) as runtime:
+        jobs = [(interval, job_name(action)) for interval, action in runtime._periodic]
+        assert jobs[2:] == [(900.0, "track_leads_leads"), (1800.0, "track_leads_slow")]
+        assert [tf for tf, _ in runtime._candle_jobs] == ["4h", "1h", "1h"]
+    strategy = load_strategy_config(profiles)
+    http, store = AsyncMock(spec=httpx.AsyncClient), AsyncMock(spec=Store)
+    trackers = app.build_lead_trackers(strategy, http, store, LogNotifier())
+    assert list(trackers) == ["leads", "slow"]
+    refreshed: list[str] = []
+
+    async def refresh() -> None:
+        refreshed.append("slow")
+
+    trackers["slow"].refresh = refresh  # type: ignore[method-assign]
+    (_, first), (interval, second) = app.lead_jobs(trackers)
+    assert (interval, job_name(first), job_name(second)) == (
+        1800.0,
+        "track_leads_leads",
+        "track_leads_slow",
+    )
+    assert await second() is None and refreshed == ["slow"]
+    assert app.build_lead_trackers(load_strategy_config(PROFILES), http, store, LogNotifier()) == {}
 
 
 async def test_run_agent_starts_recovers_and_stops(postgres_url: str, db: Database) -> None:

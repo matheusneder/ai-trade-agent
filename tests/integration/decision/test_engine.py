@@ -35,6 +35,7 @@ from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.orders import EntryMode, EntryOrder
 from trade_agent.execution.positions import Position, PositionState
 from trade_agent.execution.service import PositionService
+from trade_agent.leads.tracker import LeadTracker
 from trade_agent.market.candles import INTERVAL_MS, to_frame
 from trade_agent.market.universe import Universe, UniverseConfig, build_universe
 from trade_agent.persistence.db import Database
@@ -116,6 +117,7 @@ def _engine(
     research_wait: timedelta = engine_module.SHARED_RESEARCH_WAIT,
     scopes: Mapping[str, ScopeSpec] | None = None,
     tape: DecisionTape | None = None,
+    leads: Mapping[str, LeadTracker] | None = None,
 ) -> tuple[DecisionEngine, RiskGuard]:
     async def notify(severity: Severity, text: str) -> None:
         if alerts is not None:
@@ -143,6 +145,7 @@ def _engine(
         clock=clock,
         research_wait=research_wait,
         tape=tape,
+        leads=leads,
     )
     guard.set_flattener(engine.flatten)
     return engine, guard
