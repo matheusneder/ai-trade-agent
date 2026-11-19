@@ -697,19 +697,22 @@ class _Simulation:
         regime = self.regime(index, boundary, number, up)
         for order, profile in enumerate(self.profiles):
             at = boundary + timedelta(seconds=95 + 40 * order + self.rng.randint(0, 30))
+            # D-052: a lead_consensus profile postdates D-044, so every one of its cycles carries
+            # the traders' reading; with a reading, they sold the oldest position it holds
+            lead = profile.config.family.needs_leads
+            outage = lead and boundary == self.lead_outage  # no reading: no setup
             exits: list[tuple[str, str]] = []
-            for item in [o for o in self.open if o.profile is profile]:
+            for held, item in enumerate([o for o in self.open if o.profile is profile]):
                 price = self.price(item.asset, index)
                 gaining = price > (item.record.entry_price or price)
-                if self.rng.random() < (0.5 if gaining else 0.35):  # score below exit_score
+                sold = lead and not outage and held == 0
+                if sold or self.rng.random() < (0.5 if gaining else 0.35):  # or a weak score
                     price = _q(self.price(item.asset, index) * Decimal("0.9995"), item.asset.tick)
                     exits.append(self.close(item, at, price, ExitReason.DECISION))
             effective = max(self.global_state, profile.state, key=lambda s: s.rank)
             opened: list[str] = []
             rejected: list[tuple[str, str]] = []
             evaluated = self.rng.randint(9, 16)
-            lead = profile.config.family.needs_leads and number > 0
-            outage = lead and boundary == self.lead_outage  # no reading: no setup
             if effective is OpState.RUNNING and up and not outage:
                 busy = {o.asset.base for o in self.open}  # one position per asset
                 slots = profile.config.allocation.max_open_positions - sum(
@@ -754,7 +757,7 @@ class _Simulation:
                 "stop_noise": noise,
                 "regime": regime,
             }
-            if number:  # the first cycles predate D-044: no family, filter flag nor filtered
+            if number or lead:  # the first cycles predate D-044: no family, filter flag, filtered
                 payload |= {
                     "family": profile.config.family.value,
                     "regime_filter": profile.config.uses_regime_filter,
@@ -1276,7 +1279,9 @@ def _expected(data: Dataset) -> Expected:
         llm_cost=float(sum((u.cost_usd for u in data.llm), Decimal(0))),
         pending_intents=0,
         unprotected=sum(p.state == "unprotected" for p in data.positions),
-        lead_traders=[t["nickname"] for t in sorted(latest, key=lambda t: -t["score"])],
+        lead_traders=[
+            t["nickname"] for t in sorted(latest, key=lambda t: (-t["score"], t["nickname"]))
+        ],
         lead_selections=len(selections),
         lead_status=lead_cycles[-1]["leads"]["status"] if lead_cycles else "",
         lead_fresh=lead_cycles[-1]["leads"]["fresh"] if lead_cycles else 0,
@@ -1300,15 +1305,16 @@ def _expected(data: Dataset) -> Expected:
 
 
 def _lead_complete(data: Dataset) -> bool:
-    """D-052: a position of the lead_consensus profile, and one of its cycles that closed one
-    (the exits of "Decisões por ativo"); nothing to check without such a profile."""
-    exits = (
-        e.payload["exits"]
+    """D-052: the lead_consensus profile's cycles with the traders' reading opened a position
+    and closed one ("entrada aberta" and an exit in "Decisões por ativo", an order in "Ordens e
+    trades"); nothing to check without such a profile."""
+    cycles = [
+        e.payload
         for e in data.events()
         if e.kind == "decision.cycle" and (e.payload.get("leads") or {}).get("status") == OK
-    )
+    ]
     return not data.lead_codes or (
-        any(p.profile in data.lead_codes for p in data.positions) and any(exits)
+        any(c["opened"] for c in cycles) and any(c["exits"] for c in cycles)
     )
 
 

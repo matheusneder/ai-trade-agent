@@ -182,7 +182,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile') ORDER BY 1, 4 DESC"
+          "rawSql": "SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile') ORDER BY 1, 4 DESC, 2"
         }
       ],
       "fieldConfig": {
