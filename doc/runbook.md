@@ -198,7 +198,7 @@ Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EM
 
 The profile buys only what at least `min_backers` of its followed lead traders bought **and** its own candles confirm (doc 03, §6.4), so days without an entry are usually the strategy, as in §2.7. The *Copy trading* dashboard (Grafana and SigNoz) shows all of it; the queries below are the same data. Look in this order:
 
-1. **What the last cycle read** (one every 10 minutes, D-053): the `leads` field of the profile's `decision.cycle` event.
+1. **What the last cycle read** (one every 10 minutes, D-053; every 15 in `temp_cp_trade_validation`, D-054): the `leads` field of the profile's `decision.cycle` event.
 
    ```sql
    SELECT created_at, payload->'leads' FROM events
@@ -223,6 +223,8 @@ The profile buys only what at least `min_backers` of its followed lead traders b
 3. **The source**: a `leads.source_unavailable` event and the 🔴 Telegram alert mean a whole reading failed; `leads.source_recovered` ends it. The logs say what failed (`docker compose -f deploy/docker-compose.yml logs agent | grep '"leads\.'`): `leads.ranking_failed` and `leads.trades_failed` carry the error, and `leads.source_refused` (HTTP 403, 418, 429 or 451) the time until which the agent stops asking. `HTTP 451` is a restricted location, as in the API (doc 01, §2.5). An error that says `fora do formato esperado`, or one that repeats for hours with the website itself working, means Binance changed the endpoint: it is undocumented (doc 01, §2.6). Confirm it with the contract tests (`uv run pytest tests/contract`): the failing one names what changed, and the fix is in `leads/source.py`.
 
 While the source is down the profile opens nothing, and nothing else is affected: the other profiles do not read it, and the profile's open positions keep their native protection, their own technical exit and `max_holding`. To turn the profile off, set `enabled: false` in `config/profiles.yaml` and restart the agent; its positions stay protected on Binance and are reconciled as usual, and its share of the capital stays unused until another enabled profile gets it.
+
+`temp_cp_trade_validation` (D-054) only makes the flow run: it follows the traders that trade most often, whatever their results, and buys on one of them. Once its entries, protection and exits have been seen working, turn it off (`enabled: false`), give its `capital_share` back to `lead_consensus_1h` (0.40) and restart the agent.
 
 ## 3. Telegram commands
 

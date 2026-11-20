@@ -6,9 +6,11 @@ One periodic task per ``lead_consensus`` profile (:meth:`LeadTracker.refresh`, e
 1. when the ranking is due (``ranking_interval``), reads its first pages, keeps the
    portfolios whose figures pass, reads the PnL curve and the trades of each of those and
    follows the ``max_leads`` best scores among the ones that pass on both
-   (:mod:`trade_agent.leads.ranking`). Who is followed, each one's score and how many
-   portfolios each criterion refused go to a ``leads.selected`` event, and a change of the
-   followed traders to Telegram;
+   (:mod:`trade_agent.leads.ranking`). Ranked by activity (D-054), it reads them in the
+   ranking's order until ``shortlist`` are eligible, the trades first and the curve only of
+   an active one, and follows the ones that trade most often. Who is followed, each one's
+   score and how many portfolios each criterion refused go to a ``leads.selected`` event,
+   and a change of the followed traders to Telegram;
 2. reads the most recent trades of each followed trader.
 
 The decision cycle only reads memory (:meth:`LeadTracker.view`): it never waits for the
@@ -54,7 +56,7 @@ from trade_agent.leads.consensus import (
     LeadView,
     backings,
 )
-from trade_agent.leads.ranking import Assessment, assess, best, candidates
+from trade_agent.leads.ranking import Assessment, activity_reasons, assess, best, candidates
 from trade_agent.leads.source import (
     PAGE_SIZE,
     LeadSource,
@@ -100,6 +102,7 @@ class Followed:
                 "sharpe": lead.sharpe,
                 "positive_weeks": assessment.consistency,
                 "recent_gain_pct": assessment.recent_gain_pct,
+                "trades_per_day": round(assessment.trades_per_day, 2),
                 "trading_days": lead.trading_days,
                 "copier_pnl": f"{lead.copier_pnl:f}",
             },
@@ -262,10 +265,14 @@ class LeadTracker:
                 if len(rows) < PAGE_SIZE:
                     break
             examined, rejected = candidates(pool, selection)
+            by_activity = selection.rank_by == "activity"
+            tried = found = 0
             for lead in examined:
+                if by_activity and found >= selection.shortlist:
+                    break  # D-054: enough eligible candidates, in the ranking's order
+                tried += 1
                 try:
-                    curve = await self._request(self._source.pnl_curve(lead.portfolio_id), outcome)
-                    history = await self._request(self._source.trades(lead.portfolio_id), outcome)
+                    assessment, received, history = await self._assess(lead, now, outcome)
                 except LeadSourceRefusedError:
                     raise
                 except LeadSourceError as exc:  # e.g. a portfolio closed since the ranking
@@ -283,11 +290,10 @@ class LeadTracker:
                         kept=followed,
                     )
                     continue
-                received = self._clock()  # a long ranking ages its first readings
-                assessment = assess(lead, curve, history, now, selection)
                 rejected.update(assessment.reasons)
                 assessed.append(assessment)
-                trades[lead.portfolio_id] = (received, tuple(history))
+                found += assessment.eligible
+                trades[lead.portfolio_id] = (received, history)
             if examined and not assessed:  # an outage is no reason to stop following anybody
                 raise LeadSourceError("nenhum candidato pôde ser lido")
         except LeadSourceRefusedError:
@@ -308,11 +314,30 @@ class LeadTracker:
             previous,
             now,
             pool=len(pool),
-            examined=len(examined),
+            examined=tried,
             rejected=rejected,
             unread=sorted(kept),
         )
         return set(self._followed)
+
+    async def _assess(
+        self, lead: LeadStats, now: datetime, outcome: _Outcome
+    ) -> tuple[Assessment, datetime, tuple[LeadTrade, ...]]:
+        """A candidate's assessment, when its trades arrived, and the trades. Ranked by
+        activity (D-054), the trades come first and an idle candidate's PnL curve is not read:
+        it cannot be eligible, so the search goes on through the pool at one request each."""
+        selection, portfolio = self._config.selection, lead.portfolio_id
+        if selection.rank_by == "activity":
+            history = await self._request(self._source.trades(portfolio), outcome)
+            received = self._clock()
+            if idle := activity_reasons(history, now, selection):
+                return Assessment(lead, 0.0, None, None, idle), received, tuple(history)
+            curve = await self._request(self._source.pnl_curve(portfolio), outcome)
+        else:
+            curve = await self._request(self._source.pnl_curve(portfolio), outcome)
+            history = await self._request(self._source.trades(portfolio), outcome)
+            received = self._clock()  # a long ranking ages its first readings
+        return assess(lead, curve, history, now, selection), received, tuple(history)
 
     async def _selected(
         self,

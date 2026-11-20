@@ -1238,9 +1238,10 @@ def _containers() -> Json:
 LEADS = "service.name = 'trade-agent.leads'"
 LEAD_REQUESTS = f"{LEADS} AND server.address = 'www.binance.com'"
 LEADS_HELP = (
-    "Perfis lead_consensus (D-052): seguem os melhores lead traders do Copy Trading Spot da "
-    "Binance e só compram o que pelo menos dois deles compraram e os candles do próprio par "
-    "confirmam. Tamanho, stop e alvo são do perfil: nenhuma operação é copiada."
+    "Perfis lead_consensus (D-052): seguem lead traders do Copy Trading Spot da Binance (os "
+    "melhores, ou os que mais operam no perfil de teste, D-054) e só compram o que pelo menos "
+    "min_backers deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo "
+    "são do perfil: nenhuma operação é copiada."
 )
 
 

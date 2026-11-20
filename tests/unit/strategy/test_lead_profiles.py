@@ -1,5 +1,5 @@
 """The ``lead_consensus`` profile (D-052): its schema, the repository's one, the shares it
-took and its decision cycle (D-053)."""
+took, its decision cycle (D-053) and the profile that tests its flow (D-054)."""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -26,11 +26,11 @@ REPOSITORY = load_strategy_config(REPOSITORY_FILE)
 LEAD: dict[str, Any] = {"family": "lead_consensus", "signals": {}, "leads": {}}
 
 
-def test_the_repository_profile_follows_spot_lead_traders_on_two_fifths_of_the_account() -> None:
+def test_the_repository_profile_follows_spot_lead_traders_on_a_fifth_of_the_account() -> None:
     profile = REPOSITORY.profiles["lead_consensus_1h"]
     assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
-    assert (profile.code, profile.timeframe, profile.capital_share) == ("lead1h", "1h", D("0.40"))
-    assert REPOSITORY.profile_capital("lead_consensus_1h") == D(400)
+    assert (profile.code, profile.timeframe, profile.capital_share) == ("lead1h", "1h", D("0.20"))
+    assert REPOSITORY.profile_capital("lead_consensus_1h") == D(200)
     # D-053: it decides every 10 minutes on the 1h candles, with one reading of them per cycle
     assert (profile.cycle, profile.cadence) == (timedelta(minutes=10), "10m")
     assert profile.local_params() == ConsensusParams(
@@ -42,29 +42,59 @@ def test_the_repository_profile_follows_spot_lead_traders_on_two_fifths_of_the_a
     assert profile.leads == LeadsConfig(poll_interval=timedelta(minutes=10))
 
 
+def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> None:
+    """D-054: with the market down the traders of lead_consensus_1h barely trade, so this one
+    follows whoever trades most often, whatever the results, on the 15m candles."""
+    profile = REPOSITORY.profiles["temp_cp_trade_validation"]
+    assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
+    assert (profile.code, profile.timeframe, profile.capital_share) == ("tcpv15m", "15m", D("0.20"))
+    assert (profile.cycle, profile.cadence) == (timedelta(minutes=15), "15m")
+    assert profile.leads is not None and profile.risk is not None
+    selection, consensus = profile.leads.selection, profile.leads.consensus
+    assert selection.rank_by == "activity"
+    performance = (
+        selection.min_roi_pct,
+        selection.max_drawdown_pct,
+        selection.min_sharpe,
+        selection.max_copier_loss_pct,
+        selection.min_positive_weeks_pct,
+        selection.min_recent_gain_pct,
+    )
+    assert performance == (None,) * 6
+    assert (selection.max_idle, selection.min_trades_30d) == (timedelta(days=1), 30)
+    assert (consensus.min_backers, consensus.window) == (1, timedelta(hours=6))
+    assert profile.leads.poll_interval == timedelta(minutes=15)  # one reading per cycle
+    # the budget of the others, with a shorter pause
+    others = REPOSITORY.profiles["lead_consensus_1h"].risk
+    assert others is not None
+    assert profile.risk == others.model_copy(update={"cooldown": timedelta(hours=4)})
+
+
 def test_the_enabled_shares_still_add_up_to_the_whole_account() -> None:
     shares = {name: p.capital_share for name, p in REPOSITORY.enabled_profiles().items()}
     assert sum(shares.values()) == 1
     # D-052 took half of each rejected pair-local profile; D-053 the rest of both, which are
-    # off, and 0.10 from each main profile
+    # off, and 0.10 from each main profile; D-054 lent half of it to the flow test
     assert shares == {
         "swing_trend": D("0.25"),
         "momentum_alpha": D("0.20"),
         "alt_atr": D("0.05"),
         "pair_pullback_1h": D("0.10"),
-        "lead_consensus_1h": D("0.40"),
+        "lead_consensus_1h": D("0.20"),
+        "temp_cp_trade_validation": D("0.20"),
     }
     assert not REPOSITORY.profiles["pair_breakout_1h"].enabled
     assert not REPOSITORY.profiles["pair_range_1h"].enabled
 
 
-def test_the_repository_profile_passes_the_risk_guard_at_any_stop() -> None:
-    """Its target is 2R net of costs, so the minimum R:R holds from the tightest stop to the
-    cap, and its smallest lot is above Binance's 5 USDT minimum."""
-    profile = REPOSITORY.profiles["lead_consensus_1h"]
+@pytest.mark.parametrize("name", ["lead_consensus_1h", "temp_cp_trade_validation"])
+def test_the_repository_profiles_pass_the_risk_guard_at_any_stop(name: str) -> None:
+    """Their target is 2R net of costs, so the minimum R:R holds from the tightest stop to
+    the cap, and their smallest lot is above Binance's 5 USDT minimum."""
+    profile = REPOSITORY.profiles[name]
     pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
     fee = D(str(pre_trade.round_trip_fee_pct))
-    capital = REPOSITORY.profile_capital("lead_consensus_1h")
+    capital = REPOSITORY.profile_capital(name)
     for stop in (D("0.5"), D(2), D(4), D(6), D(9)):
         policy = profile.protection.policy(stop, D(1), cost_pct=profile.cost_pct())
         assert policy.stop_pct is not None and policy.stop_pct <= D(6)
@@ -107,6 +137,8 @@ def test_a_cycle_shorter_than_the_candle_is_only_for_the_lead_traders_consensus(
     assert local_profile(**LEAD).cadence == "1h"  # without a cycle: at each close
     assert local_profile(**merge(LEAD, {"cycle": "10m"})).cadence == "10m"
     assert local_profile(**merge(LEAD, {"cycle": "30m"})).cycle == timedelta(minutes=30)
+    # D-054: the candle itself is a cycle too, the same as none
+    assert local_profile(**merge(LEAD, {"cycle": "1h"})).cadence == "60m"
     with pytest.raises(ValidationError, match="cycle é só da família lead_consensus"):
         local_profile(cycle="10m")
     data = raw_config()
@@ -115,10 +147,10 @@ def test_a_cycle_shorter_than_the_candle_is_only_for_the_lead_traders_consensus(
         StrategyConfig.model_validate(data)
 
 
-@pytest.mark.parametrize("cycle", ["4m", "7m", "1h", "2h", 450])
+@pytest.mark.parametrize("cycle", ["4m", "7m", "2h", 450])
 def test_a_cycle_divides_the_candle_in_whole_minutes_of_at_least_five(cycle: object) -> None:
-    """4 minutes is too short, 7 does not divide the hour, the hour is the candle itself and
-    450 seconds (7.5 minutes) is no whole number of minutes."""
+    """4 minutes is too short, 7 does not divide the hour, 2 hours are longer than the candle
+    and 450 seconds (7.5 minutes) is no whole number of minutes."""
     with pytest.raises(ValidationError, match="cycle deve ter minutos inteiros"):
         local_profile(**merge(LEAD, {"cycle": cycle}))
 
@@ -171,7 +203,11 @@ def test_invalid_lead_settings(values: dict[str, Any], message: str) -> None:
 def test_the_defaults_never_let_one_trader_or_the_return_alone_decide() -> None:
     selection, consensus = LeadSelectionConfig(), LeadConsensusConfig()
     assert consensus.min_backers >= 2
-    assert selection.max_copier_loss_pct is not None and selection.min_sharpe > 0
-    assert selection.min_positive_weeks_pct > 50 and selection.max_drawdown_pct <= 20
+    assert selection.rank_by == "score" and selection.min_roi_pct is not None
+    assert selection.max_copier_loss_pct is not None
+    assert selection.min_sharpe is not None and selection.min_sharpe > 0
+    assert selection.min_positive_weeks_pct is not None
+    assert selection.min_positive_weeks_pct > 50 and selection.min_recent_gain_pct is not None
+    assert selection.max_drawdown_pct is not None and selection.max_drawdown_pct <= 20
     assert LeadsConfig().max_data_age < timedelta(hours=1)  # stale trades are no signal
     assert LOCAL_PULLBACK["family"] != "lead_consensus"  # the fixture stays a pullback

@@ -21,6 +21,10 @@ recent performance     0.25    PnL of the last 30 days, in % of the balance, cap
 The floors and caps keep one extreme figure from carrying the score: a drawdown of zero
 (nothing sold at a loss *yet*) does not make the ratio infinite, and a 300% ROI is worth no
 more than the cap. The rejection reasons are operator text (Portuguese).
+
+A profile that only tests the copy trading flow (D-054) leaves the performance criteria out
+(``null``) and orders the eligible ones by their trades per day (``rank_by: activity``): it
+follows whoever trades most often, whatever the results.
 """
 
 import bisect
@@ -57,14 +61,15 @@ TOO_MANY_TRADES = "operações demais (provável robô de grade)"
 
 
 def figure_reasons(lead: LeadStats, config: LeadSelectionConfig) -> tuple[str, ...]:
-    """What the portfolio's ranking figures fail."""
+    """What the portfolio's ranking figures fail; a ``null`` criterion is not checked."""
+    roi, drawdown, sharpe = config.min_roi_pct, config.max_drawdown_pct, config.min_sharpe
     copier_loss = config.max_copier_loss_pct
     checks = [
         (lead.trading_days < config.min_days, YOUNG),
         (lead.balance < config.min_balance, SMALL),
-        (lead.roi_pct < config.min_roi_pct, LOW_ROI),
-        (lead.mdd_pct > config.max_drawdown_pct, DEEP_DRAWDOWN),
-        (lead.sharpe is None or lead.sharpe < config.min_sharpe, LOW_SHARPE),
+        (roi is not None and lead.roi_pct < roi, LOW_ROI),
+        (drawdown is not None and lead.mdd_pct > drawdown, DEEP_DRAWDOWN),
+        (sharpe is not None and (lead.sharpe is None or lead.sharpe < sharpe), LOW_SHARPE),
         (
             copier_loss is not None
             and -lead.copier_pnl * 100 > Decimal(str(copier_loss)) * lead.copy_aum,
@@ -78,7 +83,10 @@ def candidates(
     pool: Iterable[LeadStats], config: LeadSelectionConfig
 ) -> tuple[list[LeadStats], Counter[str]]:
     """The portfolios of the pool worth two more readings, in the ranking's order (best
-    Sharpe ratio first), and how many each criterion refused."""
+    Sharpe ratio first), and how many each criterion refused: the first ``shortlist``, or
+    with ``rank_by: activity`` all of them, since the ranking has no trade count and its
+    first portfolios may all be idle; the tracker then reads them in order until it has
+    found ``shortlist`` eligible ones (D-054)."""
     passed: list[LeadStats] = []
     rejected: Counter[str] = Counter()
     for lead in {s.portfolio_id: s for s in pool}.values():
@@ -86,7 +94,7 @@ def candidates(
         rejected.update(reasons)
         if not reasons:
             passed.append(lead)
-    return passed[: config.shortlist], rejected
+    return (passed if config.rank_by == "activity" else passed[: config.shortlist]), rejected
 
 
 def pnl_at(curve: Sequence[PnlPoint], moment: datetime) -> float | None:
@@ -135,6 +143,14 @@ def activity_reasons(
     return tuple(reasons)
 
 
+def trades_per_day(trades: Sequence[LeadTrade], now: datetime) -> float:
+    """How often the portfolio trades: its most recent ``trades`` over the days from the
+    oldest of them to ``now`` (at least one), so a pause since the last one lowers it."""
+    if not trades:
+        return 0.0
+    return len(trades) / max((now - min(t.at for t in trades)) / timedelta(days=1), 1.0)
+
+
 @dataclass(frozen=True, slots=True)
 class Assessment:
     lead: LeadStats
@@ -143,6 +159,7 @@ class Assessment:
     recent_gain_pct: float | None
     reasons: tuple[str, ...]
     """Why the candidate is not eligible; empty when it is."""
+    trades_per_day: float = 0.0
 
     @property
     def eligible(self) -> bool:
@@ -158,12 +175,10 @@ def assess(
 ) -> Assessment:
     """A candidate's score and what its PnL curve and its trades fail, if anything."""
     consistency, recent = positive_weeks(curve), recent_gain_pct(curve, lead.balance)
+    weeks, gain = config.min_positive_weeks_pct, config.min_recent_gain_pct
     checks = [
-        (
-            consistency is None or consistency * 100 < config.min_positive_weeks_pct,
-            INCONSISTENT,
-        ),
-        (recent is None or recent < config.min_recent_gain_pct, WEAK_RECENT),
+        (weeks is not None and (consistency is None or consistency * 100 < weeks), INCONSISTENT),
+        (gain is not None and (recent is None or recent < gain), WEAK_RECENT),
     ]
     ratio = min(max(lead.roi_pct, 0.0) / max(lead.mdd_pct, MDD_FLOOR), RATIO_CAP) / RATIO_CAP
     recent_part = min(max(recent or 0.0, 0.0) / RECENT_CAP, 1.0)
@@ -177,10 +192,16 @@ def assess(
             *(reason for failed, reason in checks if failed),
             *activity_reasons(trades, now, config),
         ),
+        trades_per_day=trades_per_day(trades, now),
     )
 
 
 def best(assessments: Iterable[Assessment], config: LeadSelectionConfig) -> list[Assessment]:
-    """The eligible candidates to follow: the ``max_leads`` best scores."""
-    eligible = sorted((a for a in assessments if a.eligible), key=lambda a: a.score, reverse=True)
+    """The eligible candidates to follow: the ``max_leads`` best scores, or with ``rank_by:
+    activity`` the ones that trade most often (D-054)."""
+
+    def key(a: Assessment) -> tuple[float, ...]:
+        return (a.trades_per_day, a.score) if config.rank_by == "activity" else (a.score,)
+
+    eligible = sorted((a for a in assessments if a.eligible), key=key, reverse=True)
     return eligible[: config.max_leads]
