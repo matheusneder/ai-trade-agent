@@ -232,9 +232,10 @@ profiles:
     code: lead1h
     enabled: true
     family: lead_consensus
-    # 400 USDT (D-053, was 0.10): the 0.05 of pair_breakout_1h and of pair_range_1h, and 0.10
-    # each from swing_trend and momentum_alpha
-    capital_share: 0.40
+    # 200 USDT (D-054): the 0.40 of D-053 (the 0.05 of pair_breakout_1h and of pair_range_1h,
+    # and 0.10 each from swing_trend and momentum_alpha), half of it lent to
+    # temp_cp_trade_validation
+    capital_share: 0.20
     timeframe: 1h              # confirmation, stop and risk budget on the 1h candles
     cycle: 10m                 # decides at :00, :10 ... :50 on the last closed 1h candle (D-053)
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
@@ -283,4 +284,68 @@ profiles:
       max_data_age: 45m        # an older reading of a trader does not count
       max_ranking_age: 24h     # without a new ranking for this long: nobody is followed
       backoff: 1h              # after the source refuses a request
+      request_delay_s: 0.5
+
+  # ------------------------------------------------------------ copy trading flow test (D-054)
+  # Temporary, Demo only, and no strategy: with the market down the traders lead_consensus_1h
+  # follows barely trade, and it needs two of them on the same asset, so its flow (selection,
+  # readings, consensus, the candles' confirmation, entry, protection and exits) has gone
+  # untested. This one follows the traders that trade most often, whatever their results, buys
+  # what a single one of them bought and decides at each 15m close. Turn it off and give its
+  # share back to lead_consensus_1h once the flow is validated.
+  temp_cp_trade_validation:
+    code: tcpv15m
+    enabled: true
+    family: lead_consensus
+    capital_share: 0.20        # 200 USDT, half of the 0.40 of lead_consensus_1h (D-054)
+    timeframe: 15m             # confirmation, stop and risk budget on the 15m candles
+    cycle: 15m                 # the timeframe itself: at each 15m close
+    tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
+    allocation:
+      max_open_positions: 2
+      max_position_pct: 0.35
+      cash_reserve_pct: 0.30
+      risk_per_trade_pct: 0.5
+    entry:
+      min_score: -1.0          # ranking only (share of the followed traders that bought)
+      order: limit_fok
+      max_slippage_bps: 20
+    protection:
+      stop: {mode: fixed, atr_mult: 2.0, max_pct: 6.0}
+      take_profit: {mode: limit, activation_pct: 0.5, activation_r: 2.0}   # target at 2R net
+      max_holding: 24h         # short, so the positions turn over and the exits run too
+    signals:
+      max_extension_atr: 1.5
+    llm: {enabled: false}
+    risk:
+      <<: *local_risk
+      cooldown: 4h             # 24h in the others: a pause does not hold the test for a day
+    leads:
+      selection:
+        rank_by: activity      # the traders with the most trades per day, whatever their results
+        pool_pages: 5
+        shortlist: 30          # candidates whose PnL curve and trades are read (2 requests each)
+        max_leads: 6
+        min_days: 14
+        min_balance: 100       # their purchases are measured against it (min_buy_pct)
+        min_roi_pct: null      # null: not checked, this profile only tests the flow
+        max_drawdown_pct: null
+        min_sharpe: null
+        max_copier_loss_pct: null
+        min_positive_weeks_pct: null
+        min_recent_gain_pct: null
+        max_idle: 1d           # traded in the last day
+        min_trades_30d: 30     # about one a day at least
+        max_trades_per_day: 50.0      # above it: taken for a grid bot
+      consensus:
+        min_backers: 1         # one trader alone opens a position
+        window: 6h
+        min_buy_pct: 0.5       # net purchase, % of the trader's own balance
+        max_symbols_per_lead: 3
+        max_premium_pct: 1.5
+      poll_interval: 15m       # one reading per cycle
+      ranking_interval: 6h
+      max_data_age: 45m
+      max_ranking_age: 24h
+      backoff: 1h
       request_delay_s: 0.5

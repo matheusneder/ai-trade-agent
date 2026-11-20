@@ -100,6 +100,7 @@ class Followed:
                 "sharpe": lead.sharpe,
                 "positive_weeks": assessment.consistency,
                 "recent_gain_pct": assessment.recent_gain_pct,
+                "trades_per_day": round(assessment.trades_per_day, 2),
                 "trading_days": lead.trading_days,
                 "copier_pnl": f"{lead.copier_pnl:f}",
             },

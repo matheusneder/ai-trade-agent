@@ -261,8 +261,14 @@ class LeadSelectionConfig(_Strict):
     return alone: a portfolio must also be old enough, have its owner's money in it, a bounded
     drawdown, a risk-adjusted return, copiers that did not lose much, gains spread over the
     weeks, a recent gain and a human trading rhythm (:mod:`trade_agent.leads.ranking`).
+
+    A test profile may leave the performance criteria out (``null``) and follow the traders
+    that trade most often instead (``rank_by: activity``, D-054).
     """
 
+    rank_by: Literal["score", "activity"] = "score"
+    """Which eligible traders are followed: the best scores, or the ones that trade most often
+    whatever their results (trades per day, D-054)."""
     pool_pages: int = Field(default=5, ge=1, le=20)
     """Pages of 30 portfolios read from the ranking, best Sharpe ratio first."""
     shortlist: int = Field(default=20, ge=1, le=60)
@@ -274,16 +280,17 @@ class LeadSelectionConfig(_Strict):
     """Days the portfolio has been trading."""
     min_balance: Decimal = Field(default=Decimal(1000), ge=0)
     """The lead trader's own money in the portfolio (its AUM minus the copiers'), in USDT."""
-    min_roi_pct: float = 3.0
-    max_drawdown_pct: float = Field(default=20.0, gt=0)
-    min_sharpe: float = 1.0
+    min_roi_pct: float | None = 3.0
+    """``null`` here and in the other performance criteria: not checked (D-054)."""
+    max_drawdown_pct: float | None = Field(default=20.0, gt=0)
+    min_sharpe: float | None = 1.0
     """A portfolio without a Sharpe ratio (Binance gives none to the young ones) is refused."""
     max_copier_loss_pct: float | None = Field(default=5.0, ge=0)
     """What the copiers lost over the window, in % of the money they have in the portfolio,
-    above which it is refused whatever its own ROI (``null``: not checked)."""
-    min_positive_weeks_pct: float = Field(default=55.0, ge=0, le=100)
+    above which it is refused whatever its own ROI."""
+    min_positive_weeks_pct: float | None = Field(default=55.0, ge=0, le=100)
     """Share of the 7-day steps of the cumulative PnL curve that ended higher."""
-    min_recent_gain_pct: float = 0.0
+    min_recent_gain_pct: float | None = 0.0
     """PnL of the last 30 days, in % of the trader's own balance."""
     max_idle: timedelta = timedelta(days=7)
     """Longest time since the portfolio's last trade."""
@@ -370,7 +377,8 @@ class ProfileConfig(_Strict):
     timeframe: Timeframe
     cycle: timedelta | None = None
     """How often a ``lead_consensus`` profile decides, on the last closed candle of its
-    ``timeframe`` (D-053): its consensus changes between the closes. ``None``: at each close."""
+    ``timeframe`` (D-053): its consensus changes between the closes. ``None``, or the
+    timeframe itself: at each close."""
     tiers: dict[Tier, Fraction]
     allocation: AllocationConfig
     entry: EntryConfig
@@ -398,7 +406,7 @@ class ProfileConfig(_Strict):
                 raise ValueError("cycle é só da família lead_consensus")
             candle = timedelta(milliseconds=INTERVAL_MS[self.timeframe])
             minute = timedelta(minutes=1)
-            if not MIN_CYCLE <= self.cycle < candle or candle % self.cycle or self.cycle % minute:
+            if not MIN_CYCLE <= self.cycle <= candle or candle % self.cycle or self.cycle % minute:
                 raise ValueError(
                     f"cycle deve ter minutos inteiros, ser >= 5m e dividir o timeframe "
                     f"({self.timeframe})"

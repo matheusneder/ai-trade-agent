@@ -792,6 +792,7 @@ class _Simulation:
                         "sharpe": round(self.rng.uniform(1.0, 3.5), 4),
                         "positive_weeks": round(self.rng.randint(7, 11) / 12, 4),
                         "recent_gain_pct": round(self.rng.uniform(0, 6), 4),
+                        "trades_per_day": round(self.rng.uniform(0.3, 8), 2),
                         "trading_days": self.rng.randint(90, 700),
                         "copier_pnl": str(self.rng.randint(-50, 900)),
                     },
