@@ -31,15 +31,17 @@ def test_the_repository_profile_follows_spot_lead_traders_on_a_fifth_of_the_acco
     assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
     assert (profile.code, profile.timeframe, profile.capital_share) == ("lead1h", "1h", D("0.20"))
     assert REPOSITORY.profile_capital("lead_consensus_1h") == D(200)
-    # D-053: it decides every 10 minutes on the 1h candles, with one reading of them per cycle
-    assert (profile.cycle, profile.cadence) == (timedelta(minutes=10), "10m")
+    # D-055: at each 1h close again (every 10 minutes in D-053), with one reading per cycle
+    assert (profile.cycle, profile.cadence) == (timedelta(hours=1), "60m")
     assert profile.local_params() == ConsensusParams(
         max_extension_atr=1.5, min_stop_atr=2.0, max_stop_pct=0.06
     )
     assert not profile.llm.enabled and not profile.uses_regime_filter
     assert profile.risk is not None and profile.risk.max_drawdown_pct == D(8)
-    # the file spells out the defaults, so a change of either is a deliberate one
-    assert profile.leads == LeadsConfig(poll_interval=timedelta(minutes=10))
+    # the file spells out the defaults, so a change of any is a deliberate one: D-055 reads
+    # the traders every hour, so their reading counts for 90 minutes
+    hourly = LeadsConfig(poll_interval=timedelta(hours=1), max_data_age=timedelta(minutes=90))
+    assert profile.leads == hourly
 
 
 def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> None:

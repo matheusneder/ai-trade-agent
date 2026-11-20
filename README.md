@@ -78,8 +78,8 @@ The agent needs PostgreSQL and the keys in the `.env`. At startup, it applies th
 - reconciles every 5 minutes and reacts to User Data Stream events;
 - evaluates the stop conditions every minute (`config/stop_conditions.yaml`);
 - collects news every 15 minutes;
-- with a `lead_consensus` profile enabled, reads the lead traders of Binance's Spot Copy Trading every 10 minutes ([architecture](doc/03-architecture.md), §6.4);
-- builds the universe and runs the decision cycle of each enabled profile at the candle close (the current profiles use 4h, 1h and, in the copy trading flow test, 15m), or every 10 minutes on the last closed candle for `lead_consensus_1h`.
+- with a `lead_consensus` profile enabled, reads the lead traders of Binance's Spot Copy Trading every hour, and every 15 minutes in the copy trading flow test ([architecture](doc/03-architecture.md), §6.4);
+- builds the universe and runs the decision cycle of each enabled profile at the candle close (the current profiles use 4h, 1h and, in the copy trading flow test, 15m).
 
 Use **Demo Mode** (`TA_BINANCE_ENV=demo`) to run the agent: the Spot Testnet has only ~20 days of history, and the universe ends up empty (see [`doc/runbook.md`](doc/runbook.md)). With `TA_TRADING_ENABLED=false` (the default), the agent runs in **simulation**: it decides and records the entries and exits as events, without sending orders. With Telegram configured (`TA_TELEGRAM_BOT_TOKEN` and `TA_TELEGRAM_CHAT_ID`), it sends alerts and accepts `/status`, `/pause`, `/resume`, `/halt` and `/flatten` (the latter with a confirmation code).
 
