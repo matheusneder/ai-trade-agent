@@ -845,7 +845,7 @@ class _Simulation:
 
         assets = {s: buy(s, self.rng.randint(2, 3)) for s in [*opened, *(s for s, _ in rejected)]}
         free = [a.symbol for a in ASSETS if a.symbol not in assets and a.symbol not in dict(exits)]
-        # 4 candidates at most, and an exit per position held (5 in tcphr15m, D-056): with an
+        # 4 candidates at most, and an exit per position held (up to 20 in tcphr15m, D-057): with an
         # exit, the 8 assets may all be taken; without one, at least 4 are left
         self.rng.shuffle(free)
         if free:
