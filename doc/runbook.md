@@ -198,7 +198,7 @@ Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EM
 
 The profile buys only what at least `min_backers` of its followed lead traders bought **and** its own candles confirm (doc 03, §6.4), so days without an entry are usually the strategy, as in §2.7. The *Copy trading* dashboard (Grafana and SigNoz) shows all of it; the queries below are the same data. Look in this order:
 
-1. **What the last cycle read** (one every 10 minutes, D-053; every 15 in `temp_cp_trade_validation`, D-054): the `leads` field of the profile's `decision.cycle` event.
+1. **What the last cycle read** (one an hour, D-055; every 15 minutes in `temp_cp_trade_validation`, D-054): the `leads` field of the profile's `decision.cycle` event.
 
    ```sql
    SELECT created_at, payload->'leads' FROM events
@@ -211,7 +211,7 @@ The profile buys only what at least `min_backers` of its followed lead traders b
    | `ok` | The reading is fresh. `assets` lists who bought and sold each asset: without a `"consensus": "buy"` there was nothing to confirm; with one and no entry, the cycle's `filtered` (the candles refused it) or `rejected` (price past what the traders paid, slots, risk budget) says why | nothing |
    | `nenhum trader selecionado` | The last ranking found nobody that passes `leads.selection` | see step 2 |
    | `ranking de traders vencido` | No ranking could be read for `max_ranking_age` (24 h), or none since the start | see step 3 |
-   | `copy trading sem dados recentes` | The followed traders' trades could not be read for `max_data_age` (45 min) | see step 3 |
+   | `copy trading sem dados recentes` | The followed traders' trades could not be read for `max_data_age` (90 min; 45 in the flow test) | see step 3 |
 
 2. **Who is followed and who was refused**: the `leads.selected` event of each ranking (every 6 h) has the followed traders with their score and figures, `rejected`, how many portfolios each criterion refused, and `unread`, the followed traders it could not read and kept: their vote is unknown, so they block a buy consensus they could overturn until they are read again. In a falling market most Spot traders fail the recent gain and the positive weeks: on 2026-11-19, with BTC below its EMA 200 for four weeks, 1 portfolio of 150 was followed. That is the strategy declining to follow anybody. Loosening a threshold is a change of strategy: edit `leads.selection` in `config/profiles.yaml` and restart the agent.
 
