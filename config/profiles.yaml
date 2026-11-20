@@ -369,7 +369,7 @@ profiles:
     cycle: 15m
     tiers: {core: 1.0, large: 1.0, mid: 1.0, small: 1.0}   # no tier limit, small ones too
     allocation:
-      max_open_positions: 5    # lots of 20 USDT; ~9.7 at the 10% stop cap (5 USDT minimum)
+      max_open_positions: 20   # D-057: the budget binds first (5 lots of 20 USDT, ~10 at the 10% stop cap)
       max_position_pct: 0.20
       cash_reserve_pct: 0.0
       risk_per_trade_pct: 1.0  # twice the others: the wide stops still fit the minimum lot
