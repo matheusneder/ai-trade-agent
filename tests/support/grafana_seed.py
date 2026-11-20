@@ -845,10 +845,13 @@ class _Simulation:
 
         assets = {s: buy(s, self.rng.randint(2, 3)) for s in [*opened, *(s for s, _ in rejected)]}
         free = [a.symbol for a in ASSETS if a.symbol not in assets and a.symbol not in dict(exits)]
-        self.rng.shuffle(free)  # at least 2 left: 4 candidates and 2 exits at most, of 8 assets
-        refused = free.pop()
-        assets[refused] = buy(refused, 2)
-        filtered.append([refused, self.rng.choice(CANDLE_REFUSALS)])
+        # 4 candidates at most, and an exit per position held (5 in tcphr15m, D-056): with an
+        # exit, the 8 assets may all be taken; without one, at least 4 are left
+        self.rng.shuffle(free)
+        if free:
+            refused = free.pop()
+            assets[refused] = buy(refused, 2)
+            filtered.append([refused, self.rng.choice(CANDLE_REFUSALS)])
         sold = exits[0][0] if exits else free.pop()  # the first exit: the traders sold it
         assets[sold] = Backing(sold, sellers=tuple(sorted(self.rng.sample(ids, 2))))
         if free:
@@ -1306,16 +1309,19 @@ def _expected(data: Dataset) -> Expected:
 
 
 def _lead_complete(data: Dataset) -> bool:
-    """D-052: the lead_consensus profile's cycles with the traders' reading opened a position
-    and closed one ("entrada aberta" and an exit in "Decisões por ativo", an order in "Ordens e
-    trades"); nothing to check without such a profile."""
+    """D-052: the lead_consensus profiles' cycles with the traders' reading opened a position
+    and closed one ("entrada aberta" and an exit in "Decisões por ativo"), and every such
+    profile has an order in "Ordens e trades" (one that runs after the others may find no
+    asset free in a whole day); nothing to check without such a profile."""
     cycles = [
         e.payload
         for e in data.events()
         if e.kind == "decision.cycle" and (e.payload.get("leads") or {}).get("status") == OK
     ]
     return not data.lead_codes or (
-        any(c["opened"] for c in cycles) and any(c["exits"] for c in cycles)
+        any(c["opened"] for c in cycles)
+        and any(c["exits"] for c in cycles)
+        and data.lead_codes <= {p.profile for p in data.positions}
     )
 
 
