@@ -1,14 +1,17 @@
 """The synthetic day keeps the agent's invariants (no Docker, no browser: always runs)."""
 
 import dataclasses
+import random
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from tests.support.grafana_seed import (
+    ASSETS,
     STEP,
     Dataset,
+    _Simulation,
     daily_scope_pnl,
     generate,
     log_counts,
@@ -19,6 +22,7 @@ from trade_agent.execution.positions import (
     realized_pnl,
     summarize_fills,
 )
+from trade_agent.leads.consensus import SELL_CONSENSUS
 from trade_agent.persistence.models import (
     EventRecord,
     ExchangeOrderRecord,
@@ -158,3 +162,37 @@ def test_lead_cycles_buy_only_what_the_traders_bought(day: Dataset) -> None:
             assert set(asset) == {"buyers", "sellers", "avg_buy_price", "consensus"}
     selection = next(e.payload for e in day.events() if e.kind == "leads.selected")
     assert {"profile", "pool", "examined", "selected", "rejected", "unread"} == set(selection)
+
+
+@pytest.mark.parametrize(
+    ("seed", "end"),
+    [
+        (4, datetime(2026, 11, 20, 15, 30, tzinfo=UTC)),
+        (42, datetime(2026, 11, 20, 11, 30, tzinfo=UTC)),
+    ],
+)
+def test_every_lead_profile_has_orders(seed: int, end: datetime) -> None:
+    """D-056: "Ordens e trades do copy trading" lists every lead_consensus profile. These
+    days used to come out without an order of tcphr15m, which runs after the other two."""
+    data = generate(seed=seed, hours=24, end=end)
+    assert data.lead_codes
+    assert data.lead_codes <= {p.profile for p in data.positions}
+
+
+def test_a_lead_cycle_whose_setups_and_exits_take_every_asset() -> None:
+    """D-056: 4 setups and 4 exits (tcphr15m holds up to 5) leave no asset for a candle
+    refusal; the reading still has the sell consensus behind the first exit."""
+    rng = random.Random(0)  # noqa: S311 - synthetic data, not security
+    simulation = _Simulation(rng, END - timedelta(hours=24), END)
+    simulation._lead_selection(END - timedelta(hours=1))
+    symbols = [a.symbol for a in ASSETS]
+    exits = [(s, "saída") for s in symbols[4:]]
+    filtered: list[list[str]] = []
+    leads = simulation._lead_view(
+        0, END, outage=False, opened=symbols[:2],
+        rejected=[(s, "score") for s in symbols[2:4]], exits=exits, filtered=filtered,
+    )  # fmt: skip
+    assert filtered == []
+    assert set(leads["assets"]) == set(symbols[:5])  # the 4 setups and what they sold
+    assert leads["assets"][symbols[4]]["consensus"] == "sell"
+    assert exits[0] == (symbols[4], SELL_CONSENSUS)

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import insert, update
 
-from tests.support.risk import NOW
+from tests.support.risk import NOW, closed_position
 from trade_agent.persistence.models import PositionRecord
 from trade_agent.persistence.store import Store
 
@@ -43,3 +43,17 @@ async def test_risk_history_never_truncates_at_ui_page_size(store: Store) -> Non
     reset = await store.risk_history(NOW - timedelta(days=1))
     assert reset.consecutive_losses == 0 and reset.streaks == {}
     assert reset.daily == {"con": Decimal(-1004)}
+
+
+async def test_a_profile_outside_the_global_streak_neither_adds_nor_breaks(store: Store) -> None:
+    """D-056: the flow test's losses and wins are left out of the global streak only."""
+    for hours, profile, pnl in [(6, "con", "-1"), (5, "mod", "2"), (4, "con", "-1")] + [
+        (n, "mod", "-1") for n in range(4)
+    ]:
+        await closed_position(
+            store, profile=profile, pnl=pnl, closed_at=NOW - timedelta(hours=hours)
+        )
+    assert (await store.risk_history(NOW)).consecutive_losses == 5  # back to mod's win
+    history = await store.risk_history(NOW, outside_global_streak={"mod"})
+    assert history.consecutive_losses == 2  # con's, across mod's win
+    assert history.streaks == {"con": 2, "mod": 4}

@@ -387,6 +387,7 @@ profiles:
     llm: {enabled: false}
     risk:
       cost_pct: 0.3            # sizing and target only: no pause, open-risk cap or re-entry wait
+      global_streak: false     # its losses neither pause every profile nor reset the global streak
     leads:
       selection: *busiest      # the traders of temp_cp_trade_validation
       consensus:

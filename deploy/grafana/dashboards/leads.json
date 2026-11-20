@@ -161,7 +161,7 @@
     {
       "type": "table",
       "title": "Traders acompanhados agora",
-      "description": "A última seleção de cada perfil: nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, operações por dia (das mais recentes até agora; o perfil de teste segue os que mais operam, D-054) e o dinheiro do próprio trader no portfólio (USDT).",
+      "description": "A última seleção de cada perfil: nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, operações por dia (das mais recentes até agora; os perfis de teste seguem os que mais operam, D-054 e D-056) e o dinheiro do próprio trader no portfólio (USDT).",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "trade-agent-pg"

@@ -90,8 +90,10 @@ def test_the_high_risk_flow_test_turns_a_consensus_into_an_order_as_often_as_it_
     assert all(profile.tier_limit(tier) == 1 for tier in Tier)
     assert profile.allocation.cash_reserve_pct == 0
     assert profile.allocation.max_open_positions > flow_test.allocation.max_open_positions
-    # no pause, no open-risk cap and no re-entry wait: only the cost of its own sizing
-    assert profile.risk == ScopeRiskConfig(cost_pct=D("0.3"))
+    # no pause, no open-risk cap and no re-entry wait: only the cost of its own sizing, and
+    # out of the global streak of losses
+    assert profile.risk == ScopeRiskConfig(cost_pct=D("0.3"), global_streak=False)
+    assert flow_test.risk is not None and flow_test.risk.global_streak
     assert profile.leads is not None and flow_test.leads is not None
     consensus = profile.leads.consensus
     assert (consensus.min_backers, consensus.window) == (1, timedelta(hours=24))

@@ -21,7 +21,7 @@ from trade_agent.risk.conditions import Action
 from trade_agent.risk.guard import Hit, RiskGuard, RiskSnapshot, evaluate
 from trade_agent.risk.monitor import EQUITY_KEY, RiskMonitor, quote_deviation
 from trade_agent.risk.state import GLOBAL, OpState, ScopeState, StateStore
-from trade_agent.strategy.profiles import StrategyConfig, load_strategy_config
+from trade_agent.strategy.profiles import ScopeRiskConfig, StrategyConfig, load_strategy_config
 
 D = Decimal
 PROFILES = load_strategy_config(Path(__file__).parents[2] / "fixtures" / "profiles.yaml")
@@ -280,6 +280,40 @@ async def test_monitor_snapshot(
 def _with_capital(capital: int) -> StrategyConfig:
     account = PROFILES.account.model_copy(update={"managed_capital": D(capital)})
     return PROFILES.model_copy(update={"account": account})
+
+
+STREAK = "max_consecutive_losses"
+
+
+async def test_four_losses_of_a_flow_test_pause_no_profile(
+    store: Store, api: BinanceSpotApi, fake: FakeBinance
+) -> None:
+    """D-056: with ``global_streak: false``, 4 losses in a row of that profile leave the global
+    streak (and ``max_consecutive_losses``) alone; without it, they pause every profile."""
+
+    def streak(snapshot: RiskSnapshot) -> list[str]:
+        return [h.scope for h in evaluate(CONDITIONS, snapshot) if h.condition == STREAK]
+
+    fake.candles[("BTCUSDT", "1m")] = _klines([60000.0] * 61)
+    for hour in range(4):
+        await closed_position(store, profile="mod", pnl="-1", closed_at=NOW - timedelta(hours=hour))
+    counted = await RiskMonitor(
+        api=api, store=store, strategy=PROFILES, health=CallHealth(), clock=lambda: NOW
+    ).snapshot()
+    assert streak(counted) == [GLOBAL]
+    moderado = PROFILES.profiles["moderado"]
+    flow_test = moderado.model_copy(
+        update={"risk": ScopeRiskConfig(cost_pct=D(0), global_streak=False)}
+    )
+    strategy = PROFILES.model_copy(
+        update={"profiles": {**PROFILES.profiles, "moderado": flow_test}}
+    )
+    left_out = await RiskMonitor(
+        api=api, store=store, strategy=strategy, health=CallHealth(), clock=lambda: NOW
+    ).snapshot()
+    assert left_out.consecutive_losses == 0
+    assert left_out.profile_consecutive_losses["moderado"] == 4
+    assert streak(left_out) == []
 
 
 async def test_monitor_rebases_marks_when_managed_capital_changes(

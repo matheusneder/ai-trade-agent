@@ -72,6 +72,9 @@ class RiskMonitor:
         self._fear_greed = fear_greed
         self._clock = clock
         self._names = {p.code: name for name, p in strategy.profiles.items()}
+        self._outside_streak = {
+            p.code for p in strategy.profiles.values() if p.risk and not p.risk.global_streak
+        }
         self.reconcile_anomalies = 0
         self._failed_in_a_row = 0
 
@@ -149,7 +152,9 @@ class RiskMonitor:
         )
 
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        history = await self._store.risk_history(midnight)
+        history = await self._store.risk_history(
+            midnight, outside_global_streak=self._outside_streak
+        )
         daily: dict[str, Decimal] = {}
         streaks: dict[str, int] = {}
         results: dict[str, Decimal] = {}
