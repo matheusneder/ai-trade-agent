@@ -225,9 +225,9 @@ profiles:
   # ranking (trade_agent.leads) and buys an asset only when at least `min_backers` of them
   # bought it in the window AND the pair's own candles confirm it (trade_agent.signals.local).
   # Size, stop, target and exits are the profile's own: no trade is ever copied. The source is
-  # Binance's website, public but undocumented: without fresh data no entry goes out. It
-  # decides every `cycle` on the last closed candle, since the trades arrive between the
-  # closes (D-053).
+  # Binance's website, public but undocumented: without fresh data no entry goes out. A
+  # `cycle` shorter than the timeframe makes it decide between the closes, since the trades
+  # arrive between them (D-053); since D-055 it decides at each 1h close again.
   lead_consensus_1h:
     code: lead1h
     enabled: true
@@ -237,7 +237,7 @@ profiles:
     # temp_cp_trade_validation
     capital_share: 0.20
     timeframe: 1h              # confirmation, stop and risk budget on the 1h candles
-    cycle: 10m                 # decides at :00, :10 ... :50 on the last closed 1h candle (D-053)
+    cycle: 1h                  # the timeframe itself: at each 1h close (D-055; 10m in D-053)
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
     allocation:
       max_open_positions: 2    # with max_open_risk_pct 1.0, two positions at 0.5% of risk each
@@ -279,9 +279,9 @@ profiles:
         min_buy_pct: 2.0       # net purchase, % of the trader's own balance
         max_symbols_per_lead: 3
         max_premium_pct: 1.5   # no entry with the ask more than 1.5% above what they paid
-      poll_interval: 10m       # the followed traders' trades: one reading per cycle (D-053)
+      poll_interval: 1h        # the followed traders' trades: one reading per cycle (D-055)
       ranking_interval: 6h     # who is followed
-      max_data_age: 45m        # an older reading of a trader does not count
+      max_data_age: 90m        # an older reading does not count (D-055: >= poll_interval)
       max_ranking_age: 24h     # without a new ranking for this long: nobody is followed
       backoff: 1h              # after the source refuses a request
       request_delay_s: 0.5
