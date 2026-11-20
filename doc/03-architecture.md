@@ -196,7 +196,7 @@ sequenceDiagram
 The universe is built every cycle, with the volume ranking of the moment (D-027):
 
 1. `exchangeInfo`: `status = TRADING`, USDT quote asset and the `ocoAllowed`, `otoAllowed`, `opoAllowed` and `allowTrailingStop` flags.
-2. Exclusions: stablecoins and fiat-pegged assets, leveraged tokens and pairs in `delist-schedule` (production only: Testnet and Demo do not have the route).
+2. Exclusions: stablecoins and fiat-pegged assets, leveraged tokens (a listed asset followed by UP, DOWN, BULL or BEAR, such as `BTCUP`, so `JUP` and `SYRUP` are not) and pairs in `delist-schedule` (production only: Testnet and Demo do not have the route).
 3. Liquidity: 24h volume of at least US$ 5 million and a spread of up to 20 bps.
 4. History: at least 30 days of candles.
 5. *Tiers* by USDT volume on Binance itself (D-013): `core` (BTC and ETH), `large` (ranks 1 to 20, excluding *core*), `mid` (21 to 60) and `small` (the rest). Each profile defines which *tiers* it may use and with what weight.

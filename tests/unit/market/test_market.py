@@ -179,6 +179,25 @@ def test_prefilter_reasons_and_ranking() -> None:
     assert "BTCBRL" not in excluded  # another quote asset: out of scope
 
 
+def test_only_a_listed_asset_with_a_leveraged_suffix_is_a_leveraged_token() -> None:
+    """JUP and SYRUP end like a leveraged token but are none: no J or SYR is listed, while
+    BTCUP and ETHBEAR are named after BTC and ETH. The old rule (any name ending in UP, DOWN,
+    BULL or BEAR) left both out of the 2026-11-20 universe, JUP with a buy consensus."""
+    rules = {
+        "BTCUSDT": rules_for("BTCUSDT"),
+        "ETHUSDT": rules_for("ETHUSDT"),
+        "BTCUPUSDT": _rules("BTCUPUSDT", "BTCUP"),
+        "ETHBEARUSDT": _rules("ETHBEARUSDT", "ETHBEAR"),
+        "JUPUSDT": _rules("JUPUSDT", "JUP"),
+        "SYRUPUSDT": _rules("SYRUPUSDT", "SYRUP"),
+    }
+    tickers = {s: _ticker(s, "50000000") for s in rules}
+    books = {s: _book(s, "99.99", "100.01") for s in rules}
+    ranked, excluded = prefilter(rules, tickers, books, set(), CONFIG)
+    assert excluded == {"BTCUPUSDT": "token alavancado", "ETHBEARUSDT": "token alavancado"}
+    assert {"JUPUSDT", "SYRUPUSDT"} <= set(ranked)
+
+
 def test_select_universe_assigns_tiers_and_history() -> None:
     rules, tickers, books = _market()
     history = dict.fromkeys(rules, 365) | {"NEWUSDT": 5}
