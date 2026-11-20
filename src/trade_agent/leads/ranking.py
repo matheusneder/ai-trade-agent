@@ -83,7 +83,10 @@ def candidates(
     pool: Iterable[LeadStats], config: LeadSelectionConfig
 ) -> tuple[list[LeadStats], Counter[str]]:
     """The portfolios of the pool worth two more readings, in the ranking's order (best
-    Sharpe ratio first), and how many each criterion refused."""
+    Sharpe ratio first), and how many each criterion refused: the first ``shortlist``, or
+    with ``rank_by: activity`` all of them, since the ranking has no trade count and its
+    first portfolios may all be idle; the tracker then reads them in order until it has
+    found ``shortlist`` eligible ones (D-054)."""
     passed: list[LeadStats] = []
     rejected: Counter[str] = Counter()
     for lead in {s.portfolio_id: s for s in pool}.values():
@@ -91,7 +94,7 @@ def candidates(
         rejected.update(reasons)
         if not reasons:
             passed.append(lead)
-    return passed[: config.shortlist], rejected
+    return (passed if config.rank_by == "activity" else passed[: config.shortlist]), rejected
 
 
 def pnl_at(curve: Sequence[PnlPoint], moment: datetime) -> float | None:

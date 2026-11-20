@@ -273,7 +273,9 @@ class LeadSelectionConfig(_Strict):
     """Pages of 30 portfolios read from the ranking, best Sharpe ratio first."""
     shortlist: int = Field(default=20, ge=1, le=60)
     """Portfolios that passed the ranking figures whose PnL curve and trades are read (two
-    requests each), in the ranking's order."""
+    requests each), in the ranking's order. With ``rank_by: activity``, the eligible ones
+    sought: the ranking is read in order until that many are found, and an idle portfolio
+    costs one request, its trades (D-054)."""
     max_leads: int = Field(default=6, ge=1, le=20)
     """Lead traders followed at the same time."""
     min_days: int = Field(default=90, ge=1)

@@ -324,7 +324,7 @@ profiles:
       selection:
         rank_by: activity      # the traders with the most trades per day, whatever their results
         pool_pages: 5
-        shortlist: 30          # candidates whose PnL curve and trades are read (2 requests each)
+        shortlist: 20          # eligible ones sought in the ranking's order (an idle one costs 1 request)
         max_leads: 6
         min_days: 14
         min_balance: 100       # their purchases are measured against it (min_buy_pct)

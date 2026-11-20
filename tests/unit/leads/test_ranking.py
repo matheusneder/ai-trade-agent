@@ -81,6 +81,9 @@ def test_candidates_keep_the_rankings_order_and_count_the_refusals() -> None:
     assert [lead.portfolio_id for lead in passed] == ["a", "c"]
     assert passed[0].roi_pct == 99.0
     assert rejected == {LOW_ROI: 1, LOW_SHARPE: 1}
+    # D-054: ranked by activity, every one of them, since the ranking has no trade count
+    by_activity = CONFIG.model_copy(update={"shortlist": 2, "max_leads": 2, "rank_by": "activity"})
+    assert [lead.portfolio_id for lead in candidates(pool, by_activity)[0]] == ["a", "c", "d"]
 
 
 def test_positive_weeks_counts_back_from_the_last_day() -> None:
