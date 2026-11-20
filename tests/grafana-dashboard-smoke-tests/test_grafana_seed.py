@@ -180,7 +180,7 @@ def test_every_lead_profile_has_orders(seed: int, end: datetime) -> None:
 
 
 def test_a_lead_cycle_whose_setups_and_exits_take_every_asset() -> None:
-    """D-056: 4 setups and 4 exits (tcphr15m holds up to 5) leave no asset for a candle
+    """D-056: 4 setups and 4 exits (tcphr15m holds up to 20, D-057) leave no asset for a candle
     refusal; the reading still has the sell consensus behind the first exit."""
     rng = random.Random(0)  # noqa: S311 - synthetic data, not security
     simulation = _Simulation(rng, END - timedelta(hours=24), END)
