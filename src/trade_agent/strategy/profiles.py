@@ -235,6 +235,10 @@ class ScopeRiskConfig(_Strict):
     expiry); unlike ``halt``, the technical exits go on."""
     reentry_candles: int = Field(default=0, ge=0)
     """Candles without a new entry on a pair after a stop on it."""
+    global_streak: bool = True
+    """False (a flow test, D-056): the profile's closed positions neither add to nor break the
+    global ``max_consecutive_losses`` streak (``config/stop_conditions.yaml``), so its losses
+    do not pause every profile; the other global conditions still apply to it."""
 
     _cooldown = field_validator("cooldown", mode="before")(parse_duration)
 

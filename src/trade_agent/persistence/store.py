@@ -1,7 +1,7 @@
 """Agent repository: positions, intents, order mirror, fills and events."""
 
 import dataclasses
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -251,16 +251,24 @@ class Store:
             )
             return [_to_position(r) for r in records]
 
-    async def risk_history(self, since: datetime) -> RiskHistory:
-        """Aggregate the entire settled history; no UI pagination limit affects risk."""
+    async def risk_history(
+        self, since: datetime, *, outside_global_streak: Collection[str] = ()
+    ) -> RiskHistory:
+        """Aggregate the entire settled history; no UI pagination limit affects risk.
+
+        The positions of the profiles in ``outside_global_streak`` (codes, D-056) neither add
+        to nor break the global streak of losses; their own streaks still count.
+        """
         p = PositionRecord
         order: list[ColumnElement[Any]] = [p.closed_at.desc(), p.id.desc()]
         settled = (p.state == PositionState.CLOSED.value, p.realized_pnl.is_not(None))
+        counted = p.profile.not_in(tuple(outside_global_streak))
         ranked = (
             select(
                 p.profile,
                 p.realized_pnl,
-                func.sum(case((p.realized_pnl >= 0, 1), else_=0))
+                counted.label("counted"),
+                func.sum(case((counted & (p.realized_pnl >= 0), 1), else_=0))
                 .over(order_by=order, rows=(None, 0))
                 .label("global_breaks"),
                 func.sum(case((p.realized_pnl >= 0, 1), else_=0))
@@ -284,7 +292,7 @@ class Store:
             total = await session.scalar(
                 select(func.count())
                 .select_from(ranked)
-                .where(ranked.c.global_breaks == 0, ranked.c.realized_pnl < 0)
+                .where(ranked.c.counted, ranked.c.global_breaks == 0, ranked.c.realized_pnl < 0)
             )
             return RiskHistory(
                 {code: Decimal(value or 0) for code, value in daily_rows},
