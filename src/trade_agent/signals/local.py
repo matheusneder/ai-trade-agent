@@ -45,8 +45,10 @@ They only buy (Spot). The default parameters are research seeds (doc/lab-results
     (EMA 20 < EMA 50 with the EMA 50 falling over 5 candles), the candle closes above the
     EMA 20 and at most ``max_extension_atr`` ATRs above it. Stop ``stop_buffer_atr`` ATRs
     below the lowest low of the 5 previous candles and the signal candle. Technical exit when
-    the pair turns into a local downtrend. The lab cannot run it: the lead traders' trades
-    have no history to replay (``Family.needs_leads``).
+    the pair turns into a local downtrend. Without ``trend_filter`` (a flow test, D-056) the
+    trend neither refuses a purchase (the downtrend, the close below the EMA 20) nor exits a
+    position. The lab cannot run it: the lead traders' trades have no history to replay
+    (``Family.needs_leads``).
 
 Every stop is at least ``min_stop_atr`` ATRs away; a setup whose stop would sit beyond
 ``max_stop_pct`` is discarded, never tightened to fit (``filtered`` says why). The ranking
@@ -171,6 +173,9 @@ class ConsensusParams:
 
     max_extension_atr: float = 1.5
     """0: off."""
+    trend_filter: bool = True
+    """False (a flow test, D-056): the pair's trend neither refuses a purchase (a local
+    downtrend, a close below the EMA 20) nor is a technical exit; the stop cap still holds."""
     stop_buffer_atr: float = 0.25
     min_stop_atr: float = 2.0
     max_stop_pct: float = 0.06
@@ -339,8 +344,8 @@ def _confirmation(f: pd.DataFrame, p: ConsensusParams) -> pd.DataFrame:
     whether the pair's own candles allow buying what the lead traders bought."""
     close, low, atr = _col(f, "close"), _col(f, "low"), _col(f, "atr")
     short = _col(f, "ema_short")
-    falling = local_regime_frame(f) == "baixa"
-    above = close > short
+    falling = (local_regime_frame(f) == "baixa") & p.trend_filter
+    above = (close > short) | (not p.trend_filter)
     extension_ok = (close - short <= p.max_extension_atr * atr) | (p.max_extension_atr <= 0)
     stop_price = np.minimum(low.shift(1).rolling(STOP_CANDLES).min(), low) - p.stop_buffer_atr * atr
     stop, fits = _stop(f, stop_price, p)

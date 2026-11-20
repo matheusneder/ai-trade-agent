@@ -78,6 +78,20 @@ def test_the_extension_check_can_be_turned_off() -> None:
     assert evaluate_local(_local(breakout()), free).setup == LEAD_CONSENSUS
 
 
+def test_without_the_trend_filter_the_trend_neither_refuses_nor_exits() -> None:
+    """D-056: the high-risk flow test buys what the lead traders bought whatever the pair's
+    trend, and never sells it for the trend; the extension and the stop cap still hold."""
+    loose = ConsensusParams(trend_filter=False)
+    for frame in (downtrend(), uptrend_with_pullback()):
+        signal = evaluate_local(_local(frame), loose)
+        assert (signal.setup, signal.filtered, signal.exit_signal) == (LEAD_CONSENSUS, None, False)
+    falling = evaluate_local(_local(downtrend()), loose)
+    assert falling.local_regime == "baixa" and position_exit(falling, loose, None) is None
+    assert evaluate_local(_local(breakout()), loose).filtered == EXTENDED
+    tight = ConsensusParams(trend_filter=False, max_stop_pct=0.001)
+    assert evaluate_local(_local(downtrend()), tight).filtered == WIDE_STOP
+
+
 def test_a_stop_beyond_the_cap_discards_the_setup_instead_of_tightening_it() -> None:
     tight = ConsensusParams(max_stop_pct=0.01)
     signal = evaluate_local(_local(pair_pullback()), tight)

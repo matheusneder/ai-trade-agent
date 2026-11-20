@@ -1,5 +1,5 @@
 """The ``lead_consensus`` profile (D-052): its schema, the repository's one, the shares it
-took, its decision cycle (D-053) and the profile that tests its flow (D-054)."""
+took, its decision cycle (D-053) and the profiles that test its flow (D-054, D-056)."""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -10,12 +10,14 @@ import pytest
 from pydantic import ValidationError
 
 from tests.support.local_profiles import LOCAL_PULLBACK, local_profile, merge, raw_config
+from trade_agent.market.universe import Tier
 from trade_agent.risk.conditions import load_stop_conditions
 from trade_agent.signals import ConsensusParams, Family
 from trade_agent.strategy.profiles import (
     LeadConsensusConfig,
     LeadsConfig,
     LeadSelectionConfig,
+    ScopeRiskConfig,
     StrategyConfig,
     load_strategy_config,
 )
@@ -49,7 +51,7 @@ def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> 
     follows whoever trades most often, whatever the results, on the 15m candles."""
     profile = REPOSITORY.profiles["temp_cp_trade_validation"]
     assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
-    assert (profile.code, profile.timeframe, profile.capital_share) == ("tcpv15m", "15m", D("0.20"))
+    assert (profile.code, profile.timeframe, profile.capital_share) == ("tcpv15m", "15m", D("0.10"))
     assert (profile.cycle, profile.cadence) == (timedelta(minutes=15), "15m")
     assert profile.leads is not None and profile.risk is not None
     selection, consensus = profile.leads.selection, profile.leads.consensus
@@ -72,34 +74,66 @@ def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> 
     assert profile.risk == others.model_copy(update={"cooldown": timedelta(hours=4)})
 
 
+def test_the_high_risk_flow_test_turns_a_consensus_into_an_order_as_often_as_it_can() -> None:
+    """D-056: the 15m candles of every asset temp_cp_trade_validation saw bought were in a
+    local downtrend, so it sent no order. This one loosens every filter of its own: the
+    candles only discard a stop beyond 10%, and nothing pauses it."""
+    profile = REPOSITORY.profiles["temp_cp_trade_high_risk_validation"]
+    flow_test = REPOSITORY.profiles["temp_cp_trade_validation"]
+    assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
+    assert (profile.code, profile.capital_share) == ("tcphr15m", D("0.10"))
+    assert profile.timeframe == flow_test.timeframe == "15m"
+    assert profile.cadence == flow_test.cadence == "15m"
+    assert profile.local_params() == ConsensusParams(
+        max_extension_atr=0, trend_filter=False, min_stop_atr=2.0, max_stop_pct=0.10
+    )
+    assert all(profile.tier_limit(tier) == 1 for tier in Tier)
+    assert profile.allocation.cash_reserve_pct == 0
+    assert profile.allocation.max_open_positions > flow_test.allocation.max_open_positions
+    # no pause, no open-risk cap and no re-entry wait: only the cost of its own sizing
+    assert profile.risk == ScopeRiskConfig(cost_pct=D("0.3"))
+    assert profile.leads is not None and flow_test.leads is not None
+    consensus = profile.leads.consensus
+    assert (consensus.min_backers, consensus.window) == (1, timedelta(hours=24))
+    assert consensus.max_premium_pct > flow_test.leads.consensus.max_premium_pct
+    assert profile.leads.selection == flow_test.leads.selection  # the same traders
+
+
 def test_the_enabled_shares_still_add_up_to_the_whole_account() -> None:
     shares = {name: p.capital_share for name, p in REPOSITORY.enabled_profiles().items()}
     assert sum(shares.values()) == 1
     # D-052 took half of each rejected pair-local profile; D-053 the rest of both, which are
-    # off, and 0.10 from each main profile; D-054 lent half of it to the flow test
+    # off, and 0.10 from each main profile; D-054 lent half of it to the flow test, which
+    # D-056 split with the high-risk one
     assert shares == {
         "swing_trend": D("0.25"),
         "momentum_alpha": D("0.20"),
         "alt_atr": D("0.05"),
         "pair_pullback_1h": D("0.10"),
         "lead_consensus_1h": D("0.20"),
-        "temp_cp_trade_validation": D("0.20"),
+        "temp_cp_trade_validation": D("0.10"),
+        "temp_cp_trade_high_risk_validation": D("0.10"),
     }
     assert not REPOSITORY.profiles["pair_breakout_1h"].enabled
     assert not REPOSITORY.profiles["pair_range_1h"].enabled
 
 
-@pytest.mark.parametrize("name", ["lead_consensus_1h", "temp_cp_trade_validation"])
+@pytest.mark.parametrize(
+    "name",
+    ["lead_consensus_1h", "temp_cp_trade_validation", "temp_cp_trade_high_risk_validation"],
+)
 def test_the_repository_profiles_pass_the_risk_guard_at_any_stop(name: str) -> None:
     """Their target is 2R net of costs, so the minimum R:R holds from the tightest stop to
-    the cap, and their smallest lot is above Binance's 5 USDT minimum."""
+    the cap, and their smallest lot is above Binance's 5 USDT minimum (D-056: 100 USDT at
+    1% of risk still buys one at the 10% cap)."""
     profile = REPOSITORY.profiles[name]
     pre_trade = load_stop_conditions(REPOSITORY_FILE.with_name("stop_conditions.yaml")).pre_trade
     fee = D(str(pre_trade.round_trip_fee_pct))
     capital = REPOSITORY.profile_capital(name)
-    for stop in (D("0.5"), D(2), D(4), D(6), D(9)):
+    cap = profile.protection.stop.max_pct
+    for stop in (D("0.5"), D(2), D(4), D(6), D(9), D(15), D(20)):
         policy = profile.protection.policy(stop, D(1), cost_pct=profile.cost_pct())
-        assert policy.stop_pct is not None and policy.stop_pct <= D(6)
+        assert policy.stop_pct is not None and policy.stop_pct == min(stop, cap or stop)
         reward_risk = (policy.take_profit_pct - fee) / (policy.stop_pct + fee)
         assert reward_risk >= D(str(pre_trade.min_reward_risk)), stop
         risk = capital * profile.allocation.risk_per_trade_pct / 100

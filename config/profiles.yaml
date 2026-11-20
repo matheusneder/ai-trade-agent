@@ -297,7 +297,9 @@ profiles:
     code: tcpv15m
     enabled: true
     family: lead_consensus
-    capital_share: 0.20        # 200 USDT, half of the 0.40 of lead_consensus_1h (D-054)
+    # 100 USDT: half of the 0.40 of lead_consensus_1h (D-054), half of that lent to
+    # temp_cp_trade_high_risk_validation (D-056)
+    capital_share: 0.10
     timeframe: 15m             # confirmation, stop and risk budget on the 15m candles
     cycle: 15m                 # the timeframe itself: at each 15m close
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
@@ -321,7 +323,7 @@ profiles:
       <<: *local_risk
       cooldown: 4h             # 24h in the others: a pause does not hold the test for a day
     leads:
-      selection:
+      selection: &busiest      # also temp_cp_trade_high_risk_validation's (D-056)
         rank_by: activity      # the traders with the most trades per day, whatever their results
         pool_pages: 5
         shortlist: 20          # eligible ones sought in the ranking's order (an idle one costs 1 request)
@@ -344,6 +346,56 @@ profiles:
         max_symbols_per_lead: 3
         max_premium_pct: 1.5
       poll_interval: 15m       # one reading per cycle
+      ranking_interval: 6h
+      max_data_age: 45m
+      max_ranking_age: 24h
+      backoff: 1h
+      request_delay_s: 0.5
+
+  # ------------------------------------------------------------ high-risk flow test (D-056)
+  # Temporary, Demo only, and no strategy: on 2026-11-20 temp_cp_trade_validation saw a buy
+  # consensus in every cycle, but the 15m candles of every asset were in a local downtrend,
+  # so no order went out. This one follows the same traders and loosens every filter that is
+  # the profile's own, so a consensus becomes an order as often as the mechanism allows: no
+  # trend check (nor the trend's technical exit), no extension check, a wider stop cap, any
+  # tier, no pauses and no open-risk cap. The universe and the global stop conditions stay.
+  # Turn it off with temp_cp_trade_validation.
+  temp_cp_trade_high_risk_validation:
+    code: tcphr15m
+    enabled: true
+    family: lead_consensus
+    capital_share: 0.10        # 100 USDT, half of the 0.20 of temp_cp_trade_validation (D-056)
+    timeframe: 15m
+    cycle: 15m
+    tiers: {core: 1.0, large: 1.0, mid: 1.0, small: 1.0}   # no tier limit, small ones too
+    allocation:
+      max_open_positions: 5    # lots of 20 USDT; ~9.7 at the 10% stop cap (5 USDT minimum)
+      max_position_pct: 0.20
+      cash_reserve_pct: 0.0
+      risk_per_trade_pct: 1.0  # twice the others: the wide stops still fit the minimum lot
+    entry:
+      min_score: -1.0
+      order: limit_fok
+      max_slippage_bps: 50     # 20 in the others: fewer FOK entries left unfilled
+    protection:
+      stop: {mode: fixed, atr_mult: 2.0, max_pct: 10.0}   # 6 in the others; 10 is the repository's cap
+      take_profit: {mode: limit, activation_pct: 0.5, activation_r: 2.0}   # target at 2R net
+      max_holding: 24h
+    signals:
+      trend_filter: false      # buys in a local downtrend too, and never exits on it
+      max_extension_atr: 0     # 0: off
+    llm: {enabled: false}
+    risk:
+      cost_pct: 0.3            # sizing and target only: no pause, open-risk cap or re-entry wait
+    leads:
+      selection: *busiest      # the traders of temp_cp_trade_validation
+      consensus:
+        min_backers: 1
+        window: 24h            # 6h in temp_cp_trade_validation: older purchases count too
+        min_buy_pct: 0.1       # a net purchase of 0.1% of the trader's own balance
+        max_symbols_per_lead: 10
+        max_premium_pct: 20.0  # 1.5 in the others: effectively off
+      poll_interval: 15m
       ranking_interval: 6h
       max_data_age: 45m
       max_ranking_age: 24h

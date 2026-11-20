@@ -107,9 +107,10 @@ COALESCE(
 or the Risk Guard's refusal, the refusal of the pair's own candles, or nothing to act on."""
 LEADS_HELP = (
     "Perfis lead_consensus (D-052): seguem lead traders do Copy Trading Spot da Binance (os "
-    "melhores, ou os que mais operam no perfil de teste, D-054) e só compram o que pelo menos "
-    "min_backers deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo "
-    "são do perfil: nenhuma operação é copiada."
+    "melhores, ou os que mais operam nos perfis de teste, D-054 e D-056) e só compram o que "
+    "pelo menos min_backers deles compraram e os candles do próprio par confirmam (no de alto "
+    "risco, D-056, só o teto do stop). Tamanho, stop e alvo são do perfil: nenhuma operação "
+    "é copiada."
 )
 DECISIONS_HELP = (
     "Cada ativo que os traders acompanhados movimentaram, em cada ciclo: quem comprou e quem "

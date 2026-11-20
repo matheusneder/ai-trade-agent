@@ -1239,9 +1239,10 @@ LEADS = "service.name = 'trade-agent.leads'"
 LEAD_REQUESTS = f"{LEADS} AND server.address = 'www.binance.com'"
 LEADS_HELP = (
     "Perfis lead_consensus (D-052): seguem lead traders do Copy Trading Spot da Binance (os "
-    "melhores, ou os que mais operam no perfil de teste, D-054) e só compram o que pelo menos "
-    "min_backers deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo "
-    "são do perfil: nenhuma operação é copiada."
+    "melhores, ou os que mais operam nos perfis de teste, D-054 e D-056) e só compram o que "
+    "pelo menos min_backers deles compraram e os candles do próprio par confirmam (no de alto "
+    "risco, D-056, só o teto do stop). Tamanho, stop e alvo são do perfil: nenhuma operação "
+    "é copiada."
 )
 
 
@@ -1293,7 +1294,7 @@ def _copy_trading() -> Json:
                                 decimals=0,
                                 description=(
                                     "Traders acompanhados cujos trades foram lidos há menos de "
-                                    "max_data_age (90 min em lead_consensus_1h, 45 no perfil de "
+                                    "max_data_age (90 min em lead_consensus_1h, 45 nos perfis de "
                                     "teste): só esses contam no consenso."
                                 ),
                             ),
