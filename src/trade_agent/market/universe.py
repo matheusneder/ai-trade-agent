@@ -6,6 +6,7 @@ collects the data it needs from the exchange.
 
 import re
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
@@ -29,7 +30,9 @@ STABLE_OR_FIAT = frozenset(
         "MXN", "ZAR", "PLN", "RON", "UAH", "COP", "CZK", "IDRT", "BIDR", "PAXG", "XAUT",
     }
 )  # fmt: skip
-_LEVERAGED = re.compile(r"^.+(UP|DOWN|BULL|BEAR)$")
+_LEVERAGED = re.compile(r"^(.+?)(UP|DOWN|BULL|BEAR)$")
+"""A leveraged token is named after its underlying (``BTCUP``, ``ETHBEAR``), itself a listed
+asset: ``JUP`` and ``SYRUP`` only end like one."""
 
 
 class Tier(StrEnum):
@@ -85,7 +88,12 @@ def _spread_bps(book: BookTicker | None) -> Decimal | None:
     return (book.ask_price - book.bid_price) / mid * BIPS
 
 
-def _static_exclusion(rules: SymbolRules, config: UniverseConfig, delisted: set[str]) -> str | None:
+def _static_exclusion(
+    rules: SymbolRules, config: UniverseConfig, delisted: set[str], assets: AbstractSet[str]
+) -> str | None:
+    """Why the symbol is left out whatever its volume and spread; ``assets``: every listed
+    base asset."""
+    leveraged = _LEVERAGED.match(rules.base_asset)
     if not rules.is_trading:
         return f"status {rules.status}"
     if not (rules.oco_allowed and rules.oto_allowed and rules.opo_allowed):
@@ -94,7 +102,7 @@ def _static_exclusion(rules: SymbolRules, config: UniverseConfig, delisted: set[
         return "sem trailing stop"
     if rules.base_asset in config.excluded_assets:
         return "stablecoin/fiat"
-    if _LEVERAGED.match(rules.base_asset):
+    if leveraged is not None and leveraged.group(1) in assets:
         return "token alavancado"
     if rules.symbol in delisted:
         return "delistagem agendada"
@@ -111,10 +119,11 @@ def prefilter(
     """First stage (no history): rules, liquidity and spread; sorts by volume."""
     passed: list[str] = []
     excluded: dict[str, str] = {}
+    assets = {rules.base_asset for rules in rules_by_symbol.values()}
     for symbol, rules in rules_by_symbol.items():
         if rules.quote_asset != config.quote_asset:
             continue
-        reason = _static_exclusion(rules, config, delisted)
+        reason = _static_exclusion(rules, config, delisted, assets)
         ticker = tickers.get(symbol)
         spread = _spread_bps(books.get(symbol))
         if reason is None and (ticker is None or ticker.quote_volume < config.min_quote_volume_24h):
