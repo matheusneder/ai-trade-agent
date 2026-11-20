@@ -21,7 +21,7 @@
         "spec": {
           "display": {
             "name": "Traders acompanhados",
-            "description": "Perfis lead_consensus (D-052): seguem os melhores lead traders do Copy Trading Spot da Binance e só compram o que pelo menos dois deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo são do perfil: nenhuma operação é copiada."
+            "description": "Perfis lead_consensus (D-052): seguem lead traders do Copy Trading Spot da Binance (os melhores, ou os que mais operam no perfil de teste, D-054) e só compram o que pelo menos min_backers deles compraram e os candles do próprio par confirmam. Tamanho, stop e alvo são do perfil: nenhuma operação é copiada."
           },
           "plugin": {
             "kind": "signoz/NumberPanel",
@@ -222,7 +222,7 @@
                     "source": "",
                     "disabled": false,
                     "filter": {
-                      "expression": "profile IN ('lead_consensus_1h')"
+                      "expression": "profile IN ('lead_consensus_1h', 'temp_cp_trade_validation')"
                     },
                     "groupBy": [],
                     "order": [],
@@ -280,7 +280,7 @@
                     "source": "",
                     "disabled": false,
                     "filter": {
-                      "expression": "profile IN ('lead_consensus_1h')"
+                      "expression": "profile IN ('lead_consensus_1h', 'temp_cp_trade_validation')"
                     },
                     "groupBy": [],
                     "order": [],
@@ -573,7 +573,7 @@
                     "source": "",
                     "disabled": false,
                     "filter": {
-                      "expression": "profile IN ('lead_consensus_1h')"
+                      "expression": "profile IN ('lead_consensus_1h', 'temp_cp_trade_validation')"
                     },
                     "groupBy": [
                       {
@@ -642,7 +642,7 @@
                           "source": "",
                           "disabled": false,
                           "filter": {
-                            "expression": "profile IN ('lead_consensus_1h')"
+                            "expression": "profile IN ('lead_consensus_1h', 'temp_cp_trade_validation')"
                           },
                           "groupBy": [
                             {
@@ -674,7 +674,7 @@
                           "source": "",
                           "disabled": false,
                           "filter": {
-                            "expression": "profile IN ('lead_consensus_1h')"
+                            "expression": "profile IN ('lead_consensus_1h', 'temp_cp_trade_validation')"
                           },
                           "groupBy": [
                             {

@@ -27,6 +27,7 @@ from trade_agent.leads.ranking import (
     figure_reasons,
     positive_weeks,
     recent_gain_pct,
+    trades_per_day,
 )
 from trade_agent.strategy.profiles import LeadSelectionConfig
 
@@ -80,6 +81,9 @@ def test_candidates_keep_the_rankings_order_and_count_the_refusals() -> None:
     assert [lead.portfolio_id for lead in passed] == ["a", "c"]
     assert passed[0].roi_pct == 99.0
     assert rejected == {LOW_ROI: 1, LOW_SHARPE: 1}
+    # D-054: ranked by activity, every one of them, since the ranking has no trade count
+    by_activity = CONFIG.model_copy(update={"shortlist": 2, "max_leads": 2, "rank_by": "activity"})
+    assert [lead.portfolio_id for lead in candidates(pool, by_activity)[0]] == ["a", "c", "d"]
 
 
 def test_positive_weeks_counts_back_from_the_last_day() -> None:
@@ -190,3 +194,61 @@ def test_the_best_scores_among_the_eligible_are_followed() -> None:
 def test_activity_uses_the_configured_windows() -> None:
     patient = CONFIG.model_copy(update={"max_idle": timedelta(days=30), "min_trades_30d": 1})
     assert activity_reasons([trade(hours_ago=24 * 20)], NOW, patient) == ()
+
+
+# D-054: a profile that only tests the copy trading flow
+PERFORMANCE_OFF = CONFIG.model_copy(
+    update={
+        "min_roi_pct": None,
+        "max_drawdown_pct": None,
+        "min_sharpe": None,
+        "max_copier_loss_pct": None,
+        "min_positive_weeks_pct": None,
+        "min_recent_gain_pct": None,
+    }
+)
+
+
+def test_the_performance_criteria_can_be_left_unchecked() -> None:
+    loser = stats(roi_pct=-40.0, mdd_pct=60.0, sharpe=None, copier_pnl=D(-2000))
+    assert figure_reasons(loser, PERFORMANCE_OFF) == ()
+    # the age and the trader's own money are still checked
+    assert figure_reasons(stats(trading_days=10, aum=D(3500)), PERFORMANCE_OFF) == (YOUNG, SMALL)
+    falling = days([float(90 - day) for day in range(90)])
+    assert assess(stats(), falling, active(), NOW, PERFORMANCE_OFF).eligible
+    assert assess(stats(), RISING[:5], active(), NOW, PERFORMANCE_OFF).eligible  # no whole week
+    # the trading rhythm is still checked
+    assert assess(stats(), falling, [], NOW, PERFORMANCE_OFF).reasons == (IDLE,)
+
+
+def test_trades_per_day_count_up_to_now() -> None:
+    assert trades_per_day([], NOW) == 0.0
+    assert trades_per_day([trade(hours_ago=2 + n) for n in range(10)], NOW) == 10.0  # one day
+    assert trades_per_day([trade(hours_ago=1 + 12 * n) for n in range(20)], NOW) == pytest.approx(
+        20 / (229 / 24)
+    )
+    # the same 20 trades with a pause of five days since the last one
+    paused = [trade(hours_ago=121 + 12 * n) for n in range(20)]
+    assert trades_per_day(paused, NOW) == pytest.approx(20 / (349 / 24))
+    assert assess(stats(), RISING, active(), NOW, CONFIG).trades_per_day == pytest.approx(6 / 16)
+
+
+def test_ranked_by_activity_the_busiest_traders_are_followed_whatever_their_results() -> None:
+    config = PERFORMANCE_OFF.model_copy(update={"rank_by": "activity", "max_leads": 2})
+    busy = [trade(hours_ago=1 + 2 * n) for n in range(60)]  # 12 a day
+    regular = [trade(hours_ago=1 + 6 * n) for n in range(30)]  # 4 a day
+    steady = assess(stats("steady", roi_pct=24.0), RISING, active(), NOW, config)
+    loser = assess(stats("loser", roi_pct=-30.0), days([0.0] * 90), busy, NOW, config)
+    middle = assess(stats("middle"), RISING, regular, NOW, config)
+    assert steady.score > middle.score > loser.score
+    assert loser.trades_per_day > middle.trades_per_day > steady.trades_per_day
+    assert [a.lead.portfolio_id for a in best([steady, loser, middle], config)] == [
+        "loser",
+        "middle",
+    ]
+    # the same three by the default ranking
+    by_score = config.model_copy(update={"rank_by": "score"})
+    assert [a.lead.portfolio_id for a in best([steady, loser, middle], by_score)] == [
+        "steady",
+        "middle",
+    ]

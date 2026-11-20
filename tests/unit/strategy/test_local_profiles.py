@@ -69,6 +69,7 @@ def test_the_risk_guard_gets_the_budgets_of_the_enabled_local_profiles() -> None
     assert {name: spec.code for name, spec in repository.items()} == {
         "pair_pullback_1h": "ppb1h",  # pair_breakout_1h and pair_range_1h are off (D-053)
         "lead_consensus_1h": "lead1h",  # D-052: the same budget
+        "temp_cp_trade_validation": "tcpv15m",  # D-054: with a shorter pause
     }
     assert scope_specs(local_config()) == {}  # a disabled one has none
     config = local_config(local={"enabled": True, "timeframe": "4h"})

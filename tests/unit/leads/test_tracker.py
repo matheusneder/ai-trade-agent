@@ -3,6 +3,7 @@ every failure of the source ending in fewer entries, never in a wrong one."""
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -25,13 +26,14 @@ from trade_agent.leads.tracker import (
     LeadTracker,
 )
 from trade_agent.persistence.store import Severity, Store
-from trade_agent.strategy.profiles import LeadsConfig
+from trade_agent.strategy.profiles import LeadsConfig, load_strategy_config
 
 CONSENSUS = LeadsConfig().consensus
 
 D = Decimal
 PROFILE = "lead_consensus_1h"
 KEY = CHECKPOINT.format(profile=PROFILE)
+REPOSITORY_FILE = Path(__file__).parents[3] / "config" / "profiles.yaml"
 
 
 class Clock:
@@ -547,3 +549,48 @@ async def test_the_gauges_keep_ageing_while_the_source_is_backed_off() -> None:
         assert measured.value("trade_agent.leads.consensus", profile=PROFILE) == 0
         assert measured.value("trade_agent.leads.selected", profile=PROFILE) == 2
         assert measured.value("trade_agent.leads.errors", profile=PROFILE) == 1
+
+
+# ------------------------------------------------------------------ ranked by activity (D-054)
+FLOW_TEST = load_strategy_config(REPOSITORY_FILE).profiles["temp_cp_trade_validation"].leads
+
+
+async def test_ranked_by_activity_the_search_goes_past_an_idle_top_of_the_ranking() -> None:
+    """The review of PR #60: the shortlist cut the ranking's first 30 portfolios by Sharpe
+    ratio before their trading rhythm was read, so 30 idle ones at the top hid an active
+    trader in 31st place, whatever its results, and the flow test followed nobody."""
+    assert FLOW_TEST is not None
+    idle = [trade(hours_ago=72 + n) for n in range(40)]  # nothing in the last day
+    busy = [trade(hours_ago=1 + 2 * n) for n in range(60)]  # 12 a day, the last an hour ago
+    pool = [stats(f"top{n:02d}") for n in range(30)]
+    pool.append(stats("loser", roi_pct=-30.0, sharpe=-1.0))
+    history = {lead.portfolio_id: idle for lead in pool[:30]} | {"loser": busy}
+    source = FakeSource(pool, curves={"loser": days([0.0] * 90)}, trades=history)
+    h = Harness(source, config=FLOW_TEST)
+    await h.tracker.refresh()
+    (selected,) = h.events(SELECTED_EVENT)
+    assert [lead["id"] for lead in selected["selected"]] == ["loser"]
+    assert selected["selected"][0]["trades_per_day"] == 12.1
+    assert (selected["pool"], selected["examined"], selected["rejected"]) == (31, 31, {IDLE: 30})
+    # an idle candidate costs one request: only the active one's curve is read
+    assert source.calls[:2] == ["ranking:1", "ranking:2"]
+    assert [call for call in source.calls if call.startswith("curve")] == ["curve:loser"]
+    assert len(source.calls) == 2 + 31 + 1
+    assert h.tracker.view().selected == 1
+
+
+async def test_ranked_by_activity_the_search_stops_at_shortlist_eligible_candidates() -> None:
+    assert FLOW_TEST is not None
+    selection = FLOW_TEST.selection.model_copy(update={"shortlist": 2, "max_leads": 1})
+    config = FLOW_TEST.model_copy(update={"selection": selection})
+    regular = [trade(hours_ago=1 + 6 * n) for n in range(40)]  # 4 a day
+    idle = [trade(hours_ago=72 + n) for n in range(40)]
+    busy = [trade(hours_ago=1 + 2 * n) for n in range(60)]  # 12 a day
+    trades = {"a": regular, "b": idle, "c": busy, "d": busy}
+    source = FakeSource([stats(lead) for lead in trades], trades=trades)
+    h = Harness(source, config=config)
+    await h.tracker.refresh()
+    assert source.calls == ["ranking:1", "trades:a", "curve:a", "trades:b", "trades:c", "curve:c"]
+    (selected,) = h.events(SELECTED_EVENT)
+    assert selected["examined"] == 3  # d, as busy as c, was never read
+    assert [lead["id"] for lead in selected["selected"]] == ["c"]
