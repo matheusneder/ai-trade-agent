@@ -15,7 +15,9 @@ The data imitates what the real stack emits, with the same names and attributes:
   the ranking every 6 hours, an outage of 503s around a cycle and one 429);
 * the agent's metrics (``trade_agent.*``, see ``trade_agent.metrics``): gauges every minute
   from one portfolio simulation, and cumulative counters (LLM cost and tokens, cycles,
-  entries, exits, risk state changes) fed by the same events that create the spans;
+  entries, exits, risk state changes) fed by the same events that create the spans; the
+  agent restarts once in the last third of the window, so the gauges come from two
+  ``service.instance.id`` series (the counters stay on one, the latest);
 * the logs that Alloy forwards (``service.name`` = compose service, structlog JSON flattened
   into attributes, ``trace_id``/``span_id`` of the span that wrote them);
 * the ``docker_stats`` metrics of each compose service (``deploy/otelcol``).
@@ -179,6 +181,8 @@ class Summary:
     problem_logs: list[str]  # "service severity" of the warnings and errors
     agent_problems: int
     last: Mapping[str, float]  # last value of each gauge of the "Agora" row
+    restart: int  # first reading of the instance that started in the window (unix ns)
+    restart_positions: tuple[int, int]  # active positions in the last reading before it, in it
     lead_errors: int  # failed requests to the lead traders' source (D-052)
     lead_rankings: int
     lead_http_errors: Mapping[int, int]
@@ -353,6 +357,15 @@ class _Generator:
         self.global_pause = (pause, pause + self.rng.randrange(60, 181))
         halt = self.rng.randrange(self.minutes // 2, 4 * self.minutes // 5)
         self.profile_halt = (halt, halt + self.rng.randrange(30, 91))
+        # the restart, in the last third: the previous instance's last reading falls in an
+        # hour's first minute, so it shares SigNoz's last step with the new instance's first
+        # one on a range of many hours (every step dividing an hour, from 3 minutes up)
+        self.restart_minute = next(
+            m
+            for m in range(2 * self.minutes // 3, self.minutes)
+            if (start + (m - 1) * MINUTE) % (60 * MINUTE) == 0
+        )
+        self.restart_positions = (0, 0)
         self.last: dict[str, float] = {}
         # the lead tracker (D-052)
         self.lead_selected = self.lead_fresh = self.lead_consensus = 0
@@ -633,6 +646,17 @@ class _Generator:
         run.log("reconcile.done", positions=len(self.positions), errors=0)
         run.close()
         self.finish_job(job, "reconcile")
+
+    def restart(self, at: int) -> None:
+        """A new container (a new ``service.instance.id``) whose startup reconciliation closes
+        a position stopped out while the agent was down: the previous instance's last reading
+        still counted it (on 2026-11-21, 13 positions before the restart and 5 after)."""
+        before = len(self.positions)
+        self.instance = self.uuid()
+        if self.positions:
+            self.positions[0].ret = -self.positions[0].stop
+        self.reconcile(at)
+        self.restart_positions = (before, len(self.positions))
 
     def sync_time(self, at: int) -> None:
         job = self.job("sync_time", at)
@@ -976,6 +1000,8 @@ class _Generator:
         for minute in range(self.minutes):
             at = self.start + minute * MINUTE
             self.weight = self.weight // 3  # the 1-minute window rolls over
+            if minute == self.restart_minute:
+                self.restart(at + 5 * SECOND)
             self.market(minute, at)
             self.check_risk(minute, at + 40 * SECOND)
             if minute % 5 == 2:
@@ -1209,6 +1235,8 @@ class _Generator:
             problem_logs=sorted({f"{log.service} {log.severity}" for log in problems}),
             agent_problems=sum(1 for log in problems if log.service == "agent"),
             last=dict(self.last),
+            restart=self.start + self.restart_minute * MINUTE + 41 * SECOND,  # agent_gauges
+            restart_positions=self.restart_positions,
             lead_errors=self.lead_errors,
             lead_rankings=self.lead_rankings,
             lead_http_errors=dict(sorted(self.lead_http.items())),

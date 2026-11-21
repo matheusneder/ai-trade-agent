@@ -125,7 +125,7 @@ def test_each_panel_has_one_query_of_the_kind_it_draws() -> None:
             assert kind in SQL_PANELS, name
         if kind == "signoz/NumberPanel":  # a metric as a single value needs reduceTo
             for spec in specs:
-                if spec["signal"] == "metrics":
+                if spec.get("signal") == "metrics":  # SQL has no reduceTo: it returns one row
                     assert all("reduceTo" in a for a in spec["aggregations"]), name
         for spec in specs:
             for aggregation in spec.get("aggregations", []):
@@ -165,14 +165,30 @@ def _sql_panels() -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_sql_queries_keep_their_own_time_bounds() -> None:
-    """The SQL panels ignore the dashboard's range: no SigNoz time variable, one ``now()`` (the
+    """The day's chart ignores the dashboard's range: no SigNoz time variable, one ``now()`` (the
     tests evaluate the query at other instants) and nothing the querier would template."""
-    assert {name for name, _ in _sql_panels()} == {"trade-agent-operacao/pnl-scope-today"}
+    daily = {"trade-agent-operacao/pnl-scope-today"}
+    assert {name for name, _ in _sql_panels()} == daily | {"trade-agent-operacao/positions-now"}
     for name, panel in _sql_panels():
+        if name not in daily:
+            continue
         query = _builder_specs(panel)[0]["query"]
         assert query.count("now()") == 1, name
         assert not re.search(r"\{\{|\[\[|\$", query), name  # {{.start_timestamp}}, $var...
         assert "toStartOfDay(instant, 'UTC')" in query, name  # the agent's day is UTC
+
+
+def test_newest_reading_follows_the_dashboard_range() -> None:
+    """The newest reading of a gauge: within the dashboard's range (the querier's two time
+    variables, no ``now()``), across agent instances and empty without readings (not 0)."""
+    newest = [(n, p) for n, p in _sql_panels() if "argMax(value, unix_milli)" in json.dumps(p)]
+    assert [name for name, _ in newest] == ["trade-agent-operacao/positions-now"]
+    for name, panel in newest:
+        assert panel["spec"]["plugin"]["kind"] == "signoz/NumberPanel", name
+        query = _builder_specs(panel)[0]["query"]
+        assert re.findall(r"\$\w+", query) == ["$start_timestamp_ms", "$end_timestamp_ms"], name
+        assert "now()" not in query and "instance" not in query, name
+        assert "HAVING count() > 0" in query, name
 
 
 def test_agent_metrics_exist() -> None:

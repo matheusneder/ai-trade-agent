@@ -286,31 +286,12 @@
               "kind": "scalar",
               "spec": {
                 "plugin": {
-                  "kind": "signoz/BuilderQuery",
+                  "kind": "signoz/ClickHouseSQL",
                   "spec": {
                     "name": "A",
-                    "signal": "metrics",
-                    "source": "",
+                    "query": "SELECT argMax(value, unix_milli) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'trade_agent.positions.active' AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms HAVING count() > 0",
                     "disabled": false,
-                    "filter": {
-                      "expression": ""
-                    },
-                    "groupBy": [],
-                    "order": [],
-                    "having": {
-                      "expression": ""
-                    },
-                    "functions": [],
-                    "legend": "",
-                    "aggregations": [
-                      {
-                        "metricName": "trade_agent.positions.active",
-                        "temporality": "",
-                        "timeAggregation": "latest",
-                        "spaceAggregation": "avg",
-                        "reduceTo": "last"
-                      }
-                    ]
+                    "legend": ""
                   }
                 }
               }
