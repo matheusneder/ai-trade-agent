@@ -195,6 +195,7 @@ def _report(**overrides: object) -> ExecutionReport:
 def test_affected_decision() -> None:
     assert affected_decision(_report()) == "aaaaaaaaaa"
     assert affected_decision(_report(client_order_id="web_1")) is None
+    assert affected_decision(_report(client_order_id="")) is None  # report without "c"
     status = ListStatusEvent(
         1, "BTCUSDT", 1, "OCO", "ALL_DONE", "ALL_DONE", "NONE", "ta1-mod-bbbbbbbbbb-1-L", 1, ()
     )

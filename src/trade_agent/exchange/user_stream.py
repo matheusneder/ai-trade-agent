@@ -120,7 +120,7 @@ def parse_user_event(event: Mapping[str, Any]) -> UserEvent:
         return ExecutionReport(
             event_time=int(event["E"]),
             symbol=event["s"],
-            client_order_id=event["c"],
+            client_order_id=event.get("c") or "",  # absent/null in Demo EXPIRED reports
             side=event["S"],
             order_type=event["o"],
             time_in_force=event["f"],
@@ -276,7 +276,14 @@ class UserDataStream:
                             client_id=event.get("c"),
                             status=event.get("X") or event.get("L"),
                         )
-                        yield parse_user_event(event)
+                        try:
+                            parsed = parse_user_event(event)
+                        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+                            # an exception here would end this generator, and with it the
+                            # consumer task and the subscription, silently: skip the event
+                            log.warning("user_stream.unparsed", error=repr(exc), raw=event)
+                            continue
+                        yield parsed
                     else:
                         log.warning("user_stream.closed_by_server")
             except (WebSocketException, OSError, TimeoutError, SubscriptionError) as exc:
