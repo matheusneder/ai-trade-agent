@@ -447,6 +447,7 @@ stateDiagram-v2
   ENTRY_SENT --> PARTIAL: partial fill (GTC only)
   ENTRY_SENT --> PROTECTED: full buy → OCO armed by Binance
   PLANNED --> UNPROTECTED: FOK filled at once, protection legs rejected
+  PLANNED --> PARTIAL: first sync after an unknown send outcome (GTC only)
   PARTIAL --> PROTECTED: agent creates an OCO for the partial qty
   PARTIAL --> CLOSED: qty below the minimum → market sell
   PROTECTED --> ADJUSTING: break-even

@@ -56,6 +56,7 @@ def test_terminal_states() -> None:
         (S.PLANNED, S.ENTRY_SENT),
         (S.PLANNED, S.PROTECTED),
         (S.PLANNED, S.UNPROTECTED),
+        (S.PLANNED, S.PARTIAL),
         (S.ENTRY_SENT, S.PARTIAL),
         (S.PROTECTED, S.ADJUSTING),
         (S.ADJUSTING, S.PROTECTED),

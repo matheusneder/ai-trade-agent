@@ -268,7 +268,7 @@ class PositionService:
 
     async def _on_protected(self, position: Position, verdict: Verdict) -> Position:
         changes: dict[str, Any] = {"state": S.PROTECTED, "protected_qty": verdict.protected_qty}
-        if verdict.entry is not None and position.entry_qty is None:
+        if verdict.entry is not None and position.entry_price is None:
             changes |= await self._entry_fields(position, verdict.entry)
         was = position.state
         position = await self.store.update_position(position.id, **changes)
@@ -277,6 +277,8 @@ class PositionService:
         return position
 
     async def _entry_fields(self, position: Position, entry: Order) -> dict[str, Any]:
+        """Records the entry fills. The only writer of ``entry_price``, so a ``None`` there
+        means they are missing (``PARTIAL`` sets ``entry_qty`` alone)."""
         trades = await self.api.my_trades(position.symbol, order_id=entry.order_id)
         await self.store.add_fills(trades, position.id)
         summary = summarize_fills(trades)
@@ -297,7 +299,7 @@ class PositionService:
             else ExitReason.STOP_LOSS
         )
         changes: dict[str, Any] = {}
-        if verdict.entry is not None and position.entry_qty is None:
+        if verdict.entry is not None and position.entry_price is None:
             changes |= await self._entry_fields(position, verdict.entry)
         return await self._finalize_exit(position, exit_leg, reason, changes)
 
@@ -358,8 +360,7 @@ class PositionService:
     # ================================================================== re-protection
     async def _on_unprotected(self, position: Position, verdict: Verdict) -> Position:
         changes: dict[str, Any] = {"state": S.UNPROTECTED}
-        if verdict.entry is not None and position.entry_qty is None:
-            # the entry fills are recorded here when no protected state came first
+        if verdict.entry is not None and position.entry_price is None:
             changes |= await self._entry_fields(position, verdict.entry)
         position = await self.store.update_position(position.id, **changes)
         await self._event(

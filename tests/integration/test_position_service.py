@@ -340,6 +340,26 @@ async def test_fok_filled_with_rejected_legs_is_reprotected(
     ]
 
 
+async def test_partial_seen_after_unknown_outcome_then_reprotected_with_entry_fills(
+    service: PositionService, fake: FakeBinance, store: Store, api: BinanceSpotApi
+) -> None:
+    fake.inject(Fault("POST", "/api/v3/orderList/opoco", "timeout_after"))
+    for _ in range(3):
+        fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))
+    position = await _open(service, price="62500", mode=EntryMode.LIMIT_MAKER_GTC)
+    assert position.state is S.PLANNED
+    fake.partially_fill(IDS0.entry_id, D("0.004"))
+    partial = await service.sync(position)
+    assert partial.state is S.PARTIAL
+    assert partial.entry_price is None  # PARTIAL records the quantity alone
+    await api.cancel_order_list("BTCUSDT", list_client_order_id=IDS0.list_id)
+    protected = await service.sync(partial)
+    assert protected.state is S.PROTECTED
+    assert protected.protection_list_id == IDS1.list_id
+    assert protected.entry_price == D("62500")
+    assert len(await store.fills_for(position.id)) == 1
+
+
 async def test_reprotect_lifts_activation_above_current_price(
     service: PositionService, fake: FakeBinance
 ) -> None:
