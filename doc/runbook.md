@@ -198,7 +198,7 @@ Look first at the market regime: *Visão geral* → "Filtro de regime (BTC vs EM
 
 The profile buys only what at least `min_backers` of its followed lead traders bought **and** its own candles confirm (doc 03, §6.4), so days without an entry are usually the strategy, as in §2.7. The *Copy trading* dashboard (Grafana and SigNoz) shows all of it; the queries below are the same data. Look in this order:
 
-1. **What the last cycle read** (one an hour, D-055; every 15 minutes in the flow tests `temp_cp_trade_validation` and `temp_cp_trade_high_risk_validation`, D-054 and D-056): the `leads` field of the profile's `decision.cycle` event.
+1. **What the last cycle read** (one an hour in `lead_consensus_1h`, D-055; one every 4 h in `lead_consensus_llm_4h`, D-059; every 15 minutes in the flow tests `temp_cp_trade_validation` and `temp_cp_trade_high_risk_validation`, D-054 and D-056): the `leads` field of the profile's `decision.cycle` event.
 
    ```sql
    SELECT created_at, payload->'leads' FROM events
@@ -208,7 +208,7 @@ The profile buys only what at least `min_backers` of its followed lead traders b
 
    | `status` | Meaning | What to do |
    |----------|---------|------------|
-   | `ok` | The reading is fresh. `assets` lists who bought and sold each asset: without a `"consensus": "buy"` there was nothing to confirm; with one and no entry, the cycle's `filtered` (the candles refused it) or `rejected` (price past what the traders paid, slots, risk budget) says why | nothing |
+   | `ok` | The reading is fresh. `assets` lists who bought and sold each asset: without a `"consensus": "buy"` there was nothing to confirm; with one and no entry, the cycle's `filtered` (the candles refused it) or `rejected` (price past what the traders paid, slots, risk budget) says why. In `lead_consensus_llm_4h` (D-059), `sem aprovação do analista` means the analyst gave the asset no opinion, a negative one or one below `llm.min_confidence` (its rationale is in the reading, `trade-agent research show`, and in that cycle's row of `research_reports`), and `exposição zero` that there was no valid reading at all (`pause_entries`) | nothing |
    | `nenhum trader selecionado` | The last ranking found nobody that passes `leads.selection` | see step 2 |
    | `ranking de traders vencido` | No ranking could be read for `max_ranking_age` (24 h), or none since the start | see step 3 |
    | `copy trading sem dados recentes` | The followed traders' trades could not be read for `max_data_age` (90 min; 45 in the flow tests) | see step 3 |
@@ -224,7 +224,7 @@ The profile buys only what at least `min_backers` of its followed lead traders b
 
 While the source is down the profile opens nothing, and nothing else is affected: the other profiles do not read it, and the profile's open positions keep their native protection, their own technical exit and `max_holding`. To turn the profile off, set `enabled: false` in `config/profiles.yaml` and restart the agent; its positions stay protected on Binance and are reconciled as usual, and its share of the capital stays unused until another enabled profile gets it.
 
-`temp_cp_trade_validation` (D-054) and `temp_cp_trade_high_risk_validation` (D-056) only make the flow run: they follow the traders that trade most often, whatever their results, and buy on one of them. The second has no trend check, no extension check, a 10% stop cap and no pause of its own, so it buys in a local downtrend too: its results say nothing about the strategy. Its closed positions are left out of the global streak (`risk.global_streak: false`), so its losing trades do not pause every profile (`max_consecutive_losses`, §2.3); the other global stops still apply to it. Once their entries, protection and exits have been seen working, turn both off (`enabled: false`), give their `capital_share` back to `lead_consensus_1h` (0.40) and restart the agent.
+`temp_cp_trade_validation` (D-054) and `temp_cp_trade_high_risk_validation` (D-056) only make the flow run: they follow the traders that trade most often, whatever their results, and buy on one of them. The second has no trend check, no extension check, a 10% stop cap and no pause of its own, so it buys in a local downtrend too: its results say nothing about the strategy. Its closed positions are left out of the global streak (`risk.global_streak: false`), so its losing trades do not pause every profile (`max_consecutive_losses`, §2.3); the other global stops still apply to it. Once their entries, protection and exits have been seen working, turn both off (`enabled: false`), give their `capital_share` (0.10 each) back to `lead_consensus_1h`, which then has 0.30 beside the 0.10 of `lead_consensus_llm_4h` (D-059), and restart the agent.
 
 ## 3. Telegram commands
 

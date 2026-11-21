@@ -28,11 +28,12 @@ REPOSITORY = load_strategy_config(REPOSITORY_FILE)
 LEAD: dict[str, Any] = {"family": "lead_consensus", "signals": {}, "leads": {}}
 
 
-def test_the_repository_profile_follows_spot_lead_traders_on_a_fifth_of_the_account() -> None:
+def test_the_repository_profile_follows_spot_lead_traders_on_a_tenth_of_the_account() -> None:
     profile = REPOSITORY.profiles["lead_consensus_1h"]
     assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
-    assert (profile.code, profile.timeframe, profile.capital_share) == ("lead1h", "1h", D("0.20"))
-    assert REPOSITORY.profile_capital("lead_consensus_1h") == D(200)
+    # D-059: half of its 0.20 went to lead_consensus_llm_4h
+    assert (profile.code, profile.timeframe, profile.capital_share) == ("lead1h", "1h", D("0.10"))
+    assert REPOSITORY.profile_capital("lead_consensus_1h") == D(100)
     # D-055: at each 1h close again (every 10 minutes in D-053), with one reading per cycle
     assert (profile.cycle, profile.cadence) == (timedelta(hours=1), "60m")
     assert profile.local_params() == ConsensusParams(
@@ -44,6 +45,66 @@ def test_the_repository_profile_follows_spot_lead_traders_on_a_fifth_of_the_acco
     # the traders every hour, so their reading counts for 90 minutes
     hourly = LeadsConfig(poll_interval=timedelta(hours=1), max_data_age=timedelta(minutes=90))
     assert profile.leads == hourly
+
+
+def test_the_4h_profile_loosens_its_own_rules_and_waits_for_the_analysts_approval() -> None:
+    """D-059: lead_consensus_1h's mechanism on the 4h candles, each rule of its own one step
+    looser, and no entry without the analyst's explicit opinion."""
+    profile = REPOSITORY.profiles["lead_consensus_llm_4h"]
+    strict = REPOSITORY.profiles["lead_consensus_1h"]
+    assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
+    assert (profile.code, profile.capital_share) == ("leadllm4h", strict.capital_share)
+    # at each 4h close, with the legacy profiles whose research it shares
+    assert (profile.timeframe, profile.cycle, profile.cadence) == ("4h", None, "4h")
+    assert profile.local_params() == ConsensusParams(
+        max_extension_atr=2.5, close_above_ema=False, min_stop_atr=2.0, max_stop_pct=0.08
+    )
+    llm = profile.llm
+    assert llm.requires_approval and llm.on_failure == "pause_entries"
+    assert (llm.weight, llm.min_confidence) == (D("0.5"), D("0.5"))
+    # the same values serve the other mode: only `validation` changes
+    assert not llm.model_copy(update={"validation": "filter"}).requires_approval
+    assert profile.risk is not None and strict.risk is not None and strict.leads is not None
+    slots, risk = profile.allocation.max_open_positions, profile.allocation.risk_per_trade_pct
+    assert profile.risk.max_open_risk_pct == slots * risk  # every slot fits the open-risk cap
+    # a wider budget than the 1h profile's, with every pause of it still there
+    assert profile.risk == strict.risk.model_copy(
+        update={
+            "max_open_risk_pct": D("2.25"),
+            "daily_loss_pct": D("2.5"),
+            "consecutive_losses": 4,
+            "cooldown": timedelta(hours=12),
+            "max_drawdown_pct": D(10),
+            "reentry_candles": 2,
+        }
+    )
+    assert profile.leads is not None
+    selection, consensus = profile.leads.selection, profile.leads.consensus
+    # still by score, every performance criterion checked and never on one trader alone:
+    # the 1h profile's selection but for five thresholds, its consensus but for two
+    assert selection.rank_by == "score" and consensus.min_backers == 2
+    assert selection == strict.leads.selection.model_copy(
+        update={
+            "min_days": 60,
+            "min_balance": D(500),
+            "min_sharpe": 0.7,
+            "min_positive_weeks_pct": 50.0,
+            "min_recent_gain_pct": -2.0,
+        }
+    )
+    assert consensus == strict.leads.consensus.model_copy(
+        update={"window": timedelta(hours=48), "max_premium_pct": D("2.5")}
+    )
+
+
+def test_a_neutral_opinion_never_fails_the_4h_profiles_minimum_score() -> None:
+    """Its score is the share of the followed traders that bought, at least ``min_backers``
+    of ``max_leads``; blended with a neutral opinion it must still reach ``min_score``, or
+    the approval mode would refuse what the analyst approved."""
+    profile = REPOSITORY.profiles["lead_consensus_llm_4h"]
+    assert profile.leads is not None
+    weakest = D(profile.leads.consensus.min_backers) / profile.leads.selection.max_leads
+    assert (1 - profile.llm.weight) * weakest >= D(str(profile.entry.min_score)) > 0
 
 
 def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> None:
@@ -106,13 +167,14 @@ def test_the_enabled_shares_still_add_up_to_the_whole_account() -> None:
     assert sum(shares.values()) == 1
     # D-052 took half of each rejected pair-local profile; D-053 the rest of both, which are
     # off, and 0.10 from each main profile; D-054 lent half of it to the flow test, which
-    # D-056 split with the high-risk one
+    # D-056 split with the high-risk one; D-059 gave half of the rest to the 4h profile
     assert shares == {
         "swing_trend": D("0.25"),
         "momentum_alpha": D("0.20"),
         "alt_atr": D("0.05"),
         "pair_pullback_1h": D("0.10"),
-        "lead_consensus_1h": D("0.20"),
+        "lead_consensus_1h": D("0.10"),
+        "lead_consensus_llm_4h": D("0.10"),
         "temp_cp_trade_validation": D("0.10"),
         "temp_cp_trade_high_risk_validation": D("0.10"),
     }
@@ -122,7 +184,12 @@ def test_the_enabled_shares_still_add_up_to_the_whole_account() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["lead_consensus_1h", "temp_cp_trade_validation", "temp_cp_trade_high_risk_validation"],
+    [
+        "lead_consensus_1h",
+        "lead_consensus_llm_4h",
+        "temp_cp_trade_validation",
+        "temp_cp_trade_high_risk_validation",
+    ],
 )
 def test_the_repository_profiles_pass_the_risk_guard_at_any_stop(name: str) -> None:
     """Their target is 2R net of costs, so the minimum R:R holds from the tightest stop to
@@ -163,11 +230,27 @@ def test_it_is_a_pair_local_family_with_the_same_obligations() -> None:
     for overrides, message in (
         ({"signals": {"rsi_dip": 40}}, "desconhecidos"),
         ({"signals": {"min_stop_atr": 3}}, "protection.stop"),
-        ({"llm": {"enabled": True}}, "llm.enabled false"),
+        ({"protection": {"break_even_after_r": 1.0}}, "sem break_even_after_r"),
         ({"risk": None}, "risk"),
     ):
         with pytest.raises(ValidationError, match=message):
             local_profile(**merge(LEAD, overrides))
+
+
+def test_it_is_the_one_local_family_that_may_have_the_analyst() -> None:
+    """D-059: the pair-local families stay pure TA, as the lab ran them; this one has no lab
+    run, and its analyst either only restricts or must approve each entry."""
+    with pytest.raises(ValidationError, match=r"llm\.enabled false"):
+        local_profile(llm={"enabled": True})
+    filtered = local_profile(**merge(LEAD, {"llm": {"enabled": True}})).llm
+    assert filtered.enabled and filtered.validation == "filter"
+    assert not filtered.requires_approval
+    approving = merge(LEAD, {"llm": {"enabled": True, "validation": "approval"}})
+    assert local_profile(**approving).llm.requires_approval
+    off = merge(LEAD, {"llm": {"enabled": False, "validation": "approval"}})
+    assert not local_profile(**off).llm.requires_approval  # nobody to approve
+    with pytest.raises(ValidationError, match="validation"):
+        local_profile(**merge(LEAD, {"llm": {"enabled": True, "validation": "veto"}}))
 
 
 def test_a_cycle_shorter_than_the_candle_is_only_for_the_lead_traders_consensus() -> None:

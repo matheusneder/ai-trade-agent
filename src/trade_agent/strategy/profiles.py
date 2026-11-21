@@ -207,9 +207,18 @@ class ExitConfig(_Strict):
 class LlmConfig(_Strict):
     enabled: bool = True
     """False is a pure TA baseline: no research, opinions, vetoes or degradation."""
+    validation: Literal["filter", "approval"] = "filter"
+    """How the analyst validates an entry (D-059). ``filter``: it only restricts (veto,
+    exposure cut, a sentiment that lowers the score), and an asset it says nothing about is
+    neutral. ``approval``: the same, and an entry also needs its explicit opinion on the
+    asset, not negative and with at least ``min_confidence``; no opinion is a refusal."""
     weight: Fraction = Decimal(0)
     min_confidence: Fraction = Decimal("0.5")
     on_failure: Literal["ta_only", "ta_only_reduced", "pause_entries"] = "ta_only_reduced"
+
+    @property
+    def requires_approval(self) -> bool:
+        return self.enabled and self.validation == "approval"
 
 
 class ScopeRiskConfig(_Strict):
@@ -439,7 +448,9 @@ class ProfileConfig(_Strict):
                 raise ValueError("risk e o alvo por R, ATR ou sinal são só das famílias locais")
             return self
         problems = []
-        if self.llm.enabled:
+        # the pair-local families are pure TA, as the lab ran them (D-044); lead_consensus
+        # has no lab run to stay equal to and may have the analyst (D-059)
+        if self.llm.enabled and not self.family.needs_leads:
             problems.append("llm.enabled false")
         if protection.stop.mode is not StopMode.FIXED:
             problems.append("stop fixo")

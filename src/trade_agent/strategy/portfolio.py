@@ -4,6 +4,8 @@ Rules (doc 03, §6.3):
 
 * the LLM may penalize the technical score but never raise it;
 * an LLM veto excludes the asset;
+* with ``llm.validation: approval`` (D-059) an entry also needs the analyst's explicit
+  opinion on the asset, not negative and with at least ``llm.min_confidence``;
 * ranking by final score, honoring slots, cash reserve, *tier* limits and "one position
   per asset";
 * size = ``capital × risk_per_trade / stop_distance``, capped by ``max_position_pct``,
@@ -26,6 +28,7 @@ from trade_agent.strategy.profiles import ProfileConfig
 ZERO = Decimal(0)
 BIPS = Decimal(10_000)
 PCT = Decimal(100)
+NO_APPROVAL = "sem aprovação do analista"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +73,17 @@ class Candidate:
             return technical
         return min(
             technical, (1 - weight) * technical + weight * opinion.sentiment * opinion.confidence
+        )
+
+    def approved(self, profile: ProfileConfig) -> bool:
+        """Whether the analyst approved the entry, for ``llm.validation: approval`` (D-059):
+        an opinion on the asset that is not negative, with at least ``min_confidence``."""
+        opinion = self.opinion
+        return (
+            opinion is not None
+            and not opinion.veto
+            and opinion.sentiment >= 0
+            and opinion.confidence >= profile.llm.min_confidence
         )
 
 
@@ -117,6 +131,8 @@ def _rejection(
         return "ativo já em carteira"
     if exposure_multiplier <= 0:  # reading with zero exposure, or on_failure: pause_entries
         return "exposição zero"
+    if profile.llm.requires_approval and not candidate.approved(profile):
+        return NO_APPROVAL
     if slots <= 0:
         return "sem vagas no perfil"
     return None

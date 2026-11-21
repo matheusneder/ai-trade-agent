@@ -6,29 +6,37 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+import httpx
 import pandas as pd
 from structlog.testing import capture_logs
 
 from tests.integration.decision.test_engine import (
     FOUR_HOURS,
+    NEUTRAL_VIEW,
     Clock,
     _engine,
+    _research,
     _setup_market,
     _strategy_data,
 )
 from tests.support.candles import downtrend, ohlcv, pair_pullback, raw_klines
+from tests.support.claude import FakeClaude
 from tests.support.fake_binance import FakeBinance
 from tests.support.leads import FakeSource, active, stats, trade
 from tests.support.local_profiles import LOCAL_PULLBACK, merge
+from trade_agent.decision.engine import merge_candidates
 from trade_agent.exchange.api import BinanceSpotApi
 from trade_agent.execution.positions import PositionState
 from trade_agent.execution.service import PositionService
 from trade_agent.leads.consensus import NO_TRACKER, SELL_CONSENSUS, STALE_RANKING
 from trade_agent.leads.source import LeadTrade
 from trade_agent.leads.tracker import LeadTracker
+from trade_agent.persistence.db import Database
 from trade_agent.persistence.store import Store
+from trade_agent.research.models import CandidateContext
 from trade_agent.signals import Family
 from trade_agent.signals.local import DOWNTREND, LEAD_CONSENSUS, TECHNICAL_EXITS
+from trade_agent.strategy.portfolio import NO_APPROVAL
 from trade_agent.strategy.profiles import StrategyConfig
 
 D = Decimal
@@ -306,6 +314,103 @@ async def test_the_pairs_own_downtrend_closes_the_position_whatever_the_traders_
     report = await engine.run_profile("lead")  # the traders still hold their purchase
     assert report.exits == (("SOLUSDT", TECHNICAL_EXITS[Family.LEAD_CONSENSUS]),)
     assert await store.active_positions() == []
+
+
+ANALYST = {"enabled": True, "weight": 0.5, "min_confidence": 0.5, "on_failure": "pause_entries"}
+
+
+def _view(**sol: Any) -> dict[str, Any]:
+    """A neutral reading; with ``sol``, the analyst's opinion on it."""
+    opinion = {
+        "asset": "SOL", "horizon": "days", "catalysts": [], "risk_flags": [], "veto": False,
+        "rationale": "r", "sources": [], **sol,
+    }  # fmt: skip
+    return {**NEUTRAL_VIEW, "assets": [opinion] if sol else []}
+
+
+async def test_in_approval_mode_a_consensus_waits_for_the_analysts_explicit_opinion(
+    db: Database, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """D-059: the profile's own rules are looser, so an entry needs the analyst's opinion on
+    the asset: asked for it by name, its silence, its doubt and its dislike all refuse."""
+    _market(fake)
+    clock = Clock()
+    tracker, _ = await _tracker(store, clock, ana=_bought(clock), bia=_bought(clock))
+    claude = FakeClaude()
+    async with httpx.AsyncClient() as http:
+        engine, _ = _engine(
+            api,
+            service,
+            store,
+            strategy=_strategy(llm={**ANALYST, "validation": "approval"}),
+            clock=clock,
+            research=_research(db, http, claude),
+            research_wait=timedelta(milliseconds=50),  # its 4h peer does not run here
+            leads={"lead": tracker},
+        )
+        claude.fail(500)  # no reading at all: pause_entries, whatever the mode
+        blind = await engine.run_profile("lead")
+        assert blind.rejected == (("SOLUSDT", "exposição zero"),)
+        silent, doubtful = _view(), _view(sentiment=0.2, confidence=0.3)
+        for refusal in (silent, doubtful, _view(sentiment=-0.2, confidence=0.9)):
+            claude.reply_json(refusal)
+            report = await engine.run_profile("lead")
+            assert (report.research, report.opened, report.setups) == ("ok", (), 1)
+            assert report.rejected == (("SOLUSDT", NO_APPROVAL),)
+        # the analyst was told which candidate waits for it, and what its setup is
+        (asked,) = [m["content"] for m in claude.requests[1]["messages"] if m["role"] == "user"]
+        assert "setup lead_consensus, APROVAÇÃO EXIGIDA" in str(asked)
+        claude.reply_json(_view(sentiment=0, confidence=0.7))  # looked at it: nothing against
+        approved = await engine.run_profile("lead")
+        assert approved.opened == ("SOLUSDT",) and approved.rejected == ()
+        claude.fail(500)  # holding SOL: the candidate is the position, no approval is asked
+        held = await engine.run_profile("lead")
+    assert held.research.startswith("falhou") and held.opened == ()
+    assert "APROVAÇÃO EXIGIDA" not in str(claude.requests[-1]["messages"])
+
+
+async def test_in_filter_mode_the_analysts_silence_is_neutral_and_its_dislike_refuses(
+    db: Database, api: BinanceSpotApi, service: PositionService, store: Store, fake: FakeBinance
+) -> None:
+    """The other ``llm.validation`` of a lead profile (D-059): the analyst only restricts.
+    Both followed traders bought, so the score is 1: a clear dislike takes it below
+    ``min_score``, and without any reading (``pause_entries``) nothing is bought either."""
+    _market(fake)
+    clock = Clock()
+    tracker, _ = await _tracker(store, clock, ana=_bought(clock), bia=_bought(clock))
+    claude = FakeClaude()
+    strategy = _strategy(llm=ANALYST, entry={"min_score": 0.1})
+    async with httpx.AsyncClient() as http:
+        engine, _ = _engine(
+            api,
+            service,
+            store,
+            strategy=strategy,
+            clock=clock,
+            research=_research(db, http, claude),
+            research_wait=timedelta(milliseconds=50),
+            leads={"lead": tracker},
+        )
+        claude.fail(500)  # no reading yet, and none to fall back on
+        blind = await engine.run_profile("lead")
+        assert blind.research.startswith("falhou") and blind.opened == ()
+        assert blind.rejected == (("SOLUSDT", "exposição zero"),)
+        claude.reply_json(_view(sentiment=-1, confidence=1))
+        disliked = await engine.run_profile("lead")
+        assert disliked.rejected == (("SOLUSDT", "score abaixo do mínimo"),)
+        claude.reply_json(_view())  # nothing about SOL
+        report = await engine.run_profile("lead")
+    assert report.opened == ("SOLUSDT",) and report.rejected == ()
+    assert "APROVAÇÃO EXIGIDA" not in str([r["messages"] for r in claude.requests])
+
+
+def test_a_candidate_two_profiles_share_keeps_its_need_for_approval() -> None:
+    """The profiles of a close share one research (D-032): the asset is asked about once."""
+    plain = CandidateContext("SOL", "SOLUSDT", "large", 0.8, "breakout")
+    waiting = CandidateContext("SOL", "SOLUSDT", "large", 0.5, LEAD_CONSENSUS, needs_approval=True)
+    for groups in ([[plain], [waiting]], [[waiting], [plain]]):
+        (merged,) = merge_candidates(groups)
+        assert (merged.ta_score, merged.setup, merged.needs_approval) == (0.8, "breakout", True)
 
 
 async def test_the_other_profiles_never_read_the_lead_traders(
