@@ -148,7 +148,10 @@ names, span names, attributes, metric names and log fields the agent, Alloy and 
   rate, weight, clock offset, and the market regime from the first decision cycle on, with one
   cycle below the EMA 200 and no entry in it), and cumulative counters fed by the same events
   as the spans (LLM cost and tokens, cycles, setups and stop-noise removals, entries, exits,
-  risk state changes);
+  risk state changes); the agent restarts once in the last third of the window (a new
+  `service.instance.id` for the gauges, and the startup reconciliation closes a position), so
+  "Posições ativas" is checked on a range ending right after it, where SigNoz's last step
+  holds both instances;
 - **the lead tracker** of the `lead_consensus` profile (D-052) every 15 minutes: the ranking
   every 6 hours and the followed traders' trades in between (`trade-agent.leads` spans to
   `www.binance.com`), its gauges and failed-request counter, an outage of HTTP 503s that

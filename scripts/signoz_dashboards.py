@@ -81,6 +81,18 @@ FROM (
 ORDER BY scope, ts
 """
 
+# The newest reading of a gauge in the dashboard's range, whatever agent instance sent it. The
+# builder's ``latest`` averages the series of the last step: after a restart the previous
+# container's series keeps its last reading there until the step rolls over (15 min on a
+# 3-day range, longer on wider ones), so 13 stale positions and 5 real ones showed as 9.
+NEWEST_READING = """
+SELECT argMax(value, unix_milli) AS value
+FROM signoz_metrics.distributed_samples_v4
+WHERE metric_name = '{metric}'
+    AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms
+HAVING count() > 0
+"""
+
 type Json = dict[str, Any]
 type Cell = tuple[str, Json, int, int]  # panel key, panel, width, height
 
@@ -151,8 +163,14 @@ def events(
 
 
 def sql(query: str, *, legend: str = "", name: str = "A") -> Json:
-    """ClickHouse SQL with its own time bounds (the dashboard's range does not reach it)."""
+    """ClickHouse SQL: the dashboard's range reaches it only through ``$start_timestamp_ms``
+    and ``$end_timestamp_ms``, which the querier fills in."""
     return {"name": name, "query": " ".join(query.split()), "disabled": False, "legend": legend}
+
+
+def newest(name: str) -> Json:
+    """The newest reading of the gauge ``name`` in the range, for single-value panels."""
+    return sql(NEWEST_READING.format(metric=name))
 
 
 def rows(signal: str, *, where: str, limit: int = 50) -> Json:
@@ -380,7 +398,7 @@ def _operation() -> Json:
                             "positions-now",
                             number(
                                 "Posições ativas",
-                                metric("trade_agent.positions.active", reduce="last"),
+                                newest("trade_agent.positions.active"),
                                 decimals=0,
                             ),
                             2,
