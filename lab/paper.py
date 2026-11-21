@@ -9,7 +9,9 @@ The pair-local families (D-044) replay as the agent and the lab strategy run the
 (``limit``) target fills at its price once a bid reaches it, the family's technical exit
 closes at the decision's bid (the breakout's against the level of its entry signal), and the
 profile's ``risk`` pauses new entries (:mod:`trade_agent.risk.scope`), marked to market at
-each decision. The global stop conditions are still not replayed.
+each decision. A ``lead_consensus`` profile with the analyst (D-059) also closes on its veto
+and, in approval mode, enters only on its approval. The global stop conditions are still
+not replayed.
 """
 
 import argparse
@@ -229,18 +231,8 @@ class PaperPortfolio:
         if p is None or p.idea.profile != name:
             return
         profile = self.strategy.profiles[name]
-        if profile.family.local:  # the family's technical exit (D-044)
-            reason = position_exit(candidate.signal, profile.local_params(), p.level)
-            expired = (
-                profile.protection.max_holding is not None
-                and at - p.opened_at >= profile.protection.max_holding
-            )
-            if reason is not None or expired:
-                self.close(symbol, candidate.bid, at, "decision")
-            return
-        p.weak_cycles = (
-            p.weak_cycles + 1 if candidate.signal.score <= profile.exits.exit_score else 0
-        )
+        # the analyst's veto closes a position of any family that has the analyst: a
+        # lead_consensus profile may (D-059), and the agent closes it the same way
         veto = (
             not self.pure_ta
             and profile.llm.enabled
@@ -250,6 +242,14 @@ class PaperPortfolio:
         expired = (
             profile.protection.max_holding is not None
             and at - p.opened_at >= profile.protection.max_holding
+        )
+        if profile.family.local:  # the family's technical exit (D-044)
+            reason = position_exit(candidate.signal, profile.local_params(), p.level)
+            if reason is not None or expired or veto:
+                self.close(symbol, candidate.bid, at, "decision")
+            return
+        p.weak_cycles = (
+            p.weak_cycles + 1 if candidate.signal.score <= profile.exits.exit_score else 0
         )
         if veto or expired or p.weak_cycles >= profile.exits.exit_after_cycles:
             self.close(symbol, candidate.bid, at, "decision")

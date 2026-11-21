@@ -15,6 +15,8 @@ UP = Regime(up=True, close=101.0, ema_slow=100.0)
 DOWN = Regime(up=False, close=98.0, ema_slow=100.0)
 REPOSITORY = load_strategy_config(Path(__file__).parents[3] / "config" / "profiles.yaml")
 GATED = "swing_trend, momentum_alpha, alt_atr"
+FREE = "lead_consensus_llm_4h segue os sinais do próprio par"
+"""D-059: the 4h profile that reads no benchmark, so the regime never stops it."""
 
 
 def _watch(
@@ -46,7 +48,8 @@ async def test_first_reading_is_recorded_and_only_flips_are_announced(store: Sto
     await watch.observe("4h", 3_000, UP)
     assert alerts == [
         "Regime de mercado (4h) virou para alta: BTCUSDT fechou em 101.00, acima da EMA200 "
-        f"(100.00, +1.00%); os setups de compra dos perfis com o filtro ({GATED}) voltam a valer."
+        f"(100.00, +1.00%); os setups de compra dos perfis com o filtro ({GATED}) voltam a valer; "
+        f"{FREE}."
     ]
     await watch.observe("4h", 2_500, DOWN)  # an older candle (a late profile): ignored
     assert len(alerts) == 1
@@ -66,7 +69,7 @@ async def test_a_restart_does_not_announce_the_same_regime_again(store: Store) -
     assert len(alerts) == 1 and alerts[0].startswith("Regime de mercado (4h) virou para baixa")
     assert (
         f"os perfis com o filtro de regime ({GATED}) não abrem compras até o BTCUSDT fechar "
-        "acima da EMA200." in alerts[0]
+        f"acima da EMA200; {FREE}." in alerts[0]
     )
     assert await store.get_checkpoint("market.regime.4h") == {"up": False, "candle_ms": 3_000}
 

@@ -246,6 +246,7 @@ def merge_candidates(groups: Iterable[Sequence[CandidateContext]]) -> list[Candi
                 best,
                 setup=best.setup or seen.setup or candidate.setup,
                 held=seen.held or candidate.held,
+                needs_approval=seen.needs_approval or candidate.needs_approval,
             )
     return list(merged.values())
 
@@ -567,6 +568,8 @@ class DecisionEngine:
                 ta_score=signals[s].score if s in signals else 0.0,
                 setup=signals[s].setup if s in signals else None,
                 held=s in held,
+                # an entry of this profile waits for the analyst's explicit opinion (D-059)
+                needs_approval=profile.llm.requires_approval and s in setups and s not in held,
             )
             for s in dict.fromkeys([*setups, *held])
             if s in by_symbol

@@ -59,6 +59,7 @@ def render_candidates(candidates: Sequence[CandidateContext]) -> str:
     rows = [
         f"{c.asset} ({c.symbol}, tier {c.tier}): score técnico {c.ta_score:+.2f}"
         f"{f', setup {c.setup}' if c.setup else ''}{', EM CARTEIRA' if c.held else ''}"
+        f"{', APROVAÇÃO EXIGIDA' if c.needs_approval else ''}"
         for c in candidates
     ]
     return "\n".join(rows) or "nenhum"

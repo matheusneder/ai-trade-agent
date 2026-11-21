@@ -92,6 +92,17 @@ def test_without_the_trend_filter_the_trend_neither_refuses_nor_exits() -> None:
     assert evaluate_local(_local(downtrend()), tight).filtered == WIDE_STOP
 
 
+def test_without_the_close_above_the_ema_a_dip_is_bought_but_a_downtrend_is_not() -> None:
+    """D-059: the middle ground between the whole trend filter and none of it."""
+    dips = ConsensusParams(close_above_ema=False)
+    dip = evaluate_local(_local(uptrend_with_pullback()), dips)
+    assert (dip.setup, dip.filtered, dip.exit_signal) == (LEAD_CONSENSUS, None, False)
+    falling = evaluate_local(_local(downtrend()), dips)
+    assert (falling.setup, falling.filtered) == (None, DOWNTREND)
+    assert position_exit(falling, dips, None) == TECHNICAL_EXITS[Family.LEAD_CONSENSUS]
+    assert evaluate_local(_local(breakout()), dips).filtered == EXTENDED  # still checked
+
+
 def test_a_stop_beyond_the_cap_discards_the_setup_instead_of_tightening_it() -> None:
     tight = ConsensusParams(max_stop_pct=0.01)
     signal = evaluate_local(_local(pair_pullback()), tight)

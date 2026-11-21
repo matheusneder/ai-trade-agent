@@ -7,7 +7,8 @@ be vetoed, accepted regimes, exposure range and sentiment sign.
 The evaluation runs only the structured step, **without web search**: in historical
 cases, the search would bring back the known outcome (hindsight bias). Even so, the model
 may know the historical events from its training; that is why there are also synthetic
-cases, with fictional assets.
+cases, with fictional assets. The cases about an approval (D-059) bring the web step's
+findings written with them, since an approval rests on the research covering the asset.
 
 Exit criterion: 100% of the answers valid against the schema, every critical case correct
 and the projected daily cost within the budget.
@@ -24,7 +25,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from trade_agent.research.analyst import MarketAnalyst
-from trade_agent.research.llm import BudgetExceededError, LlmError, LlmOutputError, TrackingLedger
+from trade_agent.research.llm import (
+    BudgetExceededError,
+    LlmError,
+    LlmOutputError,
+    ResearchFindings,
+    TrackingLedger,
+)
 from trade_agent.research.models import (
     CandidateContext,
     FearGreed,
@@ -34,8 +41,12 @@ from trade_agent.research.models import (
     NewsItem,
     StoredNews,
 )
+from trade_agent.strategy.profiles import LlmConfig
 
 CYCLES_PER_DAY = 6
+APPROVAL_CONFIDENCE = float(LlmConfig().min_confidence)
+"""The confidence an approval needs in the cases: the default ``llm.min_confidence``, which
+is also ``lead_consensus_llm_4h``'s (D-059)."""
 
 
 class _Strict(BaseModel):
@@ -56,6 +67,16 @@ class EvalCandidate(_Strict):
     ta_score: float = 0.6
     setup: str | None = "trend_pullback"
     held: bool = False
+    needs_approval: bool = False
+    """A profile with ``llm.validation: approval`` waits for the analyst's opinion (D-059)."""
+
+
+class EvalFindings(_Strict):
+    """Synthetic findings of the web step, written with the case: an approval rests on the
+    research covering the asset, and a real search would bring hindsight into the case."""
+
+    text: str
+    sources: list[str] = Field(default_factory=list)
 
 
 class EvalExpectation(_Strict):
@@ -69,6 +90,11 @@ class EvalExpectation(_Strict):
     positive: list[str] = Field(default_factory=list)
     """Sentiment > 0 and no veto."""
     max_sentiment: dict[str, float] = Field(default_factory=dict)
+    approved: list[str] = Field(default_factory=list)
+    """What a profile with ``llm.validation: approval`` buys on (D-059): an opinion without a
+    veto, not negative and with at least ``APPROVAL_CONFIDENCE``."""
+    refused: list[str] = Field(default_factory=list)
+    """The opposite: no opinion, a veto, a negative sentiment or too little confidence."""
 
 
 class EvalCase(_Strict):
@@ -81,6 +107,7 @@ class EvalCase(_Strict):
     btc_change_24h: float | None = None
     candidates: list[EvalCandidate]
     news: list[EvalNews]
+    web_findings: EvalFindings | None = None
     expect: EvalExpectation
 
 
@@ -119,6 +146,7 @@ def case_inputs(
             ta_score=c.ta_score,
             setup=c.setup,
             held=c.held,
+            needs_approval=c.needs_approval,
         )
         for c in case.candidates
     ]
@@ -138,6 +166,13 @@ def case_inputs(
     return metrics, candidates, news
 
 
+def case_findings(case: EvalCase) -> ResearchFindings | None:
+    """The case's synthetic web findings, for the structured step; ``None`` without them."""
+    if case.web_findings is None:
+        return None
+    return ResearchFindings(case.web_findings.text, tuple(case.web_findings.sources))
+
+
 def check(case: EvalCase, view: MarketView) -> list[str]:
     """Unmet expectations (empty list = case passed)."""
     expect = case.expect
@@ -146,6 +181,22 @@ def check(case: EvalCase, view: MarketView) -> list[str]:
     def vetoed(asset: str) -> bool:
         reading = view.asset(asset)
         return reading is not None and reading.veto
+
+    def approved(asset: str) -> bool:
+        reading = view.asset(asset)
+        return (
+            reading is not None
+            and not reading.veto
+            and reading.sentiment >= 0
+            and reading.confidence >= APPROVAL_CONFIDENCE
+        )
+
+    def opinion(asset: str) -> str:
+        reading = view.asset(asset)
+        if reading is None:
+            return "sem opinião"
+        veto = ", veto" if reading.veto else ""
+        return f"sentimento {reading.sentiment:+.2f}, confiança {reading.confidence:.2f}{veto}"
 
     def sentiment(asset: str) -> float:
         reading = view.asset(asset)
@@ -174,6 +225,10 @@ def check(case: EvalCase, view: MarketView) -> list[str]:
         for a, limit in expect.max_sentiment.items()
         if sentiment(a) > limit
     ]
+    failures += [
+        f"{a}: aprovação esperada ({opinion(a)})" for a in expect.approved if not approved(a)
+    ]
+    failures += [f"{a}: aprovação indevida ({opinion(a)})" for a in expect.refused if approved(a)]
     return failures
 
 
@@ -242,7 +297,12 @@ async def run_eval(
         before = ledger.total
         try:
             analysis = await analyst.analyze(
-                as_of=case.as_of, metrics=metrics, candidates=candidates, news=news, web=False
+                as_of=case.as_of,
+                metrics=metrics,
+                candidates=candidates,
+                news=news,
+                web=False,
+                findings=case_findings(case),
             )
         except BudgetExceededError:
             skipped = tuple(c.id for c in cases[index:])

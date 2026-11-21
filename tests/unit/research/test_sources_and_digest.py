@@ -136,10 +136,13 @@ def test_render_blocks() -> None:
     candidates = [
         CandidateContext("SOL", "SOLUSDT", "large", 0.62, "breakout", held=True),
         CandidateContext("BTC", "BTCUSDT", "core", -0.1),
+        # D-059: a profile buys it only with the analyst's explicit opinion
+        CandidateContext("SUI", "SUIUSDT", "mid", 0.5, "lead_consensus", needs_approval=True),
     ]
     assert digest.render_candidates(candidates).splitlines() == [
         "SOL (SOLUSDT, tier large): score técnico +0.62, setup breakout, EM CARTEIRA",
         "BTC (BTCUSDT, tier core): score técnico -0.10",
+        "SUI (SUIUSDT, tier mid): score técnico +0.50, setup lead_consensus, APROVAÇÃO EXIGIDA",
     ]
 
 

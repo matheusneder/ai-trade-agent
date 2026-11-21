@@ -4,6 +4,8 @@ Rules (doc 03, §6.3):
 
 * the LLM may penalize the technical score but never raise it;
 * an LLM veto excludes the asset;
+* with ``llm.validation: approval`` (D-059) an entry also needs the analyst's explicit
+  opinion on the asset, not negative and with at least ``llm.min_confidence``;
 * ranking by final score, honoring slots, cash reserve, *tier* limits and "one position
   per asset";
 * size = ``capital × risk_per_trade / stop_distance``, capped by ``max_position_pct``,
@@ -26,6 +28,7 @@ from trade_agent.strategy.profiles import ProfileConfig
 ZERO = Decimal(0)
 BIPS = Decimal(10_000)
 PCT = Decimal(100)
+NO_APPROVAL = "sem aprovação do analista"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,17 @@ class Candidate:
             technical, (1 - weight) * technical + weight * opinion.sentiment * opinion.confidence
         )
 
+    def approved(self, profile: ProfileConfig) -> bool:
+        """Whether the analyst approved the entry, for ``llm.validation: approval`` (D-059):
+        an opinion on the asset that is not negative, with at least ``min_confidence``."""
+        opinion = self.opinion
+        return (
+            opinion is not None
+            and not opinion.veto
+            and opinion.sentiment >= 0
+            and opinion.confidence >= profile.llm.min_confidence
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TradeIdea:
@@ -109,6 +123,15 @@ def _rejection(
         return "veto do analista"
     if signal.setup is None:
         return "sem setup"
+    if (
+        profile.llm.requires_approval
+        and candidate.member.symbol not in held  # a held asset is not put up for approval
+        and not candidate.approved(profile)
+    ):
+        # Ahead of the score: a dislike strong enough also takes the blended score under the
+        # minimum, and the refusal is the analyst's. With zero exposure (no reading under
+        # on_failure: pause_entries, or the analyst's own cut) the reason says that instead.
+        return "exposição zero" if exposure_multiplier <= 0 else NO_APPROVAL
     if score < Decimal(str(profile.entry.min_score)):
         return "score abaixo do mínimo"
     if signal.max_entry_price is not None and candidate.ask > Decimal(str(signal.max_entry_price)):
