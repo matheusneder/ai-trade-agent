@@ -321,6 +321,45 @@ async def test_expired_legs_are_reprotected(
     assert "position.unprotected" in kinds and "position.reprotected" in kinds
 
 
+async def test_fok_filled_with_rejected_legs_is_reprotected(
+    service: PositionService, fake: FakeBinance, store: Store
+) -> None:
+    # the first sync still sees PLANNED: the FOK filled before any AWAITING_ENTRY verdict
+    fake.reject_pending_legs = True
+    position = await _open(service)
+    assert position.state is S.PROTECTED
+    assert position.protection_list_id == IDS1.list_id
+    assert position.entry_qty == D("0.00999")
+    assert position.entry_price == D("63000")
+    assert len(await store.fills_for(position.id)) == 1
+    assert [ol.list_client_order_id for ol in fake.open_lists()] == [IDS1.list_id]
+    assert await _kinds(store) == [
+        "position.open_requested",
+        "position.unprotected",
+        "position.reprotected",
+    ]
+
+
+async def test_partial_seen_after_unknown_outcome_then_reprotected_with_entry_fills(
+    service: PositionService, fake: FakeBinance, store: Store, api: BinanceSpotApi
+) -> None:
+    fake.inject(Fault("POST", "/api/v3/orderList/opoco", "timeout_after"))
+    for _ in range(3):
+        fake.inject(Fault("GET", "/api/v3/orderList", "timeout_before"))
+    position = await _open(service, price="62500", mode=EntryMode.LIMIT_MAKER_GTC)
+    assert position.state is S.PLANNED
+    fake.partially_fill(IDS0.entry_id, D("0.004"))
+    partial = await service.sync(position)
+    assert partial.state is S.PARTIAL
+    assert partial.entry_price is None  # PARTIAL records the quantity alone
+    await api.cancel_order_list("BTCUSDT", list_client_order_id=IDS0.list_id)
+    protected = await service.sync(partial)
+    assert protected.state is S.PROTECTED
+    assert protected.protection_list_id == IDS1.list_id
+    assert protected.entry_price == D("62500")
+    assert len(await store.fills_for(position.id)) == 1
+
+
 async def test_reprotect_lifts_activation_above_current_price(
     service: PositionService, fake: FakeBinance
 ) -> None:
