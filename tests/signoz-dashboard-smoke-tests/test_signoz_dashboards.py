@@ -6,6 +6,7 @@ panel is already checked for rendering and errors. Its *values* are not: add the
 to ``tests.support.signoz_smoke.seed.Summary``). See README.md.
 """
 
+import dataclasses
 import json
 import re
 from collections.abc import Callable
@@ -190,11 +191,14 @@ def test_number_panels_show_the_seeded_values(
     open_board: Callable[[str], Dashboard], telemetry: Telemetry, name: str, key: str
 ) -> None:
     board = open_board(name)
-    shown = board.number(key)
     if key not in EXPECTED_NUMBERS:  # depends on the last minute's noise (CPU, p95...)
-        assert number_value(shown) >= 0
+        assert number_value(board.number(key)) >= 0
         return
-    expected = EXPECTED_NUMBERS[key](telemetry.summary)
+    _assert_number(board, key, EXPECTED_NUMBERS[key](telemetry.summary))
+
+
+def _assert_number(board: Dashboard, key: str, expected: float) -> None:
+    shown = board.number(key)
     formatting = board.panels[key]["spec"]["plugin"]["spec"]["formatting"]
     fraction = shown.partition(".")[2]
     decimals = len(fraction)
@@ -206,21 +210,42 @@ def test_number_panels_show_the_seeded_values(
     # to show another time unit (1149 ms as "1 s"), on some runs
     scale = unit_scale(board.number_unit(key), formatting["unit"])
     if scale == 1 and float(expected).is_integer():
-        assert shown == number_text(expected)
+        assert shown == number_text(expected), key
     else:
-        assert number_value(shown) * scale == pytest.approx(expected, abs=scale * 10**-decimals)
+        tolerance = scale * 10**-decimals
+        assert number_value(shown) * scale == pytest.approx(expected, abs=tolerance), key
 
 
-def test_positions_now_shows_the_newest_instance(
-    open_board: Callable[[str], Dashboard], telemetry: Telemetry, window: tuple[int, int]
+def _newest_panels() -> list[Any]:
+    """Per dashboard, the number panels of a gauge's newest reading with a seeded value."""
+    found = {
+        name: [
+            key
+            for key, panel in board["spec"]["panels"].items()
+            if "argMax(" in json.dumps(panel) and key in EXPECTED_NUMBERS
+        ]
+        for name, board in BOARDS.items()
+    }
+    return [pytest.param(name, keys, id=name) for name, keys in found.items() if keys]
+
+
+@pytest.mark.parametrize(("name", "keys"), _newest_panels())
+def test_gauges_show_the_newest_instance(
+    open_board: Callable[[str], Dashboard],
+    telemetry: Telemetry,
+    window: tuple[int, int],
+    name: str,
+    keys: list[str],
 ) -> None:
-    """Right after a restart, SigNoz's last step holds the previous instance's last reading
-    too: the panel shows the new instance's count, not the average of both (on 2026-11-21,
-    9 = (13 + 5) / 2 for 15 minutes)."""
-    before, after = telemetry.summary.restart_positions
-    board = open_board("trade-agent-operacao")
-    board.open(start_ms=window[0], end_ms=telemetry.summary.restart // MS + 30_000)
-    assert board.number("positions-now") == number_text(after) != number_text(before)
+    """Right after a restart, SigNoz's last step holds the previous instance's last readings
+    too: each panel shows the new instance's first one, not the average of both (on
+    2026-11-21, "Posições ativas" showed 9 = (13 + 5) / 2 for 15 minutes)."""
+    summary = telemetry.summary
+    restarted = dataclasses.replace(summary, last=summary.restart_last)
+    board = open_board(name)
+    board.open(start_ms=window[0], end_ms=summary.restart // MS + 30_000)
+    for key in keys:
+        _assert_number(board, key, EXPECTED_NUMBERS[key](restarted))
 
 
 @pytest.mark.parametrize(("name", "key"), _panels("signoz/TimeSeriesPanel", "signoz/BarChartPanel"))
