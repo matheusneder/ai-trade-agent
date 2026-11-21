@@ -12,6 +12,7 @@ from trade_agent.research.evaluation import (
     CaseOutcome,
     EvalCase,
     EvalReport,
+    case_findings,
     case_inputs,
     check,
     fear_greed_label,
@@ -19,7 +20,12 @@ from trade_agent.research.evaluation import (
     render_report,
     run_eval,
 )
-from trade_agent.research.llm import BudgetExceededError, MemoryLedger, TrackingLedger
+from trade_agent.research.llm import (
+    BudgetExceededError,
+    MemoryLedger,
+    ResearchFindings,
+    TrackingLedger,
+)
 from trade_agent.research.models import (
     AssetView,
     CandidateContext,
@@ -124,6 +130,22 @@ async def test_analyze_skips_or_survives_web_research() -> None:
     assert all("tools" not in r for r in fake.requests[:3])
 
 
+async def test_analyze_with_given_findings_skips_the_web_step() -> None:
+    """The evaluation's approval cases bring their own findings (D-059)."""
+    fake = FakeClaude()
+    fake.reply_json(_draft(_asset("SOL")))
+    analyst = MarketAnalyst(fake.claude(), research_config())
+    given = ResearchFindings("nada contra SOL", ("https://a.example/sol",))
+    analysis = await analyst.analyze(
+        as_of=NOW, metrics=MarketMetrics(), candidates=CANDIDATES, news=[], web=True, findings=given
+    )
+    assert analysis.findings is given
+    (structured,) = fake.requests  # no research request
+    assert "tools" not in structured
+    content = structured["messages"][0]["content"]
+    assert "<web_findings>\nnada contra SOL\nFontes:\nhttps://a.example/sol" in str(content)
+
+
 async def test_budget_exhausted_during_research_propagates() -> None:
     ledger = MemoryLedger()
     config = research_config(budget=BudgetConfig(daily_usd=Decimal("0.001")))
@@ -151,7 +173,28 @@ def test_repository_cases_are_valid() -> None:
     for case in cases:
         referenced = set(case.expect.veto + case.expect.no_veto + case.expect.negative)
         referenced |= set(case.expect.positive) | set(case.expect.max_sentiment)
+        referenced |= set(case.expect.approved + case.expect.refused)
         assert referenced <= {c.asset for c in case.candidates}, case.id
+
+
+def test_repository_cases_cover_the_approval_mode() -> None:
+    """D-059: every candidate that waits for approval has a verdict expected of it, in both
+    directions, and a wrong approval is a critical failure."""
+    waiting = {
+        (case.id, c.asset)
+        for case in load_cases(CASES_FILE)
+        for c in case.candidates
+        if c.needs_approval
+    }
+    cases = {case.id: case for case in load_cases(CASES_FILE)}
+    approved = {(i, a) for i, case in cases.items() for a in case.expect.approved}
+    refused = {(i, a) for i, case in cases.items() for a in case.expect.refused}
+    assert approved and len(refused) >= 3
+    assert approved | refused == waiting and not approved & refused
+    assert all(cases[i].critical for i, _ in refused)
+    # an approval rests on the research: the case brings its findings
+    assert all(cases[i].web_findings is not None for i, _ in approved)
+    assert any(cases[i].web_findings is None for i, _ in refused)  # no coverage: no approval
 
 
 def test_duplicate_case_ids_are_rejected(tmp_path: Path) -> None:
@@ -200,6 +243,22 @@ def test_case_inputs() -> None:
     assert news[0].id == 1 and news[0].item.published_at == NOW - timedelta(hours=3)
     no_fg = case_inputs(_case().model_copy(update={"fear_greed": None}))[0]
     assert no_fg.fear_greed is None
+    assert not any(c.needs_approval for c in candidates) and case_findings(_case()) is None
+
+
+def test_a_case_may_mark_a_candidate_for_approval_and_bring_its_findings() -> None:
+    case = EvalCase.model_validate(
+        {
+            "id": "c", "kind": "synthetic", "description": "d", "as_of": NOW,
+            "candidates": [{"asset": "SOL", "needs_approval": True}, {"asset": "BTC"}],
+            "news": [],
+            "web_findings": {"text": "nada contra SOL", "sources": ["https://a.example/sol"]},
+            "expect": {"approved": ["SOL"]},
+        }
+    )  # fmt: skip
+    _, candidates, _ = case_inputs(case)
+    assert [c.needs_approval for c in candidates] == [True, False]
+    assert case_findings(case) == ResearchFindings("nada contra SOL", ("https://a.example/sol",))
 
 
 def _view(**overrides: Any) -> MarketView:
@@ -246,6 +305,33 @@ def test_check_each_expectation() -> None:
     assert check(_case(negative=["BTC", "ETH"], positive=["SOL"]), view) == []
 
 
+def test_check_an_approval_as_the_planner_reads_it() -> None:
+    """D-059: an opinion without a veto, not negative, with at least the default
+    ``llm.min_confidence`` (0.5); silence, a veto, a dislike and a doubt are refusals."""
+
+    def opinion(asset: str, sentiment: float, confidence: float, veto: bool = False) -> AssetView:
+        return AssetView(
+            asset=asset, sentiment=sentiment, confidence=confidence, horizon=Horizon.DAYS, veto=veto
+        )
+
+    view = _view(
+        assets=(
+            opinion("SOL", 0.0, 0.5),  # neutral and just confident enough
+            opinion("BTC", 0.6, 0.9, veto=True),
+            opinion("ADA", -0.1, 0.9),
+            opinion("XRP", 0.4, 0.49),
+        )
+    )
+    assert check(_case(approved=["SOL"], refused=["BTC", "ADA", "XRP", "ETH"]), view) == []
+    assert check(_case(approved=["BTC", "ADA", "XRP", "ETH"], refused=["SOL"]), view) == [
+        "BTC: aprovação esperada (sentimento +0.60, confiança 0.90, veto)",
+        "ADA: aprovação esperada (sentimento -0.10, confiança 0.90)",
+        "XRP: aprovação esperada (sentimento +0.40, confiança 0.49)",
+        "ETH: aprovação esperada (sem opinião)",
+        "SOL: aprovação indevida (sentimento +0.00, confiança 0.50)",
+    ]
+
+
 async def test_run_eval_outcomes_and_report() -> None:
     fake = FakeClaude()
     fake.reply_json(_draft(_asset("SOL", veto=True)))  # passed
@@ -269,6 +355,27 @@ async def test_run_eval_outcomes_and_report() -> None:
     assert "InternalServerError" in text
     assert "Casos aprovados: **1/4**" in text
     assert "não atendido ❌" in text
+
+
+async def test_run_eval_gives_the_analyst_the_cases_findings_and_marks() -> None:
+    fake = FakeClaude()
+    fake.reply_json(_draft(_asset("SOL", sentiment=0.0)))
+    ledger = TrackingLedger(MemoryLedger())
+    analyst = MarketAnalyst(fake.claude(ledger=ledger), research_config())
+    case = EvalCase.model_validate(
+        {
+            "id": "c", "kind": "synthetic", "description": "d", "as_of": NOW,
+            "candidates": [{"asset": "SOL", "setup": "lead_consensus", "needs_approval": True}],
+            "news": [],
+            "web_findings": {"text": "nada contra SOL"},
+            "expect": {"approved": ["SOL"]},
+        }
+    )  # fmt: skip
+    report = await run_eval(analyst, ledger, [case], budget_usd=Decimal(5))
+    assert [o.passed for o in report.outcomes] == [True]
+    content = str(fake.requests[0]["messages"][0]["content"])
+    assert "setup lead_consensus, APROVAÇÃO EXIGIDA" in content
+    assert "<web_findings>\nnada contra SOL" in content
 
 
 async def test_run_eval_stops_when_budget_is_exhausted() -> None:
