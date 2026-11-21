@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 from websockets.asyncio.server import ServerConnection, serve
 
 from tests.unit.exchange.test_user_stream_events import EXECUTION_REPORT
@@ -109,6 +110,24 @@ async def test_subscribes_with_valid_signature_and_parses_events() -> None:
     assert isinstance(events[1], ExecutionReport)
     assert isinstance(events[2], AccountPosition)
     assert isinstance(events[3], UnknownEvent)
+
+
+async def test_malformed_event_is_skipped_without_ending_the_stream() -> None:
+    malformed = {k: v for k, v in EXECUTION_REPORT.items() if k != "t"}
+
+    async def script(ws: ServerConnection, request: dict[str, Any], _: int) -> None:
+        await _ok(ws, request)
+        await ws.send(json.dumps({"subscriptionId": 0, "event": malformed}))
+        await ws.send(json.dumps({"subscriptionId": 0, "event": EXECUTION_REPORT}))
+        await asyncio.sleep(0.3)
+
+    with capture_logs() as logs:
+        async with ws_server(script) as url:
+            events = await _collect(_stream(url), 2)
+    assert isinstance(events[1], ExecutionReport)
+    assert events[1].trade_id == EXECUTION_REPORT["t"]
+    unparsed = [entry for entry in logs if entry["event"] == "user_stream.unparsed"]
+    assert unparsed[0]["error"] == "KeyError('t')"
 
 
 @pytest.mark.parametrize("reason", ["serverShutdown", "eventStreamTerminated"])
