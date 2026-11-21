@@ -539,6 +539,7 @@ cases:
     expect:
       refused: [VELA]
       negative: [VELA]
+      no_veto: [VELA]       # a refusal keeps the profile out; a veto would also close a position
 
   - id: syn-aprovacao-sem-cobertura
     kind: synthetic
@@ -575,6 +576,8 @@ cases:
       sources: ["https://coindesk.example/stablecoin-depeg-custodian", "https://theblock.example/exchange-suspends-withdrawals", "https://tokenomist.example/talisman"]
     expect:
       refused: [TALIS]
+      negative: [TALIS]
+      no_veto: [TALIS, BTC]  # the shock is systemic: nothing is against either asset
       regime: [risk_off]
       max_exposure: 0.5
 

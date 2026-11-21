@@ -393,7 +393,8 @@ class ProfileConfig(_Strict):
     cycle: timedelta | None = None
     """How often a ``lead_consensus`` profile decides, on the last closed candle of its
     ``timeframe`` (D-053): its consensus changes between the closes. ``None``, or the
-    timeframe itself: at each close."""
+    timeframe itself: at each close. Shorter than the timeframe only without the LLM
+    (D-059)."""
     tiers: dict[Tier, Fraction]
     allocation: AllocationConfig
     entry: EntryConfig
@@ -426,6 +427,10 @@ class ProfileConfig(_Strict):
                     f"cycle deve ter minutos inteiros, ser >= 5m e dividir o timeframe "
                     f"({self.timeframe})"
                 )
+            # the research is shared per candle close (D-032): between the closes each cycle
+            # would wait for peers that do not run and then pay a research of its own (D-059)
+            if self.cycle < candle and self.llm.enabled:
+                raise ValueError("cycle menor que o timeframe exige llm.enabled false")
         return self
 
     @model_validator(mode="after")

@@ -123,6 +123,15 @@ def _rejection(
         return "veto do analista"
     if signal.setup is None:
         return "sem setup"
+    if (
+        profile.llm.requires_approval
+        and candidate.member.symbol not in held  # a held asset is not put up for approval
+        and not candidate.approved(profile)
+    ):
+        # Ahead of the score: a dislike strong enough also takes the blended score under the
+        # minimum, and the refusal is the analyst's. With zero exposure (no reading under
+        # on_failure: pause_entries, or the analyst's own cut) the reason says that instead.
+        return "exposição zero" if exposure_multiplier <= 0 else NO_APPROVAL
     if score < Decimal(str(profile.entry.min_score)):
         return "score abaixo do mínimo"
     if signal.max_entry_price is not None and candidate.ask > Decimal(str(signal.max_entry_price)):
@@ -131,8 +140,6 @@ def _rejection(
         return "ativo já em carteira"
     if exposure_multiplier <= 0:  # reading with zero exposure, or on_failure: pause_entries
         return "exposição zero"
-    if profile.llm.requires_approval and not candidate.approved(profile):
-        return NO_APPROVAL
     if slots <= 0:
         return "sem vagas no perfil"
     return None

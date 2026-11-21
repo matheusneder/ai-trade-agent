@@ -129,6 +129,56 @@ def test_a_local_technical_exit_and_the_breakout_level() -> None:
     assert expired.trades[0]["reason"] == "decision"
 
 
+def _lead_accounts() -> tuple[PaperPortfolio, PaperPortfolio]:
+    """The pure-TA and the TA + LLM accounts of a ``lead_consensus`` profile with the analyst
+    in approval mode (D-059), like ``lead_consensus_llm_4h``."""
+    lead = {
+        "family": "lead_consensus",
+        "timeframe": "4h",
+        "signals": {},
+        "leads": {},
+        "llm": {"enabled": True, "validation": "approval", "on_failure": "pause_entries"},
+    }
+    config = local_config(local=lead)
+    conditions = StopConditions(pre_trade=PreTradeConfig(min_reward_risk=1))
+    ta, llm = (
+        PaperPortfolio(
+            config,
+            conditions,
+            pure_ta=pure,
+            fee_pct=D(".1"),
+            slippage_bps=D(10),
+            profiles=["local"],
+        )
+        for pure in (True, False)
+    )
+    return ta, llm
+
+
+def test_a_lead_profile_with_the_analyst_replays_its_approval_and_its_veto() -> None:
+    """The agent closes a ``lead_consensus_llm_4h`` position on the analyst's veto; the replay
+    left it open, because the pair-local branch returned before the veto (PR 70's review)."""
+    ta, llm = _lead_accounts()
+    silent = _local_candidate(setup="lead_consensus")
+    approved = replace(silent, opinion=MarketOpinion(sentiment=D(0), confidence=D(".7")))
+    for account in (ta, llm):
+        account.decision("local", [silent], D(1), NOW)
+    assert "SOLUSDT" in ta.positions and not llm.positions  # nobody approved it
+    assert llm.rejections[-1] == {"symbol": "SOLUSDT", "reason": "sem aprovação do analista"}
+    llm.decision("local", [approved], D(1), NOW + timedelta(hours=4))
+    assert "SOLUSDT" in llm.positions
+    # held, neither a technical exit nor the maximum holding: only the veto closes it, and
+    # only in the account that listens to the analyst
+    vetoed = replace(
+        _local_candidate(setup=None),
+        opinion=MarketOpinion(sentiment=D("-0.9"), confidence=D(".9"), veto=True),
+    )
+    for account in (ta, llm):
+        account.decision("local", [vetoed], D(1), NOW + timedelta(hours=8))
+    assert "SOLUSDT" in ta.positions and not llm.positions
+    assert [t["reason"] for t in llm.trades] == ["decision"] and ta.trades == []
+
+
 def test_the_scope_pauses_a_local_profile_after_its_stops() -> None:
     account = _local_account(risk={"daily_loss_pct": None})
     stops = 0

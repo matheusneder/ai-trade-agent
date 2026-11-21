@@ -1,6 +1,7 @@
 """The ``lead_consensus`` profile (D-052): its schema, the repository's one, the shares it
 took, its decision cycle (D-053) and the profiles that test its flow (D-054, D-056)."""
 
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -10,9 +11,17 @@ import pytest
 from pydantic import ValidationError
 
 from tests.support.local_profiles import LOCAL_PULLBACK, local_profile, merge, raw_config
+from tests.unit.strategy.test_portfolio_and_exits import _candidate
 from trade_agent.market.universe import Tier
 from trade_agent.risk.conditions import load_stop_conditions
 from trade_agent.signals import ConsensusParams, Family
+from trade_agent.strategy.portfolio import (
+    NO_APPROVAL,
+    Candidate,
+    Holding,
+    MarketOpinion,
+    plan_entries,
+)
 from trade_agent.strategy.profiles import (
     LeadConsensusConfig,
     LeadsConfig,
@@ -105,6 +114,40 @@ def test_a_neutral_opinion_never_fails_the_4h_profiles_minimum_score() -> None:
     assert profile.leads is not None
     weakest = D(profile.leads.consensus.min_backers) / profile.leads.selection.max_leads
     assert (1 - profile.llm.weight) * weakest >= D(str(profile.entry.min_score)) > 0
+
+
+def test_a_strong_dislike_is_recorded_as_the_analysts_refusal_not_as_a_low_score() -> None:
+    """PR 70's review: with 2 of 6 traders behind a purchase (score 1/3), sentiment -0.5 at
+    confidence 0.8 takes the blended score to -0.03, under ``min_score``, and the cycle
+    recorded ``score abaixo do mínimo``. In approval mode the refusal is the analyst's; in
+    ``filter`` mode the score is what refuses, as designed."""
+    name = "lead_consensus_llm_4h"
+    profile = REPOSITORY.profiles[name]
+
+    def reasons(candidate: Candidate, **kw: Any) -> tuple[tuple[str, str], ...]:
+        args: dict[str, Any] = {"profile": profile, "holdings": [], **kw}
+        return plan_entries(name=name, capital=D(100), candidates=[candidate], **args).rejections
+
+    disliked = _candidate(
+        "SOLUSDT",
+        score=2 / 6,
+        setup="lead_consensus",
+        stop_pct=0.04,
+        opinion=MarketOpinion(D("-0.5"), D("0.8")),
+    )
+    assert disliked.final_score(profile) < D(str(profile.entry.min_score))
+    assert reasons(disliked) == (("SOLUSDT", NO_APPROVAL),)
+    filtering = profile.model_copy(
+        update={"llm": profile.llm.model_copy(update={"validation": "filter"})}
+    )
+    assert reasons(disliked, profile=filtering) == (("SOLUSDT", "score abaixo do mínimo"),)
+    # no reading at all (pause_entries): the reason is that, not a refusal nobody gave
+    silent = replace(disliked, opinion=None)
+    assert reasons(silent) == (("SOLUSDT", NO_APPROVAL),)
+    assert reasons(silent, exposure_multiplier=D(0)) == (("SOLUSDT", "exposição zero"),)
+    # and a held asset is not put up for approval: its reason stays its own
+    held = [Holding(name, "SOLUSDT", Tier.CORE, D(10))]
+    assert reasons(silent, holdings=held) == (("SOLUSDT", "ativo já em carteira"),)
 
 
 def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> None:
@@ -251,6 +294,18 @@ def test_it_is_the_one_local_family_that_may_have_the_analyst() -> None:
     assert not local_profile(**off).llm.requires_approval  # nobody to approve
     with pytest.raises(ValidationError, match="validation"):
         local_profile(**merge(LEAD, {"llm": {"enabled": True, "validation": "veto"}}))
+
+
+def test_the_analyst_and_a_cycle_shorter_than_the_candle_do_not_go_together() -> None:
+    """The research is shared per candle close (D-032): between the closes each cycle would
+    wait two minutes for peers that do not run, then pay a research of its own (D-059)."""
+    analyst = {"llm": {"enabled": True}}
+    with pytest.raises(ValidationError, match="cycle menor que o timeframe exige llm"):
+        local_profile(**merge(LEAD, {**analyst, "cycle": "10m"}))
+    # the candle itself is no shorter cycle (D-054), and neither is none
+    assert local_profile(**merge(LEAD, {**analyst, "cycle": "1h"})).cadence == "60m"
+    assert local_profile(**merge(LEAD, analyst)).cadence == "1h"
+    assert local_profile(**merge(LEAD, {"cycle": "10m"})).cadence == "10m"  # without it: D-053
 
 
 def test_a_cycle_shorter_than_the_candle_is_only_for_the_lead_traders_consensus() -> None:
