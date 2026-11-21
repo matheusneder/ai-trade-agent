@@ -183,6 +183,7 @@ class Summary:
     last: Mapping[str, float]  # last value of each gauge of the "Agora" row
     restart: int  # first reading of the instance that started in the window (unix ns)
     restart_positions: tuple[int, int]  # active positions in the last reading before it, in it
+    restart_last: Mapping[str, float]  # ``last`` in that first reading (the new instance's)
     lead_errors: int  # failed requests to the lead traders' source (D-052)
     lead_rankings: int
     lead_http_errors: Mapping[int, int]
@@ -367,6 +368,7 @@ class _Generator:
         )
         self.restart_positions = (0, 0)
         self.last: dict[str, float] = {}
+        self.restart_last: dict[str, float] = {}
         # the lead tracker (D-052)
         self.lead_selected = self.lead_fresh = self.lead_consensus = 0
         self.lead_errors = self.lead_requests = self.lead_rankings = 0
@@ -1029,6 +1031,8 @@ class _Generator:
                     )
             self.background_logs(at)
             self.agent_gauges(minute, at + 41 * SECOND)
+            if minute == self.restart_minute:
+                self.restart_last = dict(self.last)
             self.container_metrics(minute, at + 30 * SECOND)
         return self.telemetry()
 
@@ -1237,6 +1241,7 @@ class _Generator:
             last=dict(self.last),
             restart=self.start + self.restart_minute * MINUTE + 41 * SECOND,  # agent_gauges
             restart_positions=self.restart_positions,
+            restart_last=self.restart_last,
             lead_errors=self.lead_errors,
             lead_rankings=self.lead_rankings,
             lead_http_errors=dict(sorted(self.lead_http.items())),

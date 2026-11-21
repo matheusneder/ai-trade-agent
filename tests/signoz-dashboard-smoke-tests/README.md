@@ -150,8 +150,8 @@ names, span names, attributes, metric names and log fields the agent, Alloy and 
   as the spans (LLM cost and tokens, cycles, setups and stop-noise removals, entries, exits,
   risk state changes); the agent restarts once in the last third of the window (a new
   `service.instance.id` for the gauges, and the startup reconciliation closes a position), so
-  "Posições ativas" is checked on a range ending right after it, where SigNoz's last step
-  holds both instances;
+  the gauges' number panels ("Posições ativas", "Patrimônio"...) are checked on a range
+  ending right after it, where SigNoz's last step holds both instances;
 - **the lead tracker** of the `lead_consensus` profile (D-052) every 15 minutes: the ranking
   every 6 hours and the followed traders' trades in between (`trade-agent.leads` spans to
   `www.binance.com`), its gauges and failed-request counter, an outage of HTTP 503s that
