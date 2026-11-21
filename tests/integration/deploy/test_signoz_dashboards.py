@@ -53,6 +53,22 @@ REQUEST_BY_PANEL = {  # the request type each panel type draws
 SQL_PANELS = {"signoz/TimeSeriesPanel", "signoz/BarChartPanel", "signoz/NumberPanel"} | {
     "signoz/TablePanel"
 }
+# single-value panels of a gauge's newest reading → how the series of one export combine
+NEWEST = {
+    "trade-agent-operacao/equity-now": "avg",
+    "trade-agent-operacao/pnl-now": "avg",
+    "trade-agent-operacao/drawdown-now": "avg",
+    "trade-agent-operacao/exposure-now": "avg",
+    "trade-agent-operacao/positions-now": "avg",
+    "trade-agent-operacao/risk-now": "max",  # the worst scope
+    "trade-agent-operacao/regime-now": "avg",  # the timeframes, as the builder did
+    "trade-agent-saude/errors-now": "avg",
+    "trade-agent-saude/weight-now": "avg",
+    "trade-agent-saude/clock-now": "avg",
+    "trade-agent-copy-trading/leads-selected-now": "sum",  # every lead profile
+    "trade-agent-copy-trading/leads-fresh-now": "sum",
+    "trade-agent-copy-trading/leads-consensus-now": "sum",
+}
 
 
 def _panels() -> Iterator[tuple[str, dict[str, Any]]]:
@@ -168,7 +184,7 @@ def test_sql_queries_keep_their_own_time_bounds() -> None:
     """The day's chart ignores the dashboard's range: no SigNoz time variable, one ``now()`` (the
     tests evaluate the query at other instants) and nothing the querier would template."""
     daily = {"trade-agent-operacao/pnl-scope-today"}
-    assert {name for name, _ in _sql_panels()} == daily | {"trade-agent-operacao/positions-now"}
+    assert {name for name, _ in _sql_panels()} == daily | set(NEWEST)
     for name, panel in _sql_panels():
         if name not in daily:
             continue
@@ -180,15 +196,28 @@ def test_sql_queries_keep_their_own_time_bounds() -> None:
 
 def test_newest_reading_follows_the_dashboard_range() -> None:
     """The newest reading of a gauge: within the dashboard's range (the querier's two time
-    variables, no ``now()``), across agent instances and empty without readings (not 0)."""
-    newest = [(n, p) for n, p in _sql_panels() if "argMax(value, unix_milli)" in json.dumps(p)]
-    assert [name for name, _ in newest] == ["trade-agent-operacao/positions-now"]
+    variables, no ``now()``), across agent instances, the series of one export combined and
+    empty without readings (not 0). No single value of an agent gauge left on the builder,
+    whose ``latest`` averages the previous instance's last reading in."""
+    newest = [(n, p) for n, p in _sql_panels() if "argMax(export, unix_milli)" in json.dumps(p)]
+    assert {name for name, _ in newest} == set(NEWEST)
     for name, panel in newest:
         assert panel["spec"]["plugin"]["kind"] == "signoz/NumberPanel", name
         query = _builder_specs(panel)[0]["query"]
         assert re.findall(r"\$\w+", query) == ["$start_timestamp_ms", "$end_timestamp_ms"], name
         assert "now()" not in query and "instance" not in query, name
+        assert f"{NEWEST[name]}(value) AS export" in query and "GROUP BY unix_milli" in query, name
         assert "HAVING count() > 0" in query, name
+    builder = [
+        name
+        for name, panel in _panels()
+        if panel["spec"]["plugin"]["kind"] == "signoz/NumberPanel"
+        for spec in _builder_specs(panel)
+        for aggregation in spec.get("aggregations", [])
+        if aggregation.get("metricName", "").startswith("trade_agent.")
+        and aggregation["timeAggregation"] == "latest"
+    ]
+    assert not builder
 
 
 def test_agent_metrics_exist() -> None:

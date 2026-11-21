@@ -1,6 +1,7 @@
 """The seed generator alone (fast, no Docker): it runs in the default ``uv run pytest``."""
 
 import re
+import statistics
 from datetime import UTC, datetime
 from typing import Any
 
@@ -159,6 +160,15 @@ def test_the_agent_restarts_with_a_new_instance(day: seed.Telemetry) -> None:
     before, after = summary.restart_positions
     assert (previous[-1].value, current[0].value) == (float(before), float(after))
     assert before > after
+    # the "Agora" panels right after it: the new instance's first reading, the worst scope
+    first = {
+        m.name: m.points for m in day.metrics if dict(m.resource).get("service.instance.id") == new
+    }
+    assert summary.restart_last.keys() == summary.last.keys()
+    for name, value in summary.restart_last.items():
+        readings = [p.value for p in first[name] if p.time == summary.restart]
+        combine = max if name == "trade_agent.risk.state" else statistics.fmean
+        assert value == pytest.approx(combine(readings)), name
     counters = {
         dict(m.resource)["service.instance.id"]
         for m in day.metrics
