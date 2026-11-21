@@ -70,6 +70,16 @@ def test_parse_execution_report_without_optional_fields() -> None:
     assert event.commission_asset is None
 
 
+def test_parse_execution_report_without_client_order_id() -> None:
+    for report in (
+        {**EXECUTION_REPORT, "c": None},
+        {k: v for k, v in EXECUTION_REPORT.items() if k != "c"},
+    ):
+        event = parse_user_event(report)
+        assert isinstance(event, ExecutionReport)
+        assert event.client_order_id == ""
+
+
 def test_parse_list_status() -> None:
     event = parse_user_event(
         {
