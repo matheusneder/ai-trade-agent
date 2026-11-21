@@ -15,7 +15,7 @@ import pytest
 from playwright.sync_api import Page, expect
 from scripts import signoz_dashboards
 
-from tests.support.signoz_smoke.seed import LEAD, Summary, Telemetry
+from tests.support.signoz_smoke.seed import LEAD, MS, Summary, Telemetry
 from tests.support.signoz_smoke.ui import (
     BrowserIssues,
     Dashboard,
@@ -211,6 +211,18 @@ def test_number_panels_show_the_seeded_values(
         assert number_value(shown) * scale == pytest.approx(expected, abs=scale * 10**-decimals)
 
 
+def test_positions_now_shows_the_newest_instance(
+    open_board: Callable[[str], Dashboard], telemetry: Telemetry, window: tuple[int, int]
+) -> None:
+    """Right after a restart, SigNoz's last step holds the previous instance's last reading
+    too: the panel shows the new instance's count, not the average of both (on 2026-11-21,
+    9 = (13 + 5) / 2 for 15 minutes)."""
+    before, after = telemetry.summary.restart_positions
+    board = open_board("trade-agent-operacao")
+    board.open(start_ms=window[0], end_ms=telemetry.summary.restart // MS + 30_000)
+    assert board.number("positions-now") == number_text(after) != number_text(before)
+
+
 @pytest.mark.parametrize(("name", "key"), _panels("signoz/TimeSeriesPanel", "signoz/BarChartPanel"))
 def test_chart_legends_list_the_seeded_series(
     open_board: Callable[[str], Dashboard], telemetry: Telemetry, name: str, key: str
@@ -246,7 +258,8 @@ def test_list_panels_show_the_seeded_rows(
 
 def _fixed_window(query: dict[str, Any]) -> bool:
     """A request of a panel with its own time range (the day's result: the last 24 h)."""
-    return "clickhouse_sql" in json.dumps(query["compositeQuery"])
+    text = json.dumps(query["compositeQuery"])
+    return "clickhouse_sql" in text and "$start_timestamp_ms" not in text
 
 
 @pytest.mark.parametrize("relative", ["1h", "1w"])

@@ -144,6 +144,29 @@ def test_daily_scope_pnl_restarts_at_the_utc_midnight(day: seed.Telemetry) -> No
     assert today["global"] == pytest.approx(points[last] - points[first])
 
 
+def test_the_agent_restarts_with_a_new_instance(day: seed.Telemetry) -> None:
+    """Two series per gauge: the previous instance stops in an hour's first minute (SigNoz's
+    last step of a long range then holds both), with one more position than the new one."""
+    summary = day.summary
+    series = [m for m in day.metrics if m.name == "trade_agent.positions.active"]
+    assert len(series) == 2
+    old, new = (dict(m.resource)["service.instance.id"] for m in series)
+    assert old != new
+    previous, current = (m.points for m in series)
+    assert previous[-1].time < current[0].time == summary.restart
+    assert summary.start + 2 * (summary.end - summary.start) // 3 <= summary.restart
+    assert previous[-1].time // seed.MINUTE % 60 == 0
+    before, after = summary.restart_positions
+    assert (previous[-1].value, current[0].value) == (float(before), float(after))
+    assert before > after
+    counters = {
+        dict(m.resource)["service.instance.id"]
+        for m in day.metrics
+        if m.kind == "sum" and m.name.startswith("trade_agent.")
+    }
+    assert counters == {new}
+
+
 def test_the_otlp_requests_carry_everything(day: seed.Telemetry) -> None:
     spans = sum(
         len(scope.spans)
