@@ -321,6 +321,25 @@ async def test_expired_legs_are_reprotected(
     assert "position.unprotected" in kinds and "position.reprotected" in kinds
 
 
+async def test_fok_filled_with_rejected_legs_is_reprotected(
+    service: PositionService, fake: FakeBinance, store: Store
+) -> None:
+    # the first sync still sees PLANNED: the FOK filled before any AWAITING_ENTRY verdict
+    fake.reject_pending_legs = True
+    position = await _open(service)
+    assert position.state is S.PROTECTED
+    assert position.protection_list_id == IDS1.list_id
+    assert position.entry_qty == D("0.00999")
+    assert position.entry_price == D("63000")
+    assert len(await store.fills_for(position.id)) == 1
+    assert [ol.list_client_order_id for ol in fake.open_lists()] == [IDS1.list_id]
+    assert await _kinds(store) == [
+        "position.open_requested",
+        "position.unprotected",
+        "position.reprotected",
+    ]
+
+
 async def test_reprotect_lifts_activation_above_current_price(
     service: PositionService, fake: FakeBinance
 ) -> None:

@@ -7,6 +7,7 @@ State machine (doc 03, §9.2)::
                                       UNPROTECTED ⇄ EXITING → CLOSED
     EXITING → PROTECTED (the exit failed and the protection is still active on the exchange)
     PLANNED/ENTRY_SENT → REJECTED (entry not filled)
+    PLANNED → UNPROTECTED (a FOK entry filled at once, but its protection legs were rejected)
 """
 
 from collections.abc import Iterable
@@ -46,7 +47,7 @@ class PositionState(StrEnum):
 
 S = PositionState
 TRANSITIONS: dict[PositionState, frozenset[PositionState]] = {
-    S.PLANNED: frozenset({S.ENTRY_SENT, S.PROTECTED, S.REJECTED, S.CLOSED}),
+    S.PLANNED: frozenset({S.ENTRY_SENT, S.PROTECTED, S.REJECTED, S.CLOSED, S.UNPROTECTED}),
     S.ENTRY_SENT: frozenset({S.PROTECTED, S.PARTIAL, S.REJECTED, S.CLOSED, S.UNPROTECTED}),
     S.PARTIAL: frozenset({S.PROTECTED, S.UNPROTECTED, S.EXITING, S.CLOSED}),
     S.PROTECTED: frozenset({S.ADJUSTING, S.UNPROTECTED, S.EXITING, S.CLOSED}),

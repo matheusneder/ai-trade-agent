@@ -357,7 +357,11 @@ class PositionService:
 
     # ================================================================== re-protection
     async def _on_unprotected(self, position: Position, verdict: Verdict) -> Position:
-        position = await self.store.update_position(position.id, state=S.UNPROTECTED)
+        changes: dict[str, Any] = {"state": S.UNPROTECTED}
+        if verdict.entry is not None and position.entry_qty is None:
+            # the entry fills are recorded here when no protected state came first
+            changes |= await self._entry_fields(position, verdict.entry)
+        position = await self.store.update_position(position.id, **changes)
         await self._event(
             "position.unprotected", Severity.CRITICAL, position, {"reason": verdict.reason}
         )

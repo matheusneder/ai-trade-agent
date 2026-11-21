@@ -161,6 +161,8 @@ class FakeBinance:
         self.spreads_bps: dict[str, Decimal] = {}
         self.candles: dict[tuple[str, str], list[list[Any]]] = {}
         self.delisted: set[str] = set()
+        # scenario: an OPO's pending OCO is rejected when its entry fills
+        self.reject_pending_legs = False
         self.requests: list[httpx.Request] = []
         self._ids = itertools.count(1)
         self._list_ids = itertools.count(1)
@@ -749,6 +751,14 @@ class FakeBinance:
         base, _ = self._assets(order_list.symbol)
         step = D(self._filters(order_list.symbol)["LOT_SIZE"]["stepSize"])
         qty = (received // step) * step
+        if self.reject_pending_legs:  # the bought balance stays free, with no protection
+            for pending_id in order_list.pending_ids:
+                leg = self.orders[pending_id]
+                leg.pending = False
+                leg.orig_qty = qty
+                leg.status = "REJECTED"
+            order_list.status = order_list.status_type = "ALL_DONE"
+            return
         self._move(base, -qty)
         self._move(base, qty, from_locked=True)
         order_list.locked_base = qty
