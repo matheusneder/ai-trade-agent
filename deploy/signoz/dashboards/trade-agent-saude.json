@@ -54,31 +54,12 @@
               "kind": "scalar",
               "spec": {
                 "plugin": {
-                  "kind": "signoz/BuilderQuery",
+                  "kind": "signoz/ClickHouseSQL",
                   "spec": {
                     "name": "A",
-                    "signal": "metrics",
-                    "source": "",
+                    "query": "SELECT argMax(export, unix_milli) AS value FROM ( SELECT unix_milli, avg(value) AS export FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'trade_agent.binance.error_rate' AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms GROUP BY unix_milli ) HAVING count() > 0",
                     "disabled": false,
-                    "filter": {
-                      "expression": ""
-                    },
-                    "groupBy": [],
-                    "order": [],
-                    "having": {
-                      "expression": ""
-                    },
-                    "functions": [],
-                    "legend": "",
-                    "aggregations": [
-                      {
-                        "metricName": "trade_agent.binance.error_rate",
-                        "temporality": "",
-                        "timeAggregation": "latest",
-                        "spaceAggregation": "avg",
-                        "reduceTo": "last"
-                      }
-                    ]
+                    "legend": ""
                   }
                 }
               }
@@ -125,31 +106,12 @@
               "kind": "scalar",
               "spec": {
                 "plugin": {
-                  "kind": "signoz/BuilderQuery",
+                  "kind": "signoz/ClickHouseSQL",
                   "spec": {
                     "name": "A",
-                    "signal": "metrics",
-                    "source": "",
+                    "query": "SELECT argMax(export, unix_milli) AS value FROM ( SELECT unix_milli, avg(value) AS export FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'trade_agent.binance.weight_used_1m' AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms GROUP BY unix_milli ) HAVING count() > 0",
                     "disabled": false,
-                    "filter": {
-                      "expression": ""
-                    },
-                    "groupBy": [],
-                    "order": [],
-                    "having": {
-                      "expression": ""
-                    },
-                    "functions": [],
-                    "legend": "",
-                    "aggregations": [
-                      {
-                        "metricName": "trade_agent.binance.weight_used_1m",
-                        "temporality": "",
-                        "timeAggregation": "latest",
-                        "spaceAggregation": "avg",
-                        "reduceTo": "last"
-                      }
-                    ]
+                    "legend": ""
                   }
                 }
               }
@@ -196,31 +158,12 @@
               "kind": "scalar",
               "spec": {
                 "plugin": {
-                  "kind": "signoz/BuilderQuery",
+                  "kind": "signoz/ClickHouseSQL",
                   "spec": {
                     "name": "A",
-                    "signal": "metrics",
-                    "source": "",
+                    "query": "SELECT argMax(export, unix_milli) AS value FROM ( SELECT unix_milli, avg(value) AS export FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'trade_agent.clock.offset' AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms GROUP BY unix_milli ) HAVING count() > 0",
                     "disabled": false,
-                    "filter": {
-                      "expression": ""
-                    },
-                    "groupBy": [],
-                    "order": [],
-                    "having": {
-                      "expression": ""
-                    },
-                    "functions": [],
-                    "legend": "",
-                    "aggregations": [
-                      {
-                        "metricName": "trade_agent.clock.offset",
-                        "temporality": "",
-                        "timeAggregation": "latest",
-                        "spaceAggregation": "avg",
-                        "reduceTo": "last"
-                      }
-                    ]
+                    "legend": ""
                   }
                 }
               }

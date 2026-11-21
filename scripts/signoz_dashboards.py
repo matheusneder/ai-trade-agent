@@ -84,12 +84,19 @@ ORDER BY scope, ts
 # The newest reading of a gauge in the dashboard's range, whatever agent instance sent it. The
 # builder's ``latest`` averages the series of the last step: after a restart the previous
 # container's series keeps its last reading there until the step rolls over (15 min on a
-# 3-day range, longer on wider ones), so 13 stale positions and 5 real ones showed as 9.
+# 3-day range, longer on wider ones), so 13 stale positions and 5 real ones showed as 9. The
+# agent stamps every series of a gauge (one per scope, profile or timeframe) with the instant of
+# the export: ``combine`` joins the series of each export first, as the builder's space
+# aggregation did across the series of a step.
 NEWEST_READING = """
-SELECT argMax(value, unix_milli) AS value
-FROM signoz_metrics.distributed_samples_v4
-WHERE metric_name = '{metric}'
-    AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms
+SELECT argMax(export, unix_milli) AS value
+FROM (
+    SELECT unix_milli, {combine}(value) AS export
+    FROM signoz_metrics.distributed_samples_v4
+    WHERE metric_name = '{metric}'
+        AND unix_milli >= $start_timestamp_ms AND unix_milli <= $end_timestamp_ms
+    GROUP BY unix_milli
+)
 HAVING count() > 0
 """
 
@@ -168,9 +175,10 @@ def sql(query: str, *, legend: str = "", name: str = "A") -> Json:
     return {"name": name, "query": " ".join(query.split()), "disabled": False, "legend": legend}
 
 
-def newest(name: str) -> Json:
-    """The newest reading of the gauge ``name`` in the range, for single-value panels."""
-    return sql(NEWEST_READING.format(metric=name))
+def newest(name: str, *, combine: str = "avg") -> Json:
+    """The newest reading of the gauge ``name`` in the range, for single-value panels;
+    ``combine``: how the series of one export add up (``max`` scope, ``sum`` of profiles)."""
+    return sql(NEWEST_READING.format(metric=name, combine=combine))
 
 
 def rows(signal: str, *, where: str, limit: int = 50) -> Json:
@@ -358,9 +366,7 @@ def _operation() -> Json:
                     [
                         cell(
                             "equity-now",
-                            number(
-                                "Patrimônio (USDT)", metric("trade_agent.equity", reduce="last")
-                            ),
+                            number("Patrimônio (USDT)", newest("trade_agent.equity")),
                             2,
                             3,
                         ),
@@ -368,7 +374,7 @@ def _operation() -> Json:
                             "pnl-now",
                             number(
                                 "Resultado do dia (USDT)",
-                                metric("trade_agent.pnl.daily", reduce="last"),
+                                newest("trade_agent.pnl.daily"),
                             ),
                             2,
                             3,
@@ -377,7 +383,7 @@ def _operation() -> Json:
                             "drawdown-now",
                             number(
                                 "Drawdown",
-                                metric("trade_agent.drawdown", reduce="last"),
+                                newest("trade_agent.drawdown"),
                                 unit="percent",
                                 warn=5,
                                 alert=10,
@@ -388,9 +394,7 @@ def _operation() -> Json:
                         ),
                         cell(
                             "exposure-now",
-                            number(
-                                "Exposição (USDT)", metric("trade_agent.exposure", reduce="last")
-                            ),
+                            number("Exposição (USDT)", newest("trade_agent.exposure")),
                             2,
                             3,
                         ),
@@ -408,7 +412,7 @@ def _operation() -> Json:
                             "risk-now",
                             number(
                                 "Pior estado do risco",
-                                metric("trade_agent.risk.state", space="max", reduce="last"),
+                                newest("trade_agent.risk.state", combine="max"),
                                 decimals=0,
                                 warn=1,
                                 alert=2,
@@ -517,7 +521,7 @@ def _operation() -> Json:
                             "regime-now",
                             number(
                                 "BTC vs EMA200 agora",
-                                metric("trade_agent.market.regime", reduce="last"),
+                                newest("trade_agent.market.regime"),
                                 unit="percent",
                                 description=REGIME_HELP,
                             ),
@@ -681,7 +685,7 @@ def _health() -> Json:
                             "errors-now",
                             number(
                                 "Falhas na Binance (5 min)",
-                                metric("trade_agent.binance.error_rate", reduce="last"),
+                                newest("trade_agent.binance.error_rate"),
                                 unit="percentunit",
                                 warn=0.05,
                                 alert=0.2,
@@ -694,7 +698,7 @@ def _health() -> Json:
                             "weight-now",
                             number(
                                 "Peso usado (1 min)",
-                                metric("trade_agent.binance.weight_used_1m", reduce="last"),
+                                newest("trade_agent.binance.weight_used_1m"),
                                 decimals=0,
                                 warn=3000,
                                 alert=5000,
@@ -707,7 +711,7 @@ def _health() -> Json:
                             "clock-now",
                             number(
                                 "Desvio do relógio",
-                                metric("trade_agent.clock.offset", reduce="last"),
+                                newest("trade_agent.clock.offset"),
                                 unit="ms",
                                 decimals=0,
                                 warn=500,
@@ -1297,7 +1301,7 @@ def _copy_trading() -> Json:
                             "leads-selected-now",
                             number(
                                 "Traders acompanhados",
-                                metric("trade_agent.leads.selected", space="sum", reduce="last"),
+                                newest("trade_agent.leads.selected", combine="sum"),
                                 decimals=0,
                                 description=LEADS_HELP,
                             ),
@@ -1308,7 +1312,7 @@ def _copy_trading() -> Json:
                             "leads-fresh-now",
                             number(
                                 "Com leitura recente",
-                                metric("trade_agent.leads.fresh", space="sum", reduce="last"),
+                                newest("trade_agent.leads.fresh", combine="sum"),
                                 decimals=0,
                                 description=(
                                     "Traders acompanhados cujos trades foram lidos há menos de "
@@ -1323,7 +1327,7 @@ def _copy_trading() -> Json:
                             "leads-consensus-now",
                             number(
                                 "Ativos com consenso de compra",
-                                metric("trade_agent.leads.consensus", space="sum", reduce="last"),
+                                newest("trade_agent.leads.consensus", combine="sum"),
                                 decimals=0,
                             ),
                             2,
