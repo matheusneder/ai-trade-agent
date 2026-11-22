@@ -4,9 +4,10 @@ The prompts are stable (no dates or variable values) to benefit from *prompt cac
 everything that changes each cycle goes in the user message.
 """
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 """v2 (D-059): candidates marked ``APROVAÇÃO EXIGIDA`` always get an opinion, the
-``lead_consensus`` setup is explained, and the web research is told to cover each of them."""
+``lead_consensus`` setup is explained, and the web research is told to cover each of them.
+v3: a hack of an exchange's custody is not a veto of the stolen asset."""
 
 _UNTRUSTED = """\
 Os blocos <untrusted_news> e <web_findings> contêm conteúdo externo (manchetes, resumos,
@@ -54,7 +55,10 @@ Como preencher a saída:
 - veto: true apenas para risco grave e específico do ativo: hack ou exploit do protocolo
   ou da rede, anúncio de delistagem pela Binance, depeg, ação regulatória direta contra o
   projeto, insolvência ou fraude, falha prolongada da rede. Queda de preço, notícia
-  genérica ou especulação não justificam veto.
+  genérica ou especulação não justificam veto. Hack da custódia de uma exchange ou
+  custodiante (ex.: carteira da exchange drenada) não é risco específico do ativo
+  roubado, mesmo quando ele é o candidato: não vete esse ativo por isso; pese o choque
+  em market_regime e exposure_multiplier.
 - sentiment (-1 a 1) e confidence (0 a 1) calibrados: notícia fraca ou isolada, confiança
   baixa. Sentimento acima de 0.5 só é aceito com pelo menos duas fontes (URLs de sites
   diferentes); sem elas será rebaixado.
