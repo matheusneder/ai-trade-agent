@@ -84,11 +84,13 @@ class MarketAnalyst:
         candidates: Sequence[CandidateContext],
         news: Sequence[StoredNews],
         web: bool,
+        findings: ResearchFindings | None = None,
     ) -> Analysis:
+        """``findings`` given (the evaluation's synthetic ones, D-059): the reading uses them
+        and the web step is skipped."""
         models = self._config.models
         notes: list[str] = []
-        findings: ResearchFindings | None = None
-        if web and self._config.web.enabled and candidates:
+        if findings is None and web and self._config.web.enabled and candidates:
             try:
                 findings = await self._llm.research(
                     purpose="research",
