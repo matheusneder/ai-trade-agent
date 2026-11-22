@@ -1316,8 +1316,9 @@ def _copy_trading() -> Json:
                                 decimals=0,
                                 description=(
                                     "Traders acompanhados cujos trades foram lidos há menos de "
-                                    "max_data_age (90 min em lead_consensus_1h, 45 nos perfis de "
-                                    "teste): só esses contam no consenso."
+                                    "max_data_age (90 min em lead_consensus_1h e "
+                                    "lead_consensus_llm_4h, 45 nos perfis de teste): só esses "
+                                    "contam no consenso."
                                 ),
                             ),
                             2,

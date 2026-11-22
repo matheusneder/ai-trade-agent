@@ -18,7 +18,13 @@ from trade_agent.execution.positions import Position, PositionState
 from trade_agent.market.universe import Tier, UniverseMember
 from trade_agent.signals import Signal
 from trade_agent.strategy.exits import break_even_protection, exit_reason, next_weak_cycles
-from trade_agent.strategy.portfolio import Candidate, Holding, MarketOpinion, plan_entries
+from trade_agent.strategy.portfolio import (
+    NO_APPROVAL,
+    Candidate,
+    Holding,
+    MarketOpinion,
+    plan_entries,
+)
 from trade_agent.strategy.profiles import ProfileConfig, load_strategy_config
 
 D = Decimal
@@ -179,6 +185,52 @@ def test_disabled_llm_ignores_veto_and_penalty() -> None:
     candidate = _candidate("AAAUSDT", opinion=MarketOpinion(D(-1), D(1), veto=True))
     assert candidate.final_score(profile) == D("0.8")
     assert len(_plan(profile=profile, candidates=[candidate]).ideas) == 1
+
+
+def test_approval_mode_needs_the_analysts_explicit_opinion() -> None:
+    """D-059: with ``llm.validation: approval`` an entry needs an opinion on the asset that is
+    not negative, with at least ``min_confidence``; in the default mode silence is neutral."""
+    approving = CONSERVATIVE.model_copy(
+        update={"llm": CONSERVATIVE.llm.model_copy(update={"validation": "approval"})}
+    )
+    candidates = [
+        _candidate("AAAUSDT", score=0.9),  # the analyst said nothing about it
+        _candidate("BBBUSDT", score=0.9, opinion=MarketOpinion(D(0), D("0.6"))),
+        _candidate("CCCUSDT", score=0.9, opinion=MarketOpinion(D("0.4"), D("0.5"))),
+        _candidate("DDDUSDT", score=0.9, opinion=MarketOpinion(D("-0.1"), D("0.9"))),
+        _candidate("EEEUSDT", score=0.9, opinion=MarketOpinion(D("0.5"), D("0.9"), veto=True)),
+    ]
+    result = _plan(profile=approving, candidates=candidates)
+    assert [i.symbol for i in result.ideas] == ["BBBUSDT"]
+    assert dict(result.rejections) == {
+        "AAAUSDT": NO_APPROVAL,
+        "CCCUSDT": NO_APPROVAL,  # not confident enough
+        "DDDUSDT": NO_APPROVAL,  # negative, though its blended score still passes
+        "EEEUSDT": "veto do analista",
+    }
+    # the same candidates under the default mode: only the veto refuses
+    filtered = _plan(candidates=candidates)
+    assert {i.symbol for i in filtered.ideas} == {"AAAUSDT", "CCCUSDT", "BBBUSDT"}
+    assert NO_APPROVAL not in dict(filtered.rejections).values()
+    # and a profile without the analyst has nobody to wait for
+    off = approving.model_copy(update={"llm": approving.llm.model_copy(update={"enabled": False})})
+    assert _plan(profile=off, candidates=candidates[:1]).ideas[0].symbol == "AAAUSDT"
+
+
+def test_an_approved_entry_still_obeys_every_other_rule() -> None:
+    approving = CONSERVATIVE.model_copy(
+        update={"llm": CONSERVATIVE.llm.model_copy(update={"validation": "approval"})}
+    )
+    approved = MarketOpinion(D("0.3"), D("0.8"))
+    weak = _candidate("AAAUSDT", score=0.5, opinion=approved)
+    held = _candidate("BBBUSDT", opinion=approved)
+    holdings = [Holding("conservador", "BBBUSDT", Tier.CORE, D(100))]
+    result = _plan(profile=approving, candidates=[weak, held], holdings=holdings)
+    assert result.ideas == ()
+    assert dict(result.rejections) == {
+        "AAAUSDT": "score abaixo do mínimo",
+        "BBBUSDT": "ativo já em carteira",
+    }
 
 
 def test_cost_adjusted_sizing_keeps_loss_inside_budget() -> None:

@@ -101,6 +101,9 @@ class CandidateContext:
     ta_score: float
     setup: str | None = None
     held: bool = False
+    needs_approval: bool = False
+    """A profile with ``llm.validation: approval`` buys it only with the analyst's explicit
+    opinion (D-059): the analyst is told so and always gives one."""
 
 
 @dataclass(frozen=True, slots=True)
