@@ -70,9 +70,8 @@ def test_the_risk_guard_gets_the_budgets_of_the_enabled_local_profiles() -> None
         "pair_pullback_1h": "ppb1h",  # pair_breakout_1h and pair_range_1h are off (D-053)
         "lead_consensus_1h": "lead1h",  # D-052: the same budget
         "lead_consensus_llm_4h": "leadllm4h",  # D-059: a wider one
-        "temp_cp_trade_validation": "tcpv15m",  # D-054: with a shorter pause
-        "temp_cp_trade_high_risk_validation": "tcphr15m",  # D-056: with no pause at all
-    }
+        "copy_trade_15m": "tcpv15m",  # D-054: with a shorter pause
+    }  # temp_cp_trade_high_risk_validation, with no pause at all (D-056), is off (D-060)
     assert scope_specs(local_config()) == {}  # a disabled one has none
     config = local_config(local={"enabled": True, "timeframe": "4h"})
     profile = config.profiles["local"]

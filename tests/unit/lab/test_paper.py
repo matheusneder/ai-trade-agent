@@ -64,6 +64,10 @@ def test_replay_schema_and_chronology(tmp_path: Path) -> None:
     }
     tape.write_text(json.dumps(event), encoding="utf-8")
     assert replay(tape, {"ta": account(True)})["ta"]["open_positions"] == 1
+    # D-060: the rows of a profile no longer in the config (renamed since) are skipped
+    gone = {**event, "profile": "temp_cp_trade_validation"}
+    tape.write_text(json.dumps(gone) + "\n" + json.dumps(event), encoding="utf-8")
+    assert replay(tape, {"ta": account(True)})["ta"]["open_positions"] == 1
     event["at"] = (NOW - timedelta(minutes=1)).isoformat()
     tape.write_text(tape.read_text() + "\n" + json.dumps(event), encoding="utf-8")
     with pytest.raises(ValueError, match="chronological"):

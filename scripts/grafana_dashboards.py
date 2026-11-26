@@ -87,9 +87,6 @@ DAILY_SCOPE_PNL_HELP = (
 CONFIG = Path(__file__).resolve().parents[1] / "config" / "profiles.yaml"
 # A decision cycle of a lead_consensus profile: it records what the lead traders did (`leads`)
 LEAD_CYCLE = "kind = 'decision.cycle' AND jsonb_typeof(payload->'leads') = 'object'"
-LATEST_SELECTION = (
-    "id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile')"
-)
 LEAD_DECISION = """
 COALESCE(
     CASE WHEN e.payload->'opened' @> jsonb_build_array(a.key) THEN 'entrada aberta' END,
@@ -128,6 +125,22 @@ def lead_codes(path: Path = CONFIG) -> list[str]:
     if not codes:
         raise ValueError(f"nenhum perfil lead_consensus em {path}")
     return codes
+
+
+def latest_selection(path: Path = CONFIG) -> str:
+    """Each profile's latest selection of traders, if younger than the profiles'
+    ``max_ranking_age``: after it the profile follows nobody (D-052), so the last one of a
+    disabled or renamed profile (D-060) stops counting."""
+    ages = [
+        p.leads.max_ranking_age for p in load_strategy_config(path).profiles.values() if p.leads
+    ]
+    if not ages:
+        raise ValueError(f"nenhum perfil lead_consensus em {path}")
+    seconds = int(max(ages).total_seconds())
+    return (
+        "id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' "
+        f"AND created_at > now() - interval '{seconds} seconds' GROUP BY payload->>'profile')"
+    )
 
 
 def panel(
@@ -340,12 +353,13 @@ def build() -> dict[str, dict[str, Any]]:
         table("Eventos altos e críticos", "SELECT created_at AS time, kind AS evento, severity AS severidade, position_id AS posicao, payload::text AS detalhes FROM events WHERE severity IN ('high', 'critical') AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 100"),
     ])  # fmt: skip
     lead = "profile IN (" + ", ".join(f"'{code}'" for code in lead_codes()) + ")"
+    selection = latest_selection()
     leads = dashboard("ta-leads", "Copy trading", [
-        stat("Traders acompanhados", f"SELECT coalesce(sum(jsonb_array_length(payload->'selected')), 0)::int AS traders FROM events WHERE {LATEST_SELECTION}", description=LEADS_HELP),
+        stat("Traders acompanhados", f"SELECT coalesce(sum(jsonb_array_length(payload->'selected')), 0)::int AS traders FROM events WHERE {selection}", description=LEADS_HELP),
         stat("Última leitura dos traders", f"SELECT payload->'leads'->>'status' AS status, (payload->'leads'->>'fresh')::int AS com_leitura FROM events WHERE {LEAD_CYCLE} ORDER BY id DESC LIMIT 1", text=True, description="Status da leitura que o último ciclo usou ('ok' ou o motivo de não haver entrada) e quantos traders acompanhados tinham leitura recente."),
         stat("Posições abertas (copy trading)", f"SELECT count(*) AS posicoes, coalesce(sum(entry_quote), 0)::float AS custo FROM positions WHERE state NOT IN ('closed', 'rejected') AND {lead}"),
         stat("Resultado realizado (período)", f"SELECT coalesce(sum(realized_pnl), 0)::float AS pnl FROM positions WHERE {CLOSED} AND {lead} AND $__timeFilter(closed_at)", "currencyUSD"),
-        table("Traders acompanhados agora", f"SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'trades_per_day')::float AS operacoes_dia, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.{LATEST_SELECTION} ORDER BY 1, 4 DESC, 2", w=16, h=8, description="A última seleção de cada perfil: nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, operações por dia (das mais recentes até agora; os perfis de teste seguem os que mais operam, D-054 e D-056) e o dinheiro do próprio trader no portfólio (USDT)."),
+        table("Traders acompanhados agora", f"SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'trades_per_day')::float AS operacoes_dia, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.{selection} ORDER BY 1, 4 DESC, 2", w=16, h=8, description="A última seleção de cada perfil, se mais nova que max_ranking_age (mais velha, o perfil não segue ninguém): nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, operações por dia (das mais recentes até agora; os perfis de teste seguem os que mais operam, D-054 e D-056) e o dinheiro do próprio trader no portfólio (USDT)."),
         table("Fonte de copy trading", "SELECT created_at AS time, payload->>'profile' AS perfil, CASE kind WHEN 'leads.source_unavailable' THEN 'indisponível' ELSE 'voltou a responder' END AS fonte FROM events WHERE kind IN ('leads.source_unavailable', 'leads.source_recovered') AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50", w=8, h=8, description="Leituras em que todas as requisições à fonte (endpoints do site da Binance, não documentados) falharam, e a volta. Sem leitura recente, o perfil não abre entradas."),
         panel("Consenso dos traders por ciclo", f"SELECT e.created_at AS time, count(a.key) FILTER (WHERE a.value->>'consensus' = 'buy') AS compra, count(a.key) FILTER (WHERE a.value->>'consensus' = 'sell') AS venda, count(a.key) FILTER (WHERE jsonb_typeof(a.value->'consensus') = 'null') AS sem_consenso FROM events e LEFT JOIN LATERAL jsonb_each(e.payload->'leads'->'assets') a ON true WHERE e.{LEAD_CYCLE} AND $__timeFilter(e.created_at) GROUP BY e.id, e.created_at ORDER BY 1", description="Ativos com consenso de compra (compradores menos vendedores ≥ min_backers), de venda, e movimentados sem consenso, a cada ciclo."),
         panel("Leitura dos traders por ciclo", f"SELECT date_trunc('day', created_at) AS time, count(*) FILTER (WHERE payload->'leads'->>'status' = 'ok') AS com_leitura, count(*) FILTER (WHERE payload->'leads'->>'status' <> 'ok') AS sem_leitura FROM events WHERE {LEAD_CYCLE} AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", kind="barchart", description="Ciclos que decidiram com a leitura dos traders e ciclos sem ela (ranking vencido, nenhum trader selecionado ou fonte sem dados recentes): esses não abrem entradas."),
