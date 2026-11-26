@@ -17,6 +17,12 @@
   - AWS gives new accounts credits for 6 months, not a free tier.
   - Serverless (Lambda with Aurora) does not fit: the agent's WebSocket and Telegram polling need a long-running process, and the fixed IP needs a NAT gateway (about US$ 33/month) besides the database. It would cost more than a VM after a rewrite.
 - **Paid fallback, same architecture:** Hetzner CAX21 (4 ARM vCPUs, 8 GB, about €11/month with IPv4 since the June 2026 price increase).
+- **Region: Brazil, not Tokyo.** Binance's matching engine runs in AWS Tokyo, and an OCI VM in Tokyo or Osaka would cut each request from about 300 ms to a few. That does not pay off here:
+  - **Latency:** measured from Brazil on 2026-11-26. A request to `api.binance.com` takes about 290 ms: the connection ends at a nearby CloudFront edge (35 ms), but the request still travels to Tokyo. `demo-api.binance.com` sits in AWS Tokyo itself, at about 300 ms per round trip.
+  - **Why it does not matter:** the exits run on Binance's server (OPOCO/OCO). The decisions come minutes after a 15m, 1h or 4h close. The `limit_fok` entries allow 18–20 bps of slippage over the ask. On Demo, all 117 entries sent from Brazil since 2026-10-01 filled, and none was rejected.
+  - **Cost:** the same in both. OCI charges the same prices in every region, and the Always Free allowance is the same everywhere. Free-tier capacity per region is not published; *Out of host capacity* reports exist for both countries.
+  - **Account:** binance.com stopped serving residents of Japan on 2023-11-30 (they moved to Binance Japan), and its terms restrict use by location. A Brazilian account trading from a Japanese IP is the kind of signal that can trigger a compliance review. Whether the API refuses Japanese IPs is unverified. The `lead_consensus` source, undocumented endpoints of www.binance.com, is the part most exposed to geoblocking. A Brazilian IP matches the account's KYC, and the production key will be restricted to it.
+  - Tokyo becomes worth a paid test only if a strategy turns latency-sensitive (sub-second entries) or FOK entries start to be rejected.
 
 ## 2. Rules for the move
 

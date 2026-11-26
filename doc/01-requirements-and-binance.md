@@ -80,7 +80,9 @@ Other API points:
 ### 2.5 Account security and eligibility
 
 - **API key:** **Ed25519** (Binance's recommendation), only with *Reading* and *Spot Trading*, **withdrawals disabled** and the IP list restricted to the server's fixed IP.
-- **Restricted location:** Binance answers **HTTP 451** to IPs from restricted locations (e.g. the US and Ontario), which includes cloud regions in those countries. The server must be in an allowed region (e.g. São Paulo, Frankfurt, Tokyo).
+- **Restricted location:** Binance answers **HTTP 451** to IPs from restricted locations (e.g. the US and Ontario), which includes cloud regions in those countries. The server must be in an allowed region (e.g. São Paulo or Frankfurt), preferably in the account's KYC country.
+  - Avoid Tokyo even though Binance's matching engine runs there. binance.com stopped serving residents of Japan on 2023-11-30, and its terms restrict use by location. Whether the API refuses Japanese IPs is unverified.
+  - The latency it would save does not matter to this agent ([oci-deployment.md](oci-deployment.md), §1).
 - **Sub-accounts:** only for corporate accounts or **VIP 1+** individuals. That is why the profiles share the same account: each one has a share of `managed_capital`, and the positions are identified by the prefix of the order IDs (doc 03, §8).
 
 ### 2.6 Copy Trading data
