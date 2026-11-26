@@ -31,7 +31,7 @@
 2. **Upgrade the account to Pay As You Go** (*Billing & Cost Management → Upgrade and Manage Payment*).
    - Usage inside the Always Free limits stays free.
    - The upgrade raises the priority for A1 capacity: *Out of host capacity* is common in the Brazilian regions.
-   - It also exempts the instance from idle-instance reclamation (per user reports). An Always Free instance whose 95th-percentile CPU stays below 20% for 7 days may be reclaimed, and this stack runs below that.
+   - Idle reclamation is not a risk for this stack either way. Oracle may reclaim an Always Free instance when, over 7 days, its CPU (95th percentile), its network and, on A1 shapes, its memory all stay below 20%. The stack's memory (about 3.8 of 12 GB, 32%) keeps it above that. User reports also say a Pay As You Go account is exempt, which Oracle's page does not state.
 3. **Create a budget** (*Billing & Cost Management → Budgets*) of US$ 1, with an alert at 100%. Any charge means something left the free allowance.
 4. **Create the network:** *Networking → Virtual cloud networks → Start VCN Wizard → Create VCN with Internet Connectivity*. Keep the public subnet's default security list, which only allows inbound TCP 22. Open nothing else: Grafana, SigNoz and PostgreSQL listen on `127.0.0.1` and are reached through an SSH tunnel (§9).
 
@@ -78,6 +78,7 @@ On the VM, run `chmod 600 ~/ai-trade-agent/.env`, then edit the file:
 
 - Delete `DEV_JAEGER_UI`, `DEV_GRAFANA_UI_HOST` and `DEV_SIGNOZ_UI_HOST`. They are for development only.
 - Add `TA_POSTGRES_PASSWORD` with a strong password. PostgreSQL reads it only at the first initialization of its volume, and the VM starts from an empty one. The local default, `trade_agent_dev`, stays on the local machine.
+- Use hex passwords (`openssl rand -hex 24`) for `TA_POSTGRES_PASSWORD` and `GRAFANA_DB_PASSWORD`. `deploy/stack.yml` puts the first one into the agent's database URL without encoding, so `@`, `:`, `/`, `?`, `#` or `%` break it. `deploy/postgres/init` puts the second one inside a quoted SQL string, so a `'` breaks the first initialization.
 - Optional, but useful now that the agent runs elsewhere: `TA_HEALTHCHECK_URL` (go-live checklist).
 - `TA_SIGNOZ_API_KEY` belongs to the local SigNoz and is not used on the VM (§6).
 
@@ -113,18 +114,20 @@ free -h
 1. Open the tunnel (§9) and go to `http://127.0.0.1:18080`.
 2. Create the admin account.
 3. Create a service account with the *Editor* role (*Settings → Service Accounts*).
-4. From the Windows checkout, apply the dashboards with that key. Environment variables take precedence over the `.env`, so the local `.env` stays as it is:
+4. From the Windows checkout, apply the dashboards with that key. Environment variables take precedence over the `.env`, so the local `.env` stays as it is. In Git Bash:
 
    ```bash
    TA_SIGNOZ_URL=http://127.0.0.1:18080 TA_SIGNOZ_API_KEY=<key of the VM's SigNoz> uv run python -m scripts.signoz_dashboards --apply
    ```
 
-**Optional dump and restore drill.** It times the cutover and catches restore errors early. Take the dump with the commands of §7, step 3, without stopping the agent. Then, on the VM:
+   In PowerShell, set the variables first: `$env:TA_SIGNOZ_URL = "http://127.0.0.1:18080"; $env:TA_SIGNOZ_API_KEY = "<key>"`. Then run the same `uv run` command.
+
+**Optional dump and restore drill.** It times the cutover and catches restore errors early. Take the dump and copy it to the VM with §7, steps 3 and 5, without stopping the agent. Then, on the VM:
 
 ```bash
 docker compose -f deploy/docker-compose.yml cp ~/cutover.dump postgres:/tmp/cutover.dump
 docker compose -f deploy/docker-compose.yml exec postgres createdb -U trade_agent trade_agent_rehearsal
-docker compose -f deploy/docker-compose.yml exec postgres pg_restore -U trade_agent -d trade_agent_rehearsal --no-owner --exit-on-error /tmp/cutover.dump
+docker compose -f deploy/docker-compose.yml exec postgres pg_restore -U trade_agent -d trade_agent_rehearsal --no-owner --exit-on-error --single-transaction /tmp/cutover.dump
 docker compose -f deploy/docker-compose.yml exec postgres psql -U trade_agent -d trade_agent_rehearsal -c "select version_num from alembic_version"
 docker compose -f deploy/docker-compose.yml exec postgres dropdb -U trade_agent trade_agent_rehearsal
 ```
@@ -142,7 +145,9 @@ On Windows, from the repository root:
    ```
 
 2. **Stop the agent:** `docker compose -f deploy/docker-compose.yml stop agent`. Its log ends with `agent.stopped`.
-3. **Dump the database.** The dump is written inside the container and copied out, so no shell touches the binary stream. In Git Bash, prefix the first command with `MSYS_NO_PATHCONV=1`: without it, Git Bash rewrites `/tmp/cutover.dump` into a Windows path before Docker sees it. PowerShell needs nothing.
+3. **Dump the database.** The dump is written inside the container and copied out, so no shell touches the binary stream.
+   - **Git Bash:** prefix the first command with `MSYS_NO_PATHCONV=1`. Without it, Git Bash rewrites `/tmp/cutover.dump` into a Windows path before Docker sees it. `postgres:/tmp/...` in the second command is left alone. PowerShell needs nothing.
+   - **`var/`:** it is gitignored. This checkout already has it; on a fresh clone, create it first.
 
    ```bash
    docker compose -f deploy/docker-compose.yml exec postgres pg_dump -U trade_agent -d trade_agent -Fc -f /tmp/cutover.dump
@@ -154,12 +159,12 @@ On Windows, from the repository root:
 
 On the VM:
 
-6. **Restore into the empty database.** The first initialization created `grafana_ro` with `GRAFANA_DB_PASSWORD`, and the dump carries its grants.
+6. **Restore into the empty database.** The first initialization created `grafana_ro` with `GRAFANA_DB_PASSWORD`, and the dump carries its grants. `--single-transaction` makes a failed restore roll back to the empty database, so a retry does not stop at `relation already exists`.
 
    ```bash
    cd ~/ai-trade-agent
    docker compose -f deploy/docker-compose.yml cp ~/cutover.dump postgres:/tmp/cutover.dump
-   docker compose -f deploy/docker-compose.yml exec postgres pg_restore -U trade_agent -d trade_agent --no-owner --exit-on-error /tmp/cutover.dump
+   docker compose -f deploy/docker-compose.yml exec postgres pg_restore -U trade_agent -d trade_agent --no-owner --exit-on-error --single-transaction /tmp/cutover.dump
    docker compose -f deploy/docker-compose.yml exec postgres psql -U trade_agent -d trade_agent -c "select version_num from alembic_version"
    ```
 
@@ -177,6 +182,7 @@ On the VM:
 - **Telemetry:** the runbook's table of checks (§1) passes. Telemetry is below 360 s, and logs and traces arrive in Grafana and SigNoz. Run the port loop there on the VM.
 - **Decisions:** the next close produces `decision.cycle` lines.
 - **Cost:** after 24 h, the budget still shows US$ 0.
+- **Dumps:** once the checks pass, delete the three unencrypted copies of the dump. They are `var/cutover.dump` on Windows, `~/cutover.dump` on the VM and `/tmp/cutover.dump` in the VM's `postgres` container (`docker compose -f deploy/docker-compose.yml exec postgres rm /tmp/cutover.dump`). The rollback does not need them: it starts from the local volume or from a new dump.
 
 With positions open during the move, the cutover also covers the checklist's "at least one restart with open positions".
 
