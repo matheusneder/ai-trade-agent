@@ -38,7 +38,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT coalesce(sum(jsonb_array_length(payload->'selected')), 0)::int AS traders FROM events WHERE id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile')"
+          "rawSql": "SELECT coalesce(sum(jsonb_array_length(payload->'selected')), 0)::int AS traders FROM events WHERE id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' AND created_at > now() - interval '86400 seconds' GROUP BY payload->>'profile')"
         }
       ],
       "fieldConfig": {
@@ -161,7 +161,7 @@
     {
       "type": "table",
       "title": "Traders acompanhados agora",
-      "description": "A última seleção de cada perfil: nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, operações por dia (das mais recentes até agora; os perfis de teste seguem os que mais operam, D-054 e D-056) e o dinheiro do próprio trader no portfólio (USDT).",
+      "description": "A última seleção de cada perfil, se mais nova que max_ranking_age (mais velha, o perfil não segue ninguém): nota (0 a 1), ROI e drawdown dos 90 dias do ranking, Sharpe, semanas positivas e ganho dos últimos 30 dias da curva de PnL, operações por dia (das mais recentes até agora; os perfis de teste seguem os que mais operam, D-054 e D-056) e o dinheiro do próprio trader no portfólio (USDT).",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "trade-agent-pg"
@@ -182,7 +182,7 @@
           "editorMode": "code",
           "rawQuery": true,
           "format": "table",
-          "rawSql": "SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'trades_per_day')::float AS operacoes_dia, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' GROUP BY payload->>'profile') ORDER BY 1, 4 DESC, 2"
+          "rawSql": "SELECT e.payload->>'profile' AS perfil, t->>'nickname' AS trader, t->>'id' AS portfolio, (t->>'score')::float AS nota, (t->>'roi_pct')::float AS roi_pct, (t->>'mdd_pct')::float AS drawdown_pct, (t->>'sharpe')::float AS sharpe, (t->>'positive_weeks')::float * 100 AS semanas_positivas_pct, (t->>'recent_gain_pct')::float AS ganho_30d_pct, (t->>'trades_per_day')::float AS operacoes_dia, (t->>'balance')::float AS saldo_proprio, (t->>'trading_days')::int AS dias FROM events e, jsonb_array_elements(e.payload->'selected') t WHERE e.id IN (SELECT max(id) FROM events WHERE kind = 'leads.selected' AND created_at > now() - interval '86400 seconds' GROUP BY payload->>'profile') ORDER BY 1, 4 DESC, 2"
         }
       ],
       "fieldConfig": {
