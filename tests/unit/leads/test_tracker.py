@@ -552,7 +552,7 @@ async def test_the_gauges_keep_ageing_while_the_source_is_backed_off() -> None:
 
 
 # ------------------------------------------------------------------ ranked by activity (D-054)
-FLOW_TEST = load_strategy_config(REPOSITORY_FILE).profiles["temp_cp_trade_validation"].leads
+FLOW_TEST = load_strategy_config(REPOSITORY_FILE).profiles["copy_trade_15m"].leads
 
 
 async def test_ranked_by_activity_the_search_goes_past_an_idle_top_of_the_ranking() -> None:

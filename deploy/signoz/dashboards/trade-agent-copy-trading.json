@@ -165,7 +165,7 @@
                     "source": "",
                     "disabled": false,
                     "filter": {
-                      "expression": "profile IN ('lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation', 'temp_cp_trade_validation')"
+                      "expression": "profile IN ('copy_trade_15m', 'lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation')"
                     },
                     "groupBy": [],
                     "order": [],
@@ -223,7 +223,7 @@
                     "source": "",
                     "disabled": false,
                     "filter": {
-                      "expression": "profile IN ('lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation', 'temp_cp_trade_validation')"
+                      "expression": "profile IN ('copy_trade_15m', 'lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation')"
                     },
                     "groupBy": [],
                     "order": [],
@@ -516,7 +516,7 @@
                     "source": "",
                     "disabled": false,
                     "filter": {
-                      "expression": "profile IN ('lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation', 'temp_cp_trade_validation')"
+                      "expression": "profile IN ('copy_trade_15m', 'lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation')"
                     },
                     "groupBy": [
                       {
@@ -585,7 +585,7 @@
                           "source": "",
                           "disabled": false,
                           "filter": {
-                            "expression": "profile IN ('lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation', 'temp_cp_trade_validation')"
+                            "expression": "profile IN ('copy_trade_15m', 'lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation')"
                           },
                           "groupBy": [
                             {
@@ -617,7 +617,7 @@
                           "source": "",
                           "disabled": false,
                           "filter": {
-                            "expression": "profile IN ('lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation', 'temp_cp_trade_validation')"
+                            "expression": "profile IN ('copy_trade_15m', 'lead_consensus_1h', 'lead_consensus_llm_4h', 'temp_cp_trade_high_risk_validation')"
                           },
                           "groupBy": [
                             {

@@ -18,11 +18,11 @@ profiles:
     # doc/lab-results.md section 2.9).
     code: swg
     enabled: true
-    capital_share: 0.25        # Main allocation: 250 USDT (D-053, was 0.35: 0.10 went to lead_consensus_1h)
+    capital_share: 0.15        # Main allocation: 150 USDT (D-060, was 0.25: 0.10 went to copy_trade_15m)
     timeframe: 4h
     tiers: {core: 0.70, large: 0.30, mid: 0.0, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lots of ~42 USDT at the 4.5% stop cap (~58 at 0.35; ~147 at 1.5%, D-047)
+      max_open_positions: 2    # Lots of ~25 USDT at the 4.5% stop cap (~42 at 0.25, D-060; ~58 at 0.35; ~147 at 1.5%, D-047)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15   # 15% liquidity for rebalancing
       risk_per_trade_pct: 0.75  # D-047 (was 1.5): the lab's own path stays under the 15% halt
@@ -59,11 +59,11 @@ profiles:
     # and maximum holding simulated (doc/lab-results.md).
     code: mom
     enabled: true
-    capital_share: 0.20        # Tactical allocation: 200 USDT (D-053, was 0.30: 0.10 went to lead_consensus_1h)
+    capital_share: 0.10        # Tactical allocation: 100 USDT (D-060, was 0.20: 0.10 went to copy_trade_15m)
     timeframe: 4h              # Moved from 1h to 4h to remove noise and fees
     tiers: {core: 0.30, large: 0.50, mid: 0.20, small: 0.0}
     allocation:
-      max_open_positions: 2    # Lots of ~23 USDT at the 6.5% stop cap (~35 at 0.30; ~69 at 1.5%, D-047)
+      max_open_positions: 2    # Lots of ~12 USDT at the 6.5% stop cap (~23 at 0.20, D-060; ~35 at 0.30; ~69 at 1.5%, D-047)
       max_position_pct: 0.42
       cash_reserve_pct: 0.15
       risk_per_trade_pct: 0.75  # D-047 (was 1.5): the lab's own path stays under the 15% halt
@@ -234,7 +234,7 @@ profiles:
     family: lead_consensus
     # 100 USDT (D-059): the 0.40 of D-053 (the 0.05 of pair_breakout_1h and of pair_range_1h,
     # and 0.10 each from swing_trend and momentum_alpha), half of it lent to
-    # temp_cp_trade_validation (D-054) and half of the rest given to lead_consensus_llm_4h
+    # copy_trade_15m (D-054) and half of the rest given to lead_consensus_llm_4h
     capital_share: 0.10
     timeframe: 1h              # confirmation, stop and risk budget on the 1h candles
     cycle: 1h                  # the timeframe itself: at each 1h close (D-055; 10m in D-053)
@@ -379,20 +379,22 @@ profiles:
   # readings, consensus, the candles' confirmation, entry, protection and exits) has gone
   # untested. This one follows the traders that trade most often, whatever their results, buys
   # what a single one of them bought and decides at each 15m close. Turn it off and give its
-  # share back to lead_consensus_1h once the flow is validated.
-  temp_cp_trade_validation:
+  # share back once the flow is validated: 0.20 came from lead_consensus_1h (D-054, D-056), 0.10
+  # each from swing_trend and momentum_alpha (D-060). Named temp_cp_trade_validation until D-060;
+  # its code, in the order IDs and the positions' records, stays the same.
+  copy_trade_15m:
     code: tcpv15m
     enabled: true
     family: lead_consensus
-    # 100 USDT: half of the 0.40 of lead_consensus_1h (D-054), half of that lent to
-    # temp_cp_trade_high_risk_validation (D-056)
-    capital_share: 0.10
+    # 400 USDT (D-060, was 0.10): the 0.10 of temp_cp_trade_high_risk_validation, now off, and
+    # 0.10 each from swing_trend and momentum_alpha
+    capital_share: 0.40
     timeframe: 15m             # confirmation, stop and risk budget on the 15m candles
     cycle: 15m                 # the timeframe itself: at each 15m close
     tiers: {core: 0.70, large: 0.70, mid: 0.70, small: 0.0}
     allocation:
-      max_open_positions: 2
-      max_position_pct: 0.35
+      max_open_positions: 4    # D-060 (was 2)
+      max_position_pct: 0.175  # D-060 (was 0.35): 70 USDT, so four lots fit the 280 USDT budget
       cash_reserve_pct: 0.30
       risk_per_trade_pct: 0.5
     entry:
@@ -408,6 +410,7 @@ profiles:
     llm: {enabled: false}
     risk:
       <<: *local_risk
+      max_open_risk_pct: 2.0   # D-060: four positions at 0.5% of risk each (1.0 in the others)
       cooldown: 4h             # 24h in the others: a pause does not hold the test for a day
     leads:
       selection: &busiest      # also temp_cp_trade_high_risk_validation's (D-056)
@@ -440,18 +443,18 @@ profiles:
       request_delay_s: 0.5
 
   # ------------------------------------------------------------ high-risk flow test (D-056)
-  # Temporary, Demo only, and no strategy: on 2026-11-20 temp_cp_trade_validation saw a buy
+  # Temporary, Demo only, and no strategy: on 2026-11-20 copy_trade_15m saw a buy
   # consensus in every cycle, but the 15m candles of every asset were in a local downtrend,
   # so no order went out. This one follows the same traders and loosens every filter that is
   # the profile's own, so a consensus becomes an order as often as the mechanism allows: no
   # trend check (nor the trend's technical exit), no extension check, a wider stop cap, any
   # tier, no pauses and no open-risk cap. The universe and the global stop conditions stay.
-  # Turn it off with temp_cp_trade_validation.
+  # Off since D-060.
   temp_cp_trade_high_risk_validation:
     code: tcphr15m
-    enabled: true
+    enabled: false             # D-060: its 0.10 went to copy_trade_15m
     family: lead_consensus
-    capital_share: 0.10        # 100 USDT, half of the 0.20 of temp_cp_trade_validation (D-056)
+    capital_share: 0.10        # 100 USDT, half of the 0.20 of copy_trade_15m (D-056)
     timeframe: 15m
     cycle: 15m
     tiers: {core: 1.0, large: 1.0, mid: 1.0, small: 1.0}   # no tier limit, small ones too
@@ -476,10 +479,10 @@ profiles:
       cost_pct: 0.3            # sizing and target only: no pause, open-risk cap or re-entry wait
       global_streak: false     # its losses neither pause every profile nor reset the global streak
     leads:
-      selection: *busiest      # the traders of temp_cp_trade_validation
+      selection: *busiest      # the traders of copy_trade_15m
       consensus:
         min_backers: 1
-        window: 24h            # 6h in temp_cp_trade_validation: older purchases count too
+        window: 24h            # 6h in copy_trade_15m: older purchases count too
         min_buy_pct: 0.1       # a net purchase of 0.1% of the trader's own balance
         max_symbols_per_lead: 10
         max_premium_pct: 20.0  # 1.5 in the others: effectively off

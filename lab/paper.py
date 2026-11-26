@@ -136,9 +136,9 @@ class PaperPortfolio:
     def decision(
         self, name: str, candidates: list[Candidate], exposure: Decimal, at: datetime
     ) -> None:
-        profile = self.strategy.profiles[name]
-        if name not in self.cash:
+        if name not in self.cash:  # not simulated, or no longer in the config (a renamed profile)
             return
+        profile = self.strategy.profiles[name]
         if self.pure_ta:
             profile = profile.model_copy(
                 update={"llm": profile.llm.model_copy(update={"enabled": False})}

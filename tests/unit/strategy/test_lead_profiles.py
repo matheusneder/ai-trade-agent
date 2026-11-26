@@ -152,11 +152,16 @@ def test_a_strong_dislike_is_recorded_as_the_analysts_refusal_not_as_a_low_score
 
 def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> None:
     """D-054: with the market down the traders of lead_consensus_1h barely trade, so this one
-    follows whoever trades most often, whatever the results, on the 15m candles."""
-    profile = REPOSITORY.profiles["temp_cp_trade_validation"]
+    follows whoever trades most often, whatever the results, on the 15m candles. D-060 renamed
+    it from temp_cp_trade_validation and kept its code, which its positions carry."""
+    profile = REPOSITORY.profiles["copy_trade_15m"]
     assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
-    assert (profile.code, profile.timeframe, profile.capital_share) == ("tcpv15m", "15m", D("0.10"))
+    assert (profile.code, profile.timeframe, profile.capital_share) == ("tcpv15m", "15m", D("0.40"))
     assert (profile.cycle, profile.cadence) == (timedelta(minutes=15), "15m")
+    # D-060: four slots, and both the budget and the open-risk cap hold four positions
+    allocation = profile.allocation
+    assert allocation.max_open_positions == 4
+    assert 4 * allocation.max_position_pct == 1 - allocation.cash_reserve_pct
     assert profile.leads is not None and profile.risk is not None
     selection, consensus = profile.leads.selection, profile.leads.consensus
     assert selection.rank_by == "activity"
@@ -172,19 +177,20 @@ def test_the_flow_test_profile_follows_the_busiest_traders_and_buys_on_one() -> 
     assert (selection.max_idle, selection.min_trades_30d) == (timedelta(days=1), 30)
     assert (consensus.min_backers, consensus.window) == (1, timedelta(hours=6))
     assert profile.leads.poll_interval == timedelta(minutes=15)  # one reading per cycle
-    # the budget of the others, with a shorter pause
+    # the budget of the others, with a shorter pause and room for the four positions' risk
     others = REPOSITORY.profiles["lead_consensus_1h"].risk
     assert others is not None
-    assert profile.risk == others.model_copy(update={"cooldown": timedelta(hours=4)})
+    wider = {"cooldown": timedelta(hours=4), "max_open_risk_pct": 4 * allocation.risk_per_trade_pct}
+    assert profile.risk == others.model_copy(update=wider)
 
 
 def test_the_high_risk_flow_test_turns_a_consensus_into_an_order_as_often_as_it_can() -> None:
-    """D-056: the 15m candles of every asset temp_cp_trade_validation saw bought were in a
+    """D-056: the 15m candles of every asset copy_trade_15m saw bought were in a
     local downtrend, so it sent no order. This one loosens every filter of its own: the
-    candles only discard a stop beyond 10%, and nothing pauses it."""
+    candles only discard a stop beyond 10%, and nothing pauses it. Off since D-060."""
     profile = REPOSITORY.profiles["temp_cp_trade_high_risk_validation"]
-    flow_test = REPOSITORY.profiles["temp_cp_trade_validation"]
-    assert profile.enabled and profile.family is Family.LEAD_CONSENSUS
+    flow_test = REPOSITORY.profiles["copy_trade_15m"]
+    assert not profile.enabled and profile.family is Family.LEAD_CONSENSUS
     assert (profile.code, profile.capital_share) == ("tcphr15m", D("0.10"))
     assert profile.timeframe == flow_test.timeframe == "15m"
     assert profile.cadence == flow_test.cadence == "15m"
@@ -210,19 +216,20 @@ def test_the_enabled_shares_still_add_up_to_the_whole_account() -> None:
     assert sum(shares.values()) == 1
     # D-052 took half of each rejected pair-local profile; D-053 the rest of both, which are
     # off, and 0.10 from each main profile; D-054 lent half of it to the flow test, which
-    # D-056 split with the high-risk one; D-059 gave half of the rest to the 4h profile
+    # D-056 split with the high-risk one; D-059 gave half of the rest to the 4h profile;
+    # D-060 gave the flow test the high-risk one's share, now off, and 0.10 of each main one
     assert shares == {
-        "swing_trend": D("0.25"),
-        "momentum_alpha": D("0.20"),
+        "swing_trend": D("0.15"),
+        "momentum_alpha": D("0.10"),
         "alt_atr": D("0.05"),
         "pair_pullback_1h": D("0.10"),
         "lead_consensus_1h": D("0.10"),
         "lead_consensus_llm_4h": D("0.10"),
-        "temp_cp_trade_validation": D("0.10"),
-        "temp_cp_trade_high_risk_validation": D("0.10"),
+        "copy_trade_15m": D("0.40"),
     }
     assert not REPOSITORY.profiles["pair_breakout_1h"].enabled
     assert not REPOSITORY.profiles["pair_range_1h"].enabled
+    assert not REPOSITORY.profiles["temp_cp_trade_high_risk_validation"].enabled
 
 
 @pytest.mark.parametrize(
@@ -230,7 +237,7 @@ def test_the_enabled_shares_still_add_up_to_the_whole_account() -> None:
     [
         "lead_consensus_1h",
         "lead_consensus_llm_4h",
-        "temp_cp_trade_validation",
+        "copy_trade_15m",
         "temp_cp_trade_high_risk_validation",
     ],
 )
