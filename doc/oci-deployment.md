@@ -27,6 +27,7 @@
     - Only Seoul could host the free VM, because South Korea North (Chuncheon) has no Always Free A1.
     - Binance is not registered with Korea's FIU. Google Play has blocked its app there since 2026-01-28, and on 2026-10-13 the FIU ordered the websites of 27 other unregistered foreign exchanges blocked. A VM on a Korean network would lose the API overnight if a later round named Binance.
   - Tokyo becomes worth a paid test only if a strategy turns latency-sensitive (sub-second entries) or FOK entries start to be rejected.
+  - **The other regions** are scored in [oci-regions.md](oci-regions.md). Brazil comes first and Abu Dhabi is the fallback. The US, Canada and the Netherlands are on Binance's prohibited list, and the EU has been out since Binance's MiCA exit on 2026-07-01.
 
 ## 2. Rules for the move
 
