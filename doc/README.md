@@ -19,6 +19,8 @@ Autonomous cryptocurrency trading agent for **Binance Spot**. It decides with te
 | 04 | [Current status and *go-live*](04-status-and-go-live.md) | What has been validated, production checklist, testing strategy, costs, risks and open decisions |
 | 05 | [References](05-references.md) | Documentation of Binance, the tools and the data sources |
 | — | [Runbook](runbook.md) | Operation: start and check, logs, traces, SigNoz, incidents, Telegram commands and maintenance |
+| — | [Moving to Oracle Cloud](oci-deployment.md) | Proposed VPS: OCI Always Free A1 (why, account and VM, host setup, rehearsal, cutover, checks and rollback) |
+| — | [OCI regions](oci-regions.md) | Decision matrix of every OCI commercial region for the home region: Binance regulation, latency to Tokyo, cost and Always Free A1 availability |
 | — | [Lab results](lab-results.md) | The *walk-forward* that calibrated the profiles in use |
 
 ## Disclaimer

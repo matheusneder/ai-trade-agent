@@ -76,7 +76,7 @@ After the *go-live*: start with one profile and small capital (an amount you acc
 
 ## 6. Open decisions
 
-1. **VPS:** provider and region.
+1. **VPS:** provider and region. Proposed on 2026-11-26: OCI Always Free Ampere A1 (2 OCPUs, 12 GB) in São Paulo or Vinhedo, with the move procedure in [oci-deployment.md](oci-deployment.md).
 2. **Production account:** dedicated account and initial capital.
 3. **LLM weight:** depends on the "pure TA" × "TA + LLM" A/B. Its data source exists since D-050 (the tape the agent records, replayed by `lab.paper`); the comparison still has to be run on it.
 4. **Alert channel:** only Telegram, or e-mail too (through Healthchecks.io)?
