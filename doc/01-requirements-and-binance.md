@@ -84,7 +84,7 @@ Other API points:
   - Avoid the EU, Frankfurt included. Binance has no MiCA licence, and since 2026-07-01 it has offered EU residents only withdrawals and position management.
   - Avoid Tokyo even though Binance's matching engine runs there. binance.com stopped serving residents of Japan on 2023-11-30, and its terms restrict use by location. Whether the API refuses Japanese IPs is unverified.
   - Avoid Seoul as well. Binance is not registered in South Korea, which has blocked its app since 2026-01-28 and the websites of 27 other unregistered exchanges since 2026-10-13. A later round could cut the API off on Korean networks.
-  - The latency either would save does not matter to this agent ([oci-deployment.md](oci-deployment.md), §1).
+  - The latency Tokyo or Seoul would save does not matter to this agent ([oci-deployment.md](oci-deployment.md), §1).
 - **Sub-accounts:** only for corporate accounts or **VIP 1+** individuals. That is why the profiles share the same account: each one has a share of `managed_capital`, and the positions are identified by the prefix of the order IDs (doc 03, §8).
 
 ### 2.6 Copy Trading data

@@ -21,7 +21,7 @@ Verdicts and levels are defined in §4. *RTT* is the approximate round trip to T
 | Mexico | Querétaro `mx-queretaro-1`, Monterrey `mx-monterrey-1` | **Workable.** Binance operates openly (Medá, e-money licence); IP ≠ KYC | ~150 ms | Same, T1? | Yes | Fallback |
 | Colombia | Bogotá `sa-bogota-1` | **Workable.** No crypto framework; Binance operates openly; IP ≠ KYC | ~245 ms | Same, T2 | Yes | Fallback |
 | Chile | Santiago `sa-santiago-1`, Valparaíso `sa-valparaiso-1` | **Workable, unverified.** Binance operates; its CMF registration was not found; IP ≠ KYC | ~265 ms | Same, T2 | Yes | Fallback |
-| Australia | Sydney `ap-sydney-1`, Melbourne `ap-melbourne-1` | **Workable.** Residents are served by Binance Australia; IP ≠ KYC | ~100–110 ms | Same, T2 | Yes | Fallback |
+| Australia | Sydney `ap-sydney-1`, Melbourne `ap-melbourne-1` | **Workable, unverified.** Residents are served by Binance Australia; whether an Australian IP is sent there was not checked; IP ≠ KYC | ~100–110 ms | Same, T2 | Yes | Fallback |
 | South Africa | Johannesburg `af-johannesburg-1` | **Workable.** Binance acts through a licensed local FSP; IP ≠ KYC | ~360 ms | Same, T3 | Yes | Fallback |
 | India | Mumbai `ap-mumbai-1`, Hyderabad `ap-hyderabad-1` | **Workable.** Registered with FIU-IND since 2024, after a URL block; IP ≠ KYC | ~115–120 ms | Same, T2 | Yes | Fallback |
 | Switzerland | Zurich `eu-zurich-1` | **Workable, unverified.** Outside MiCA; Binance's Swiss status not checked; IP ≠ KYC | ~225 ms | Same, T1 | Yes | Fallback |
@@ -40,7 +40,7 @@ Verdicts and levels are defined in §4. *RTT* is the approximate round trip to T
 | Canada | Toronto `ca-toronto-1`, Montreal `ca-montreal-1` | **Excluded.** On the list (all of Canada, not only Ontario); Binance left in 2023 | ~145–185 ms | Same, T1 | Yes | Excluded |
 | US | Ashburn `us-ashburn-1`, Chicago `us-chicago-1`, Phoenix `us-phoenix-1`, San Jose `us-sanjose-1` | **Excluded.** On the list; the API answers HTTP 451 | ~110–150 ms | Same, T1 | Yes | Excluded |
 
-Out of scope: the government realms (US Government, US Defense, UK Sovereign, and Australia Government and Defence) and dedicated regions. A Free Tier account cannot use them.
+Out of scope: the government realms (US Government, US Defense, UK Sovereign, and Australia Government and Defence), the EU Sovereign Cloud and dedicated regions. A Free Tier account cannot use them. The EU Sovereign Cloud is realm OC19, with Frankfurt `eu-frankfurt-2` and Madrid `eu-madrid-2`. That is why the EU row skips `eu-madrid-2`. Oracle runs those regions apart from its commercial ones, and they would score *Avoid* like the rest of the EU anyway.
 
 ## 3. Notes
 
@@ -62,7 +62,10 @@ Out of scope: the government realms (US Government, US Defense, UK Sovereign, an
 - **Malaysia:** in July 2026, the Finance Ministry said Binance's website and app remain blocked. The Securities Commission put Binance back on its Investor Alert List in October 2026.
 - **India:** India blocked Binance's URLs from late 2023 until its FIU registration in August 2024. A lapse could bring the block back.
 - **Serbia:** Jovanovac is the only commercial region in its own realm (OC20), with its own console. A tenancy in the main realm (OC1) cannot reach it, and whether the Free Tier sign-up offers it is unverified.
-- **Australia:** whether an Australian IP would push the account towards the local Binance Australia entity is unverified.
+- **Australia:**
+  - Binance serves residents through a local platform, Binance Australia, as it does in Japan. Unlike Japan, no notice turned up saying binance.com stopped serving Australian residents.
+  - Whether an Australian IP would push the account towards Binance Australia is unverified. If it does, Australia drops to *Avoid*, like Japan.
+  - ASIC's 2026 penalty (26-055MR) is against Binance Australia Derivatives, over how it classified clients at onboarding. It concerns the derivatives business, not Spot.
 
 ## 4. Method
 
@@ -107,6 +110,7 @@ Out of scope: the government realms (US Government, US Defense, UK Sovereign, an
 
 - **Oracle:**
   - [Regions and availability domains](https://docs.oracle.com/en-us/iaas/Content/General/Concepts/regions.htm)
+  - [Oracle EU Sovereign Cloud](https://docs.oracle.com/en-us/iaas/Content/sovereign-cloud/eu-sovereign-cloud.htm)
   - [Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm)
   - [Free Tier](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier.htm)
   - [Free Tier FAQ](https://www.oracle.com/cloud/free/faq/)
@@ -155,5 +159,6 @@ Out of scope: the government realms (US Government, US Defense, UK Sovereign, an
 - **Not verified:**
   - whether the API refuses Japanese, EU, Canadian or Dutch IPs (only US IPs are known to get HTTP 451);
   - Binance's status in Chile, Switzerland and Serbia;
+  - whether an Australian IP sends the account to Binance Australia;
   - whether the October 2026 Korean block named Binance;
   - whether the Free Tier sign-up offers Serbia or each Brazilian region.
